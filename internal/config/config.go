@@ -45,6 +45,7 @@ type KeysConfig struct {
 	FilePath           string `json:"filePath"`
 	StartIndex         int    `json:"startIndex"`
 	BlacklistThreshold int    `json:"blacklistThreshold"`
+	MaxRetries         int    `json:"maxRetries"` // 最大重试次数
 }
 
 // OpenAIConfig OpenAI API 配置
@@ -76,10 +77,11 @@ type PerformanceConfig struct {
 
 // LogConfig 日志配置
 type LogConfig struct {
-	Level      string `json:"level"`      // debug, info, warn, error
-	Format     string `json:"format"`     // text, json
-	EnableFile bool   `json:"enableFile"` // 是否启用文件日志
-	FilePath   string `json:"filePath"`   // 日志文件路径
+	Level         string `json:"level"`         // debug, info, warn, error
+	Format        string `json:"format"`        // text, json
+	EnableFile    bool   `json:"enableFile"`    // 是否启用文件日志
+	FilePath      string `json:"filePath"`      // 日志文件路径
+	EnableRequest bool   `json:"enableRequest"` // 是否启用请求日志
 }
 
 // Config 应用配置
@@ -112,6 +114,7 @@ func LoadConfig() (*Config, error) {
 			FilePath:           getEnvOrDefault("KEYS_FILE", "keys.txt"),
 			StartIndex:         parseInteger(os.Getenv("START_INDEX"), 0),
 			BlacklistThreshold: parseInteger(os.Getenv("BLACKLIST_THRESHOLD"), 1),
+			MaxRetries:         parseInteger(os.Getenv("MAX_RETRIES"), 3),
 		},
 		OpenAI: OpenAIConfig{
 			BaseURL: getEnvOrDefault("OPENAI_BASE_URL", "https://api.openai.com"),
@@ -133,10 +136,11 @@ func LoadConfig() (*Config, error) {
 			BufferSize:         parseInteger(os.Getenv("BUFFER_SIZE"), 32*1024),
 		},
 		Log: LogConfig{
-			Level:      getEnvOrDefault("LOG_LEVEL", "info"),
-			Format:     getEnvOrDefault("LOG_FORMAT", "text"),
-			EnableFile: parseBoolean(os.Getenv("LOG_ENABLE_FILE"), false),
-			FilePath:   getEnvOrDefault("LOG_FILE_PATH", "logs/app.log"),
+			Level:         getEnvOrDefault("LOG_LEVEL", "info"),
+			Format:        getEnvOrDefault("LOG_FORMAT", "text"),
+			EnableFile:    parseBoolean(os.Getenv("LOG_ENABLE_FILE"), false),
+			FilePath:      getEnvOrDefault("LOG_FILE_PATH", "logs/app.log"),
+			EnableRequest: parseBoolean(os.Getenv("LOG_ENABLE_REQUEST"), true),
 		},
 	}
 
@@ -205,6 +209,7 @@ func DisplayConfig(config *Config) {
 	logrus.Infof("   密钥文件: %s", config.Keys.FilePath)
 	logrus.Infof("   起始索引: %d", config.Keys.StartIndex)
 	logrus.Infof("   黑名单阈值: %d 次错误", config.Keys.BlacklistThreshold)
+	logrus.Infof("   最大重试次数: %d", config.Keys.MaxRetries)
 	logrus.Infof("   上游地址: %s", config.OpenAI.BaseURL)
 	logrus.Infof("   请求超时: %dms", config.OpenAI.Timeout)
 
@@ -233,6 +238,13 @@ func DisplayConfig(config *Config) {
 	}
 	logrus.Infof("   压缩: %s", compressionStatus)
 	logrus.Infof("   缓冲区大小: %d bytes", config.Performance.BufferSize)
+
+	// 显示日志配置
+	requestLogStatus := "已启用"
+	if !config.Log.EnableRequest {
+		requestLogStatus = "已禁用"
+	}
+	logrus.Infof("   请求日志: %s", requestLogStatus)
 }
 
 // 辅助函数

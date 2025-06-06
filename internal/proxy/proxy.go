@@ -193,10 +193,11 @@ func (ps *ProxyServer) authMiddleware() gin.HandlerFunc {
 // loggerMiddleware 高性能日志中间件
 func (ps *ProxyServer) loggerMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// 只在非生产环境或调试模式下记录详细日志
-		if gin.Mode() == gin.ReleaseMode {
-			// 生产模式下只记录错误和关键信息
+		// 检查是否启用请求日志
+		if !config.AppConfig.Log.EnableRequest {
+			// 不记录请求日志，只处理请求
 			c.Next()
+			// 只记录错误
 			if c.Writer.Status() >= 400 {
 				logrus.Errorf("Error %d: %s %s", c.Writer.Status(), c.Request.Method, c.Request.URL.Path)
 			}
@@ -231,8 +232,20 @@ func (ps *ProxyServer) loggerMiddleware() gin.HandlerFunc {
 			}
 		}
 
-		// 简化日志输出，减少格式化开销
-		logrus.Infof("%s %s - %d - %v%s", method, fullPath, statusCode, latency, keyInfo)
+		// 获取重试信息（如果存在）
+		retryInfo := ""
+		if retryCount, exists := c.Get("retryCount"); exists {
+			retryInfo = fmt.Sprintf(" - Retry[%d]", retryCount)
+		}
+
+		// 根据状态码选择日志级别
+		if statusCode >= 500 {
+			logrus.Errorf("%s %s - %d - %v%s%s", method, fullPath, statusCode, latency, keyInfo, retryInfo)
+		} else if statusCode >= 400 {
+			logrus.Warnf("%s %s - %d - %v%s%s", method, fullPath, statusCode, latency, keyInfo, retryInfo)
+		} else {
+			logrus.Infof("%s %s - %d - %v%s%s", method, fullPath, statusCode, latency, keyInfo, retryInfo)
+		}
 	}
 }
 
@@ -296,6 +309,31 @@ func (ps *ProxyServer) handleProxy(c *gin.Context) {
 	// 增加请求计数
 	atomic.AddInt64(&ps.requestCount, 1)
 
+	// 读取请求体用于重试
+	var bodyBytes []byte
+	if c.Request.Body != nil {
+		var err error
+		bodyBytes, err = io.ReadAll(c.Request.Body)
+		if err != nil {
+			logrus.Errorf("读取请求体失败: %v", err)
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": gin.H{
+					"message":   "读取请求体失败",
+					"type":      "request_error",
+					"code":      "invalid_request_body",
+					"timestamp": time.Now().Format(time.RFC3339),
+				},
+			})
+			return
+		}
+	}
+
+	// 执行带重试的请求
+	ps.executeRequestWithRetry(c, startTime, bodyBytes, 0)
+}
+
+// executeRequestWithRetry 执行带重试的请求
+func (ps *ProxyServer) executeRequestWithRetry(c *gin.Context, startTime time.Time, bodyBytes []byte, retryCount int) {
 	// 获取密钥信息
 	keyInfo, err := ps.keyManager.GetNextKey()
 	if err != nil {
@@ -315,9 +353,18 @@ func (ps *ProxyServer) handleProxy(c *gin.Context) {
 	c.Set("keyIndex", keyInfo.Index)
 	c.Set("keyPreview", keyInfo.Preview)
 
-	// 直接使用请求体，避免完整读取到内存
-	var requestBody io.Reader = c.Request.Body
-	var contentLength int64 = c.Request.ContentLength
+	// 设置重试信息到上下文
+	if retryCount > 0 {
+		c.Set("retryCount", retryCount)
+	}
+
+	// 使用缓存的请求体
+	var requestBody io.Reader
+	var contentLength int64
+	if len(bodyBytes) > 0 {
+		requestBody = strings.NewReader(string(bodyBytes))
+		contentLength = int64(len(bodyBytes))
+	}
 
 	// 构建上游请求URL
 	targetURL := *ps.upstreamURL
@@ -368,14 +415,28 @@ func (ps *ProxyServer) handleProxy(c *gin.Context) {
 	resp, err := ps.httpClient.Do(req)
 	if err != nil {
 		responseTime := time.Since(startTime)
-		logrus.Errorf("代理请求失败: %v (响应时间: %v)", err, responseTime)
+
+		// 记录失败日志
+		if retryCount > 0 {
+			logrus.Warnf("重试请求失败 (第 %d 次): %v (响应时间: %v)", retryCount, err, responseTime)
+		} else {
+			logrus.Warnf("请求失败: %v (响应时间: %v)", err, responseTime)
+		}
 
 		// 异步记录失败
 		go ps.keyManager.RecordFailure(keyInfo.Key, err)
 
+		// 检查是否可以重试
+		if retryCount < config.AppConfig.Keys.MaxRetries {
+			logrus.Infof("准备重试请求 (第 %d/%d 次)", retryCount+1, config.AppConfig.Keys.MaxRetries)
+			ps.executeRequestWithRetry(c, startTime, bodyBytes, retryCount+1)
+			return
+		}
+
+		// 达到最大重试次数
 		c.JSON(http.StatusBadGateway, gin.H{
 			"error": gin.H{
-				"message":   "代理请求失败: " + err.Error(),
+				"message":   fmt.Sprintf("代理请求失败 (已重试 %d 次): %s", retryCount, err.Error()),
 				"type":      "proxy_error",
 				"code":      "request_failed",
 				"timestamp": time.Now().Format(time.RFC3339),
@@ -386,6 +447,27 @@ func (ps *ProxyServer) handleProxy(c *gin.Context) {
 	defer resp.Body.Close()
 
 	responseTime := time.Since(startTime)
+
+	// 检查HTTP状态码是否需要重试
+	// 429 (Too Many Requests) 和 5xx 服务器错误都需要重试
+	if (resp.StatusCode == 429 || resp.StatusCode >= 500) && retryCount < config.AppConfig.Keys.MaxRetries {
+		// 记录失败日志
+		if retryCount > 0 {
+			logrus.Warnf("重试请求返回错误 %d (第 %d 次) (响应时间: %v)", resp.StatusCode, retryCount, responseTime)
+		} else {
+			logrus.Warnf("请求返回错误 %d (响应时间: %v)", resp.StatusCode, responseTime)
+		}
+
+		// 异步记录失败
+		go ps.keyManager.RecordFailure(keyInfo.Key, fmt.Errorf("HTTP %d", resp.StatusCode))
+
+		// 关闭当前响应
+		resp.Body.Close()
+
+		logrus.Infof("准备重试请求 (第 %d/%d 次)", retryCount+1, config.AppConfig.Keys.MaxRetries)
+		ps.executeRequestWithRetry(c, startTime, bodyBytes, retryCount+1)
+		return
+	}
 
 	// 异步记录统计信息（不阻塞响应）
 	go func() {
