@@ -1,7 +1,7 @@
 # OpenAI 多密钥代理服务器 Makefile (Go版本)
 
 # 变量定义
-BINARY_NAME=openai-proxy
+BINARY_NAME=gpt-load
 MAIN_PATH=./cmd/main.go
 BUILD_DIR=./build
 VERSION=2.0.0
@@ -133,8 +133,8 @@ uninstall:
 .PHONY: docker-build
 docker-build:
 	@echo "🐳 构建 Docker 镜像..."
-	docker build -t openai-proxy:$(VERSION) .
-	docker tag openai-proxy:$(VERSION) openai-proxy:latest
+	docker build -t gpt-load:$(VERSION) .
+	docker tag gpt-load:$(VERSION) gpt-load:latest
 	@echo "✅ Docker 镜像构建完成"
 
 # Docker 运行
@@ -142,12 +142,12 @@ docker-build:
 docker-run:
 	@echo "🐳 运行 Docker 容器..."
 	docker run -d \
-		--name openai-proxy \
+		--name gpt-load \
 		-p 3000:3000 \
 		-v $(PWD)/keys.txt:/app/keys.txt:ro \
 		-v $(PWD)/.env:/app/.env:ro \
 		--restart unless-stopped \
-		openai-proxy:latest
+		gpt-load:latest
 
 # 健康检查
 .PHONY: health

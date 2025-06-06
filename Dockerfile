@@ -21,7 +21,7 @@ COPY . .
 # 构建应用
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
     -ldflags="-w -s -X main.Version=2.0.0" \
-    -o openai-proxy \
+    -o gpt-load \
     ./cmd/main.go
 
 # 运行阶段
@@ -38,7 +38,7 @@ RUN addgroup -g 1001 -S appgroup && \
 WORKDIR /app
 
 # 从构建阶段复制二进制文件
-COPY --from=builder /app/openai-proxy .
+COPY --from=builder /app/gpt-load .
 
 # 复制配置文件模板
 COPY --from=builder /app/.env.example .
@@ -57,4 +57,4 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:3000/health || exit 1
 
 # 启动命令
-CMD ["./openai-proxy"]
+CMD ["./gpt-load"]
