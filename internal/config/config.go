@@ -16,21 +16,21 @@ import (
 
 // Constants 配置常量
 type Constants struct {
-	MinPort              int
-	MaxPort              int
-	MinTimeout           int
-	DefaultTimeout       int
-	DefaultMaxSockets    int
+	MinPort               int
+	MaxPort               int
+	MinTimeout            int
+	DefaultTimeout        int
+	DefaultMaxSockets     int
 	DefaultMaxFreeSockets int
 }
 
 // DefaultConstants 默认常量
 var DefaultConstants = Constants{
-	MinPort:              1,
-	MaxPort:              65535,
-	MinTimeout:           1000,
-	DefaultTimeout:       30000,
-	DefaultMaxSockets:    50,
+	MinPort:               1,
+	MaxPort:               65535,
+	MinTimeout:            1000,
+	DefaultTimeout:        30000,
+	DefaultMaxSockets:     50,
 	DefaultMaxFreeSockets: 10,
 }
 
@@ -67,8 +67,11 @@ type CORSConfig struct {
 
 // PerformanceConfig 性能配置
 type PerformanceConfig struct {
-	MaxSockets     int `json:"maxSockets"`
-	MaxFreeSockets int `json:"maxFreeSockets"`
+	MaxSockets         int  `json:"maxSockets"`
+	MaxFreeSockets     int  `json:"maxFreeSockets"`
+	EnableKeepAlive    bool `json:"enableKeepAlive"`
+	DisableCompression bool `json:"disableCompression"`
+	BufferSize         int  `json:"bufferSize"`
 }
 
 // Config 应用配置
@@ -114,8 +117,11 @@ func LoadConfig() (*Config, error) {
 			AllowedOrigins: parseArray(os.Getenv("ALLOWED_ORIGINS"), []string{"*"}),
 		},
 		Performance: PerformanceConfig{
-			MaxSockets:     parseInteger(os.Getenv("MAX_SOCKETS"), DefaultConstants.DefaultMaxSockets),
-			MaxFreeSockets: parseInteger(os.Getenv("MAX_FREE_SOCKETS"), DefaultConstants.DefaultMaxFreeSockets),
+			MaxSockets:         parseInteger(os.Getenv("MAX_SOCKETS"), DefaultConstants.DefaultMaxSockets),
+			MaxFreeSockets:     parseInteger(os.Getenv("MAX_FREE_SOCKETS"), DefaultConstants.DefaultMaxFreeSockets),
+			EnableKeepAlive:    parseBoolean(os.Getenv("ENABLE_KEEP_ALIVE"), true),
+			DisableCompression: parseBoolean(os.Getenv("DISABLE_COMPRESSION"), true),
+			BufferSize:         parseInteger(os.Getenv("BUFFER_SIZE"), 32*1024),
 		},
 	}
 
@@ -186,13 +192,13 @@ func DisplayConfig(config *Config) {
 	logrus.Infof("   黑名单阈值: %d 次错误", config.Keys.BlacklistThreshold)
 	logrus.Infof("   上游地址: %s", config.OpenAI.BaseURL)
 	logrus.Infof("   请求超时: %dms", config.OpenAI.Timeout)
-	
+
 	authStatus := "未启用"
 	if config.Auth.Enabled {
 		authStatus = "已启用"
 	}
 	logrus.Infof("   认证: %s", authStatus)
-	
+
 	corsStatus := "已禁用"
 	if config.CORS.Enabled {
 		corsStatus = "已启用"
@@ -227,7 +233,7 @@ func parseArray(value string, defaultValue []string) []string {
 	if value == "" {
 		return defaultValue
 	}
-	
+
 	parts := strings.Split(value, ",")
 	result := make([]string, 0, len(parts))
 	for _, part := range parts {
@@ -235,7 +241,7 @@ func parseArray(value string, defaultValue []string) []string {
 			result = append(result, trimmed)
 		}
 	}
-	
+
 	if len(result) == 0 {
 		return defaultValue
 	}

@@ -4,7 +4,6 @@
 package proxy
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -46,16 +45,22 @@ func NewProxyServer() (*ProxyServer, error) {
 
 	// 创建高性能HTTP客户端
 	transport := &http.Transport{
-		MaxIdleConns:        config.AppConfig.Performance.MaxSockets,
-		MaxIdleConnsPerHost: config.AppConfig.Performance.MaxFreeSockets,
-		IdleConnTimeout:     90 * time.Second,
-		DisableCompression:  false,
-		ForceAttemptHTTP2:   true,
+		MaxIdleConns:          config.AppConfig.Performance.MaxSockets,
+		MaxIdleConnsPerHost:   config.AppConfig.Performance.MaxFreeSockets,
+		MaxConnsPerHost:       0, // 无限制，避免连接池瓶颈
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+		DisableCompression:    true, // 禁用压缩以减少CPU开销，让上游处理
+		ForceAttemptHTTP2:     true,
+		WriteBufferSize:       32 * 1024, // 32KB写缓冲
+		ReadBufferSize:        32 * 1024, // 32KB读缓冲
 	}
 
 	httpClient := &http.Client{
 		Transport: transport,
-		Timeout:   time.Duration(config.AppConfig.OpenAI.Timeout) * time.Millisecond,
+		// 移除全局超时，使用更细粒度的超时控制
+		// Timeout:   time.Duration(config.AppConfig.OpenAI.Timeout) * time.Millisecond,
 	}
 
 	return &ProxyServer{
@@ -180,9 +185,19 @@ func (ps *ProxyServer) authMiddleware() gin.HandlerFunc {
 	}
 }
 
-// loggerMiddleware 自定义日志中间件
+// loggerMiddleware 高性能日志中间件
 func (ps *ProxyServer) loggerMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
+		// 只在非生产环境或调试模式下记录详细日志
+		if gin.Mode() == gin.ReleaseMode {
+			// 生产模式下只记录错误和关键信息
+			c.Next()
+			if c.Writer.Status() >= 400 {
+				logrus.Errorf("Error %d: %s %s", c.Writer.Status(), c.Request.Method, c.Request.URL.Path)
+			}
+			return
+		}
+
 		start := time.Now()
 		path := c.Request.URL.Path
 		raw := c.Request.URL.RawQuery
@@ -193,16 +208,14 @@ func (ps *ProxyServer) loggerMiddleware() gin.HandlerFunc {
 		// 计算响应时间
 		latency := time.Since(start)
 
-		// 获取客户端IP
-		clientIP := c.ClientIP()
-
-		// 获取方法和状态码
+		// 获取基本信息
 		method := c.Request.Method
 		statusCode := c.Writer.Status()
 
-		// 构建完整路径
+		// 构建完整路径（避免字符串拼接）
+		fullPath := path
 		if raw != "" {
-			path = path + "?" + raw
+			fullPath = path + "?" + raw
 		}
 
 		// 获取密钥信息（如果存在）
@@ -213,22 +226,8 @@ func (ps *ProxyServer) loggerMiddleware() gin.HandlerFunc {
 			}
 		}
 
-		// 根据状态码选择颜色
-		var statusColor string
-		if statusCode >= 200 && statusCode < 300 {
-			statusColor = "\033[32m" // 绿色
-		} else {
-			statusColor = "\033[31m" // 红色
-		}
-		resetColor := "\033[0m"
-		keyColor := "\033[36m" // 青色
-
-		// 输出日志
-		logrus.Infof("%s[%s] %s %s%s%s%s - %s%d%s - %v - %s",
-			statusColor, time.Now().Format(time.RFC3339), method, path, resetColor,
-			keyColor, keyInfo, resetColor,
-			statusColor, statusCode, resetColor,
-			latency, clientIP)
+		// 简化日志输出，减少格式化开销
+		logrus.Infof("%s %s - %d - %v%s", method, fullPath, statusCode, latency, keyInfo)
 	}
 }
 
@@ -311,36 +310,30 @@ func (ps *ProxyServer) handleProxy(c *gin.Context) {
 	c.Set("keyIndex", keyInfo.Index)
 	c.Set("keyPreview", keyInfo.Preview)
 
-	// 读取请求体
-	var bodyBytes []byte
-	if c.Request.Body != nil {
-		bodyBytes, err = io.ReadAll(c.Request.Body)
-		if err != nil {
-			logrus.Errorf("读取请求体失败: %v", err)
-			c.JSON(http.StatusBadRequest, gin.H{
-				"error": gin.H{
-					"message":   "读取请求体失败",
-					"type":      "request_error",
-					"code":      "invalid_request_body",
-					"timestamp": time.Now().Format(time.RFC3339),
-				},
-			})
-			return
-		}
-	}
+	// 直接使用请求体，避免完整读取到内存
+	var requestBody io.Reader = c.Request.Body
+	var contentLength int64 = c.Request.ContentLength
 
 	// 构建上游请求URL
 	targetURL := *ps.upstreamURL
 	targetURL.Path = c.Request.URL.Path
 	targetURL.RawQuery = c.Request.URL.RawQuery
 
-	// 创建上游请求
+	// 创建带超时的上下文
+	timeout := time.Duration(config.AppConfig.OpenAI.Timeout) * time.Millisecond
+	ctx, cancel := context.WithTimeout(c.Request.Context(), timeout)
+	defer cancel()
+
+	// 创建上游请求，直接使用原始请求体进行流式传输
 	req, err := http.NewRequestWithContext(
-		context.Background(),
+		ctx,
 		c.Request.Method,
 		targetURL.String(),
-		bytes.NewReader(bodyBytes),
+		requestBody,
 	)
+	if err == nil && contentLength > 0 {
+		req.ContentLength = contentLength
+	}
 	if err != nil {
 		logrus.Errorf("创建上游请求失败: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{

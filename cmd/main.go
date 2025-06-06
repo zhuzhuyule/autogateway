@@ -44,13 +44,14 @@ func main() {
 	// 设置路由
 	router := proxyServer.SetupRoutes()
 
-	// 创建HTTP服务器
+	// 创建HTTP服务器，优化超时配置
 	server := &http.Server{
-		Addr:         fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port),
-		Handler:      router,
-		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 30 * time.Second,
-		IdleTimeout:  60 * time.Second,
+		Addr:           fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port),
+		Handler:        router,
+		ReadTimeout:    60 * time.Second,  // 增加读超时，支持大文件上传
+		WriteTimeout:   300 * time.Second, // 增加写超时，支持流式响应
+		IdleTimeout:    120 * time.Second, // 增加空闲超时，复用连接
+		MaxHeaderBytes: 1 << 20,           // 1MB header limit
 	}
 
 	// 启动服务器
@@ -90,7 +91,7 @@ func main() {
 func displayStartupInfo(cfg *config.Config) {
 	logrus.Info("🚀 OpenAI 多密钥代理服务器 v2.0.0 (Go版本)")
 	logrus.Info("")
-	
+
 	// 显示配置
 	config.DisplayConfig(cfg)
 	logrus.Info("")
