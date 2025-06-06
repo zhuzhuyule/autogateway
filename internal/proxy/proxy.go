@@ -51,10 +51,15 @@ func NewProxyServer() (*ProxyServer, error) {
 		IdleConnTimeout:       90 * time.Second,
 		TLSHandshakeTimeout:   10 * time.Second,
 		ExpectContinueTimeout: 1 * time.Second,
-		DisableCompression:    true, // 禁用压缩以减少CPU开销，让上游处理
+		DisableCompression:    config.AppConfig.Performance.DisableCompression,
 		ForceAttemptHTTP2:     true,
-		WriteBufferSize:       32 * 1024, // 32KB写缓冲
-		ReadBufferSize:        32 * 1024, // 32KB读缓冲
+		WriteBufferSize:       config.AppConfig.Performance.BufferSize,
+		ReadBufferSize:        config.AppConfig.Performance.BufferSize,
+	}
+
+	// 配置 Keep-Alive
+	if !config.AppConfig.Performance.EnableKeepAlive {
+		transport.DisableKeepAlives = true
 	}
 
 	httpClient := &http.Client{

@@ -74,6 +74,14 @@ type PerformanceConfig struct {
 	BufferSize         int  `json:"bufferSize"`
 }
 
+// LogConfig 日志配置
+type LogConfig struct {
+	Level      string `json:"level"`      // debug, info, warn, error
+	Format     string `json:"format"`     // text, json
+	EnableFile bool   `json:"enableFile"` // 是否启用文件日志
+	FilePath   string `json:"filePath"`   // 日志文件路径
+}
+
 // Config 应用配置
 type Config struct {
 	Server      ServerConfig      `json:"server"`
@@ -82,6 +90,7 @@ type Config struct {
 	Auth        AuthConfig        `json:"auth"`
 	CORS        CORSConfig        `json:"cors"`
 	Performance PerformanceConfig `json:"performance"`
+	Log         LogConfig         `json:"log"`
 }
 
 // Global config instance
@@ -122,6 +131,12 @@ func LoadConfig() (*Config, error) {
 			EnableKeepAlive:    parseBoolean(os.Getenv("ENABLE_KEEP_ALIVE"), true),
 			DisableCompression: parseBoolean(os.Getenv("DISABLE_COMPRESSION"), true),
 			BufferSize:         parseInteger(os.Getenv("BUFFER_SIZE"), 32*1024),
+		},
+		Log: LogConfig{
+			Level:      getEnvOrDefault("LOG_LEVEL", "info"),
+			Format:     getEnvOrDefault("LOG_FORMAT", "text"),
+			EnableFile: parseBoolean(os.Getenv("LOG_ENABLE_FILE"), false),
+			FilePath:   getEnvOrDefault("LOG_FILE_PATH", "logs/app.log"),
 		},
 	}
 
@@ -205,6 +220,19 @@ func DisplayConfig(config *Config) {
 	}
 	logrus.Infof("   CORS: %s", corsStatus)
 	logrus.Infof("   连接池: %d/%d", config.Performance.MaxSockets, config.Performance.MaxFreeSockets)
+
+	keepAliveStatus := "已启用"
+	if !config.Performance.EnableKeepAlive {
+		keepAliveStatus = "已禁用"
+	}
+	logrus.Infof("   Keep-Alive: %s", keepAliveStatus)
+
+	compressionStatus := "已启用"
+	if config.Performance.DisableCompression {
+		compressionStatus = "已禁用"
+	}
+	logrus.Infof("   压缩: %s", compressionStatus)
+	logrus.Infof("   缓冲区大小: %d bytes", config.Performance.BufferSize)
 }
 
 // 辅助函数

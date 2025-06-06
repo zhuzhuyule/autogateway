@@ -6,9 +6,11 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -19,17 +21,14 @@ import (
 )
 
 func main() {
-	// 设置日志格式
-	logrus.SetFormatter(&logrus.TextFormatter{
-		FullTimestamp: true,
-		ForceColors:   true,
-	})
-
 	// 加载配置
 	cfg, err := config.LoadConfig()
 	if err != nil {
-		logrus.Fatalf("❌ 配置加载失败: %v", err)
+		logrus.Fatalf("加载配置失败: %v", err)
 	}
+
+	// 配置日志
+	setupLogger(cfg)
 
 	// 显示启动信息
 	displayStartupInfo(cfg)
@@ -95,4 +94,46 @@ func displayStartupInfo(cfg *config.Config) {
 	// 显示配置
 	config.DisplayConfig(cfg)
 	logrus.Info("")
+}
+
+// setupLogger 配置日志系统
+func setupLogger(cfg *config.Config) {
+	// 设置日志级别
+	level, err := logrus.ParseLevel(cfg.Log.Level)
+	if err != nil {
+		logrus.Warnf("无效的日志级别 '%s'，使用默认级别 info", cfg.Log.Level)
+		level = logrus.InfoLevel
+	}
+	logrus.SetLevel(level)
+
+	// 设置日志格式
+	switch cfg.Log.Format {
+	case "json":
+		logrus.SetFormatter(&logrus.JSONFormatter{
+			TimestampFormat: "2006-01-02 15:04:05",
+		})
+	default:
+		logrus.SetFormatter(&logrus.TextFormatter{
+			FullTimestamp:   true,
+			ForceColors:     true,
+			TimestampFormat: "2006-01-02 15:04:05",
+		})
+	}
+
+	// 配置文件日志
+	if cfg.Log.EnableFile {
+		// 创建日志目录
+		if err := os.MkdirAll(filepath.Dir(cfg.Log.FilePath), 0755); err != nil {
+			logrus.Warnf("创建日志目录失败: %v", err)
+		} else {
+			// 打开日志文件
+			file, err := os.OpenFile(cfg.Log.FilePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+			if err != nil {
+				logrus.Warnf("打开日志文件失败: %v", err)
+			} else {
+				// 同时输出到控制台和文件
+				logrus.SetOutput(io.MultiWriter(os.Stdout, file))
+			}
+		}
+	}
 }
