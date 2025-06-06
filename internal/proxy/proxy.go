@@ -309,8 +309,15 @@ func (ps *ProxyServer) handleProxy(c *gin.Context) {
 	// 增加请求计数
 	atomic.AddInt64(&ps.requestCount, 1)
 
-	// 读取请求体用于重试
+	// 检查是否为流式请求
+	isStreamRequest := strings.Contains(c.GetHeader("Accept"), "text/event-stream") ||
+		strings.Contains(c.Request.URL.RawQuery, "stream=true") ||
+		strings.Contains(c.Request.Header.Get("Content-Type"), "text/event-stream")
+
 	var bodyBytes []byte
+	var requestBody io.Reader = c.Request.Body
+
+	// 为了支持重试，需要缓存请求体（包括流式请求）
 	if c.Request.Body != nil {
 		var err error
 		bodyBytes, err = io.ReadAll(c.Request.Body)
@@ -326,14 +333,15 @@ func (ps *ProxyServer) handleProxy(c *gin.Context) {
 			})
 			return
 		}
+		requestBody = strings.NewReader(string(bodyBytes))
 	}
 
 	// 执行带重试的请求
-	ps.executeRequestWithRetry(c, startTime, bodyBytes, 0)
+	ps.executeRequestWithRetry(c, startTime, bodyBytes, requestBody, isStreamRequest, 0)
 }
 
 // executeRequestWithRetry 执行带重试的请求
-func (ps *ProxyServer) executeRequestWithRetry(c *gin.Context, startTime time.Time, bodyBytes []byte, retryCount int) {
+func (ps *ProxyServer) executeRequestWithRetry(c *gin.Context, startTime time.Time, bodyBytes []byte, requestBody io.Reader, isStreamRequest bool, retryCount int) {
 	// 获取密钥信息
 	keyInfo, err := ps.keyManager.GetNextKey()
 	if err != nil {
@@ -358,10 +366,10 @@ func (ps *ProxyServer) executeRequestWithRetry(c *gin.Context, startTime time.Ti
 		c.Set("retryCount", retryCount)
 	}
 
-	// 使用缓存的请求体
-	var requestBody io.Reader
+	// 准备请求体和内容长度
 	var contentLength int64
 	if len(bodyBytes) > 0 {
+		// 使用缓存的请求体（支持重试）
 		requestBody = strings.NewReader(string(bodyBytes))
 		contentLength = int64(len(bodyBytes))
 	}
@@ -429,7 +437,7 @@ func (ps *ProxyServer) executeRequestWithRetry(c *gin.Context, startTime time.Ti
 		// 检查是否可以重试
 		if retryCount < config.AppConfig.Keys.MaxRetries {
 			logrus.Infof("准备重试请求 (第 %d/%d 次)", retryCount+1, config.AppConfig.Keys.MaxRetries)
-			ps.executeRequestWithRetry(c, startTime, bodyBytes, retryCount+1)
+			ps.executeRequestWithRetry(c, startTime, bodyBytes, nil, isStreamRequest, retryCount+1)
 			return
 		}
 
@@ -465,7 +473,7 @@ func (ps *ProxyServer) executeRequestWithRetry(c *gin.Context, startTime time.Ti
 		resp.Body.Close()
 
 		logrus.Infof("准备重试请求 (第 %d/%d 次)", retryCount+1, config.AppConfig.Keys.MaxRetries)
-		ps.executeRequestWithRetry(c, startTime, bodyBytes, retryCount+1)
+		ps.executeRequestWithRetry(c, startTime, bodyBytes, nil, isStreamRequest, retryCount+1)
 		return
 	}
 
@@ -488,10 +496,42 @@ func (ps *ProxyServer) executeRequestWithRetry(c *gin.Context, startTime time.Ti
 	// 设置状态码
 	c.Status(resp.StatusCode)
 
-	// 流式复制响应体（零拷贝）
-	_, err = io.Copy(c.Writer, resp.Body)
-	if err != nil {
-		logrus.Errorf("复制响应体失败: %v (响应时间: %v)", err, responseTime)
+	// 优化流式响应传输
+	if isStreamRequest {
+		// 流式响应：启用实时刷新
+		if flusher, ok := c.Writer.(http.Flusher); ok {
+			// 使用优化的缓冲区进行流式复制
+			buf := make([]byte, config.AppConfig.Performance.BufferSize)
+			for {
+				n, err := resp.Body.Read(buf)
+				if n > 0 {
+					_, writeErr := c.Writer.Write(buf[:n])
+					if writeErr != nil {
+						logrus.Errorf("写入流式响应失败: %v", writeErr)
+						break
+					}
+					flusher.Flush() // 立即刷新到客户端
+				}
+				if err != nil {
+					if err != io.EOF {
+						logrus.Errorf("读取流式响应失败: %v", err)
+					}
+					break
+				}
+			}
+		} else {
+			// 降级到标准复制
+			_, err = io.Copy(c.Writer, resp.Body)
+			if err != nil {
+				logrus.Errorf("复制流式响应失败: %v", err)
+			}
+		}
+	} else {
+		// 非流式响应：使用标准零拷贝
+		_, err = io.Copy(c.Writer, resp.Body)
+		if err != nil {
+			logrus.Errorf("复制响应体失败: %v (响应时间: %v)", err, responseTime)
+		}
 	}
 }
 
