@@ -135,7 +135,7 @@ onMounted(() => {
           <n-tooltip trigger="hover" placement="top">
             <template #trigger>
               <a
-                href="https://www.gpt-load.com/docs"
+                href="https://github.com/zhuzhuyule/autogateway#configuration"
                 target="_blank"
                 rel="noopener noreferrer"
                 class="footer-link"

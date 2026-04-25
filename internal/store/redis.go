@@ -11,7 +11,7 @@ import (
 )
 
 // RedisKeyPrefix is the prefix for all Redis keys used by AutoGateway
-const RedisKeyPrefix = "gpt-load:"
+const RedisKeyPrefix = "autogateway:"
 
 // RedisStore is a Redis-backed key-value store.
 type RedisStore struct {

@@ -17,7 +17,7 @@ export interface VersionInfo {
   status: "checking" | "latest" | "update-available" | "error";
 }
 
-const CACHE_KEY = "gpt-load-version-info";
+const CACHE_KEY = "autogateway-version-info";
 const CACHE_DURATION = 30 * 60 * 1000;
 
 class VersionService {

@@ -45,7 +45,7 @@ func runCommand() {
 		printHelp()
 	default:
 		fmt.Printf("Unknown command: %s\n", command)
-		fmt.Println("Run 'gpt-load help' for usage.")
+		fmt.Println("Run 'autogateway help' for usage.")
 		os.Exit(1)
 	}
 }
@@ -55,14 +55,14 @@ func printHelp() {
 	fmt.Println("AutoGateway - Multi-channel AI proxy with intelligent key rotation.")
 	fmt.Println()
 	fmt.Println("Usage:")
-	fmt.Println("  gpt-load                    Start the proxy server")
-	fmt.Println("  gpt-load <command> [args]   Execute a command")
+	fmt.Println("  autogateway                    Start the proxy server")
+	fmt.Println("  autogateway <command> [args]   Execute a command")
 	fmt.Println()
 	fmt.Println("Available Commands:")
 	fmt.Println("  migrate-keys    Migrate encryption keys")
 	fmt.Println("  help            Display this help message")
 	fmt.Println()
-	fmt.Println("Use 'gpt-load <command> --help' for more information about a command.")
+	fmt.Println("Use 'autogateway <command> --help' for more information about a command.")
 }
 
 // runServer run App Server
