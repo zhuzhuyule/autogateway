@@ -59,8 +59,8 @@ export default {
     deselectAll: "取消选中",
   },
   login: {
-    title: "GPT Load",
-    subtitle: "智能负载均衡管理平台",
+    title: "AutoGateway",
+    subtitle: "智能 AI API 网关",
     welcome: "欢迎回来",
     welcomeDesc: "请输入您的授权密钥以继续",
     authKey: "授权密钥",

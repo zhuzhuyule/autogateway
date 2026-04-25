@@ -1,11 +1,11 @@
 {
-  "name": "gpt-load-frontend",
+  "name": "autogateway-frontend",
   "private": true,
   "version": "0.1.0",
-  "description": "GPT Load Balancer Frontend - A modern Vue 3 frontend for GPT load balancing service",
+  "description": "AutoGateway frontend — Smart AI API gateway with auto routing, free provider aggregation and unified entry. Built on Vue 3 + Naive UI.",
   "type": "module",
-  "keywords": ["vue3", "typescript", "vite", "naive-ui", "gpt-load", "frontend"],
-  "author": "tbphp",
+  "keywords": ["autogateway", "ai-gateway", "llm-proxy", "auto-routing", "vue3", "typescript", "vite", "naive-ui"],
+  "author": "AutoGateway contributors",
   "license": "MIT",
   "repository": {
     "type": "git",

@@ -59,8 +59,8 @@ export default {
     deselectAll: "Deselect All",
   },
   login: {
-    title: "GPT Load",
-    subtitle: "Intelligent Load Balancing Platform",
+    title: "AutoGateway",
+    subtitle: "Smart AI API Gateway",
     welcome: "Welcome Back",
     welcomeDesc: "Please enter your auth key to continue",
     authKey: "Auth Key",

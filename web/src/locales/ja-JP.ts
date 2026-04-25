@@ -59,8 +59,8 @@ export default {
     deselectAll: "選択を解除",
   },
   login: {
-    title: "GPT Load",
-    subtitle: "インテリジェント負荷分散管理プラットフォーム",
+    title: "AutoGateway",
+    subtitle: "スマート AI API ゲートウェイ",
     welcome: "おかえりなさい",
     welcomeDesc: "続行するには認証キーを入力してください",
     authKey: "認証キー",
