@@ -275,6 +275,8 @@ func (ps *ProxyServer) executeRequestWithRetry(
 				attemptedSubGroups = make(map[string]bool)
 			}
 			attemptedSubGroups[group.Name] = true
+			// 当前子分组累计失败 → 通知熔断器
+			ps.subGroupManager.RecordSubGroupResult(originalGroup.ID, group.Name, false)
 			nextName, selErr := ps.subGroupManager.SelectSubGroupForModelExcluding(originalGroup, requestedModel, attemptedSubGroups)
 			if selErr == nil && nextName != "" && nextName != group.Name {
 				if nextGroup, ge := ps.groupManager.GetGroupByName(nextName); ge == nil && nextGroup != nil {
@@ -311,6 +313,10 @@ func (ps *ProxyServer) executeRequestWithRetry(
 
 		// 如果是最后一次尝试,直接返回错误,不再递归
 		if isLastAttempt {
+			// 该子分组的最终失败 → 通知熔断器(failover 路径已记录,不会重复:这里走的是 standard 直连或 aggregate 全部 sub-group 都尝试过)
+			if originalGroup.GroupType == "aggregate" && group.Name != originalGroup.Name {
+				ps.subGroupManager.RecordSubGroupResult(originalGroup.ID, group.Name, false)
+			}
 			var errorJSON map[string]any
 			if err := json.Unmarshal([]byte(errorMessage), &errorJSON); err == nil {
 				c.JSON(statusCode, errorJSON)
@@ -326,6 +332,11 @@ func (ps *ProxyServer) executeRequestWithRetry(
 
 	// ps.keyProvider.UpdateStatus(apiKey, group, true) // 请求成功不再重置成功次数，减少IO消耗
 	logrus.Debugf("Request for group %s succeeded on attempt %d with key %s", group.Name, retryCount+1, utils.MaskAPIKey(apiKey.KeyValue))
+
+	// 通知熔断器:该子分组本次请求成功(若是聚合请求)
+	if originalGroup.GroupType == "aggregate" && group.Name != originalGroup.Name {
+		ps.subGroupManager.RecordSubGroupResult(originalGroup.ID, group.Name, true)
+	}
 
 	// Check if this is a model list request (needs special handling)
 	if shouldInterceptModelList(c.Request.URL.Path, c.Request.Method) {

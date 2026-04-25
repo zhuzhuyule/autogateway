@@ -4,11 +4,19 @@ import (
 	"encoding/json"
 	"fmt"
 	"sync"
+	"time"
 
 	"autogateway/internal/models"
 	"autogateway/internal/store"
 
 	"github.com/sirupsen/logrus"
+)
+
+// 子分组熔断器参数:连续 N 次失败 → 冷却 D 秒,期间 SWRR 跳过该子分组.
+// 全部子分组都在冷却 → 仍然挑一个最早恢复的(graceful degrade).
+const (
+	subGroupBreakerThreshold = 3
+	subGroupBreakerCooldown  = 30 * time.Second
 )
 
 // SubGroupManager manages weighted round-robin selection for all aggregate groups
@@ -26,6 +34,10 @@ type subGroupItem struct {
 	currentWeight   int
 	availableModels map[string]struct{} // 上游缓存的可用模型集合;空 map 视为"未知,可能含任意模型"
 	hasModelsCache  bool                // true: availableModels 是真实可信的过滤依据
+
+	// 熔断器状态(由 selector.mu 保护)
+	consecutiveFailures int
+	cooldownUntil       time.Time
 }
 
 // NewSubGroupManager creates a new sub-group manager service
@@ -45,6 +57,21 @@ func (m *SubGroupManager) SelectSubGroup(group *models.Group) (string, error) {
 // requestedModel 为空 → 等同 SelectSubGroup. 过滤后无候选 → 退化到全量(graceful degrade).
 func (m *SubGroupManager) SelectSubGroupForModel(group *models.Group, requestedModel string) (string, error) {
 	return m.SelectSubGroupForModelExcluding(group, requestedModel, nil)
+}
+
+// RecordSubGroupResult 上层(proxy server)在每次请求结束后调用,驱动子分组级熔断器.
+// aggregateGroupID 必须是 aggregate 类型;如果原始请求是直接命中 standard 分组,该方法 no-op.
+func (m *SubGroupManager) RecordSubGroupResult(aggregateGroupID uint, subGroupName string, success bool) {
+	if subGroupName == "" {
+		return
+	}
+	m.mu.RLock()
+	sel, ok := m.selectors[aggregateGroupID]
+	m.mu.RUnlock()
+	if !ok || sel == nil {
+		return
+	}
+	sel.recordResult(subGroupName, success)
 }
 
 // SelectSubGroupForModelExcluding 与 SelectSubGroupForModel 类似,但额外排除 attempted 集合中的子分组.
@@ -247,8 +274,11 @@ func (s *selector) selectNextForModelExcluding(requestedModel string, attempted 
 	return s.selectAmong(notAttempted)
 }
 
-// selectAmong 在 SWRR 之上按 predicate 过滤,直到选到有 active keys 的子分组.
+// selectAmong 在 SWRR 之上按 predicate 过滤,跳过熔断期内的子分组,直到选到有 active keys 的子分组.
+// 若所有候选都在熔断期(graceful degrade),挑 cooldown 最早结束的那个返回.
 func (s *selector) selectAmong(pred func(*subGroupItem) bool) string {
+	now := time.Now()
+
 	if len(s.subGroups) == 1 {
 		it := &s.subGroups[0]
 		if pred(it) && s.hasActiveKeys(it.subGroupID) {
@@ -258,6 +288,7 @@ func (s *selector) selectAmong(pred func(*subGroupItem) bool) string {
 	}
 
 	attempted := make(map[uint]bool)
+	var bestCooldownCandidate *subGroupItem
 	for len(attempted) < len(s.subGroups) {
 		item := s.selectByWeight()
 		if item == nil {
@@ -273,17 +304,76 @@ func (s *selector) selectAmong(pred func(*subGroupItem) bool) string {
 			continue
 		}
 
-		if s.hasActiveKeys(item.subGroupID) {
-			logrus.WithFields(logrus.Fields{
-				"aggregate_group": s.groupName,
-				"selected_group":  item.name,
-				"attempts":        len(attempted),
-			}).Debug("Selected sub-group with active keys")
-			return item.name
+		if !s.hasActiveKeys(item.subGroupID) {
+			continue
 		}
+
+		if item.inCooldown(now) {
+			// 跳过,但记录"最早能用"的,作为 graceful degrade 兜底
+			if bestCooldownCandidate == nil || item.cooldownUntil.Before(bestCooldownCandidate.cooldownUntil) {
+				bestCooldownCandidate = item
+			}
+			continue
+		}
+
+		logrus.WithFields(logrus.Fields{
+			"aggregate_group": s.groupName,
+			"selected_group":  item.name,
+			"attempts":        len(attempted),
+		}).Debug("Selected sub-group with active keys")
+		return item.name
+	}
+
+	if bestCooldownCandidate != nil {
+		logrus.WithFields(logrus.Fields{
+			"aggregate_group": s.groupName,
+			"selected_group":  bestCooldownCandidate.name,
+			"reason":          "all candidates in cooldown, picking earliest-recover",
+		}).Warn("Sub-group circuit breaker: graceful degrade")
+		return bestCooldownCandidate.name
 	}
 
 	return ""
+}
+
+// recordResult 记录一次该子分组上游请求的最终成败,驱动熔断器开关.
+// 调用方不需要持有 selector.mu;此方法内部加锁.
+func (s *selector) recordResult(name string, success bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := range s.subGroups {
+		it := &s.subGroups[i]
+		if it.name != name {
+			continue
+		}
+		if success {
+			if it.consecutiveFailures > 0 || !it.cooldownUntil.IsZero() {
+				logrus.WithFields(logrus.Fields{
+					"aggregate_group": s.groupName,
+					"sub_group":       it.name,
+				}).Debug("Sub-group circuit breaker: reset on success")
+			}
+			it.consecutiveFailures = 0
+			it.cooldownUntil = time.Time{}
+			return
+		}
+		it.consecutiveFailures++
+		if it.consecutiveFailures >= subGroupBreakerThreshold {
+			it.cooldownUntil = time.Now().Add(subGroupBreakerCooldown)
+			logrus.WithFields(logrus.Fields{
+				"aggregate_group":  s.groupName,
+				"sub_group":        it.name,
+				"failures":         it.consecutiveFailures,
+				"cooldown_seconds": int(subGroupBreakerCooldown.Seconds()),
+			}).Warn("Sub-group circuit breaker tripped")
+		}
+		return
+	}
+}
+
+// inCooldown 是否处于熔断冷却期(无锁,调用方应已持锁或确认无并发).
+func (it *subGroupItem) inCooldown(now time.Time) bool {
+	return !it.cooldownUntil.IsZero() && now.Before(it.cooldownUntil)
 }
 
 // selectByWeight implements smooth weighted round-robin algorithm
