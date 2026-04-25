@@ -9,6 +9,9 @@ import {
   useMessage,
   type DataTableColumns,
 } from "naive-ui";
+import { useI18n } from "vue-i18n";
+
+const { t } = useI18n();
 
 interface ModelItem {
   id: string;
@@ -23,23 +26,23 @@ const catalogData = ref<ModelItem[]>([]);
 
 const columns: DataTableColumns<ModelItem> = [
   {
-    title: "Model ID",
+    title: t("modelcatalog.modelId"),
     key: "id",
   },
   {
-    title: "Display Name",
+    title: t("modelcatalog.displayName"),
     key: "display_name",
   },
   {
-    title: "Owned By",
+    title: t("modelcatalog.ownedBy"),
     key: "owned_by",
   },
   {
-    title: "Groups",
+    title: t("modelcatalog.groups"),
     key: "groups",
     render: (row) => {
       if (!row.groups || row.groups.length === 0) {
-        return h(NTag, { size: "small", type: "warning" }, () => "No groups");
+        return h(NTag, { size: "small", type: "warning" }, () => t("modelcatalog.noGroups"));
       }
       return row.groups.map((g) => h(NTag, { size: "small", type: "info", style: "margin-right: 4px;" }, () => g));
     },
@@ -60,10 +63,10 @@ async function fetchCatalog() {
         catalogData.value = result.data;
       }
     } else {
-      message.error("Failed to load model catalog");
+      message.error(t("common.requestFailed"));
     }
   } catch (_error) {
-    message.error("Failed to load model catalog");
+    message.error(t("common.requestFailed"));
   } finally {
     loading.value = false;
   }
@@ -72,9 +75,9 @@ async function fetchCatalog() {
 
 <template>
   <n-space vertical>
-    <n-card title="Model Catalog" hoverable bordered>
+    <n-card :title="t('modelcatalog.title')" hoverable bordered>
       <template #header-extra>
-        <n-button size="small" @click="fetchCatalog">Refresh</n-button>
+        <n-button size="small" @click="fetchCatalog">{{ t("common.refresh") }}</n-button>
       </template>
 
       <n-data-table

@@ -9,9 +9,13 @@ import {
   NSpace,
   NInput,
   NInputNumber,
+  NDivider,
   useMessage,
 } from "naive-ui";
 import { Save } from "@vicons/ionicons5";
+import { useI18n } from "vue-i18n";
+
+const { t } = useI18n();
 
 interface RouteConfig {
   enabled: boolean;
@@ -52,7 +56,7 @@ async function fetchConfig() {
       }
     }
   } catch (_error) {
-    message.error("Failed to load auto route configuration");
+    message.error(t("common.requestFailed"));
   }
 }
 
@@ -65,12 +69,12 @@ async function handleSubmit() {
       body: JSON.stringify(config.value),
     });
     if (response.ok) {
-      message.success("Configuration saved successfully");
+      message.success(t("common.operationSuccess"));
     } else {
-      message.error("Failed to save configuration");
+      message.error(t("common.requestFailed"));
     }
   } catch (_error) {
-    message.error("Failed to save configuration");
+    message.error(t("common.requestFailed"));
   } finally {
     loading.value = false;
   }
@@ -96,13 +100,13 @@ function removeMapping(key: string) {
 
 <template>
   <n-space vertical>
-    <n-card title="Auto Complexity Routing" hoverable bordered>
+    <n-card :title="t('autoroute.title')" hoverable bordered>
       <n-form label-placement="left" label-width="200">
-        <n-form-item label="Enable Auto Routing">
+        <n-form-item :label="t('autoroute.enableAutoRouting')">
           <n-switch v-model:value="config.enabled" />
         </n-form-item>
 
-        <n-form-item label="Simple Threshold (tokens)">
+        <n-form-item :label="t('autoroute.simpleThreshold')">
           <n-input-number
             v-model:value="config.simple_threshold"
             :min="0"
@@ -110,7 +114,7 @@ function removeMapping(key: string) {
           />
         </n-form-item>
 
-        <n-form-item label="Complex Threshold (tokens)">
+        <n-form-item :label="t('autoroute.complexThreshold')">
           <n-input-number
             v-model:value="config.complex_threshold"
             :min="0"
@@ -120,26 +124,26 @@ function removeMapping(key: string) {
       </n-form>
     </n-card>
 
-    <n-card title="Group Mappings" hoverable bordered>
+    <n-card :title="t('autoroute.groupMappings')" hoverable bordered>
       <n-form label-placement="left" label-width="150">
         <div v-for="(mapping, key) in config.group_mapping" :key="key" style="margin-bottom: 12px;">
           <n-space>
             <n-input :value="String(key)" disabled style="width: 150px;" />
-            <n-input v-model:value="mapping.simple_group" placeholder="Simple group" style="width: 150px;" />
-            <n-input v-model:value="mapping.medium_group" placeholder="Medium group" style="width: 150px;" />
-            <n-input v-model:value="mapping.complex_group" placeholder="Complex group" style="width: 150px;" />
-            <n-button type="error" size="small" @click="removeMapping(String(key))">Remove</n-button>
+            <n-input v-model:value="mapping.simple_group" :placeholder="t('autoroute.simpleGroup')" style="width: 150px;" />
+            <n-input v-model:value="mapping.medium_group" :placeholder="t('autoroute.mediumGroup')" style="width: 150px;" />
+            <n-input v-model:value="mapping.complex_group" :placeholder="t('autoroute.complexGroup')" style="width: 150px;" />
+            <n-button type="error" size="small" @click="removeMapping(String(key))">{{ t('common.delete') }}</n-button>
           </n-space>
         </div>
 
-        <n-divider>Add New Mapping</n-divider>
+        <n-divider>{{ t('autoroute.addNewMapping') }}</n-divider>
 
         <n-space>
-          <n-input v-model:value="newMappingGroup" placeholder="Model name (e.g., gpt-4o)" style="width: 150px;" />
-          <n-input v-model:value="newMappingSimple" placeholder="Simple group" style="width: 150px;" />
-          <n-input v-model:value="newMappingMedium" placeholder="Medium group" style="width: 150px;" />
-          <n-input v-model:value="newMappingComplex" placeholder="Complex group" style="width: 150px;" />
-          <n-button type="primary" size="small" @click="addMapping">Add</n-button>
+          <n-input v-model:value="newMappingGroup" :placeholder="t('autoroute.modelNamePlaceholder')" style="width: 150px;" />
+          <n-input v-model:value="newMappingSimple" :placeholder="t('autoroute.simpleGroup')" style="width: 150px;" />
+          <n-input v-model:value="newMappingMedium" :placeholder="t('autoroute.mediumGroup')" style="width: 150px;" />
+          <n-input v-model:value="newMappingComplex" :placeholder="t('autoroute.complexGroup')" style="width: 150px;" />
+          <n-button type="primary" size="small" @click="addMapping">{{ t('common.add') }}</n-button>
         </n-space>
       </n-form>
     </n-card>
@@ -156,7 +160,7 @@ function removeMapping(key: string) {
         <template #icon>
           <n-icon :component="Save" />
         </template>
-        Save Configuration
+        {{ t('common.save') }}
       </n-button>
     </div>
   </n-space>

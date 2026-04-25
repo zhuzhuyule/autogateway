@@ -11,6 +11,9 @@ import {
   useMessage,
   type DataTableColumns,
 } from "naive-ui";
+import { useI18n } from "vue-i18n";
+
+const { t } = useI18n();
 
 interface DedupSuggestion {
   model_name: string;
@@ -27,22 +30,22 @@ const aggregateName = ref("");
 
 const columns: DataTableColumns<DedupSuggestion> = [
   {
-    title: "Model Name",
+    title: t("dedup.modelName"),
     key: "model_name",
   },
   {
-    title: "Source Groups",
+    title: t("dedup.sourceGroups"),
     key: "source_groups",
     render: (row) => {
       return row.source_groups.map((g) => h(NTag, { size: "small", type: "info", style: "margin-right: 4px;" }, () => g));
     },
   },
   {
-    title: "Suggested Aggregate Name",
+    title: t("dedup.suggestedName"),
     key: "suggested_aggregate_name",
   },
   {
-    title: "Action",
+    title: t("common.actions"),
     key: "action",
     render: (row) => {
       return h(
@@ -52,7 +55,7 @@ const columns: DataTableColumns<DedupSuggestion> = [
           type: "primary",
           onClick: () => openConfirmModal(row),
         },
-        () => "Create Aggregate"
+        () => t("dedup.createAggregate")
       );
     },
   },
@@ -70,10 +73,10 @@ async function fetchSuggestions() {
       const data = await response.json();
       suggestions.value = data;
     } else {
-      message.error("Failed to load dedup suggestions");
+      message.error(t("common.requestFailed"));
     }
   } catch (_error) {
-    message.error("Failed to load dedup suggestions");
+    message.error(t("common.requestFailed"));
   } finally {
     loading.value = false;
   }
@@ -100,23 +103,23 @@ async function handleCreateAggregate() {
     });
 
     if (response.ok) {
-      message.success("Aggregate created successfully");
+      message.success(t("common.operationSuccess"));
       showConfirmModal.value = false;
       await fetchSuggestions();
     } else {
-      message.error("Failed to create aggregate");
+      message.error(t("common.requestFailed"));
     }
   } catch (_error) {
-    message.error("Failed to create aggregate");
+    message.error(t("common.requestFailed"));
   }
 }
 </script>
 
 <template>
   <n-space vertical>
-    <n-card title="Model Deduplication" hoverable bordered>
+    <n-card :title="t('dedup.title')" hoverable bordered>
       <template #header-extra>
-        <n-button size="small" @click="fetchSuggestions">Refresh</n-button>
+        <n-button size="small" @click="fetchSuggestions">{{ t("common.refresh") }}</n-button>
       </template>
 
       <n-data-table
@@ -131,14 +134,14 @@ async function handleCreateAggregate() {
     <n-modal
       v-model:show="showConfirmModal"
       preset="dialog"
-      title="Create Aggregate Model"
+      :title="t('dedup.createAggregateTitle')"
       positive-text="Create"
       negative-text="Cancel"
       @positive-click="handleCreateAggregate"
     >
       <n-space vertical>
-        <p>Create aggregate model for "{{ selectedSuggestion?.model_name }}"?</p>
-        <n-input v-model:value="aggregateName" placeholder="Aggregate name" />
+        <p>{{ t('dedup.createAggregateConfirm', { model: selectedSuggestion?.model_name }) }}</p>
+        <n-input v-model:value="aggregateName" :placeholder="t('dedup.aggregateNamePlaceholder')" />
       </n-space>
     </n-modal>
   </n-space>
