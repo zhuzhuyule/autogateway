@@ -77,6 +77,27 @@ type ParentAggregateGroupInfo struct {
 	Weight      int    `json:"weight"`
 }
 
+// 系统默认聚合分组的 SystemRole 取值
+const (
+	SystemRoleDefaultOpenAI    = "default-openai"
+	SystemRoleDefaultGemini    = "default-gemini"
+	SystemRoleDefaultAnthropic = "default-anthropic"
+)
+
+// SystemRoleForChannelType 返回对应 channel_type 的系统默认聚合 role,无对应返回 "".
+func SystemRoleForChannelType(channelType string) string {
+	switch channelType {
+	case "openai", "openai-response":
+		return SystemRoleDefaultOpenAI
+	case "gemini":
+		return SystemRoleDefaultGemini
+	case "anthropic":
+		return SystemRoleDefaultAnthropic
+	default:
+		return ""
+	}
+}
+
 // Group 对应 groups 表
 type Group struct {
 	ID                  uint                 `gorm:"primaryKey;autoIncrement" json:"id"`
@@ -87,6 +108,8 @@ type Group struct {
 	ProxyKeys           string               `gorm:"type:text" json:"proxy_keys"`
 	Description         string               `gorm:"type:varchar(512)" json:"description"`
 	GroupType           string               `gorm:"type:varchar(50);default:'standard'" json:"group_type"` // 'standard' or 'aggregate'
+	IsSystem            bool                 `gorm:"default:false;index" json:"is_system"`
+	SystemRole          string               `gorm:"type:varchar(50);default:'';index" json:"system_role"`
 	Upstreams           datatypes.JSON       `gorm:"type:json;not null" json:"upstreams"`
 	ValidationEndpoint  string               `gorm:"type:varchar(255)" json:"validation_endpoint"`
 	ChannelType         string               `gorm:"type:varchar(50);not null" json:"channel_type"`

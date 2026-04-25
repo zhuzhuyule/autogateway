@@ -81,6 +81,8 @@ export interface Group {
   header_rules?: HeaderRule[];
   proxy_keys: string;
   group_type?: GroupType;
+  is_system?: boolean;
+  system_role?: string; // 'default-openai' | 'default-gemini' | 'default-anthropic' | ''
   sub_groups?: SubGroupInfo[]; // 子分组列表（仅聚合分组）
   sub_group_ids?: number[]; // 子分组ID列表
   created_at?: string;

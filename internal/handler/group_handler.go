@@ -275,7 +275,21 @@ func (s *Server) newGroupResponse(group *models.Group) *GroupResponse {
 	if appURL != "" {
 		u, err := url.Parse(appURL)
 		if err == nil {
-			u.Path = strings.TrimRight(u.Path, "/") + "/proxy/" + group.Name
+			// 系统默认聚合分组使用无 /proxy 前缀的快捷路径,与 router 中注册的捷径一致.
+			if group.IsSystem {
+				switch group.SystemRole {
+				case models.SystemRoleDefaultOpenAI:
+					u.Path = strings.TrimRight(u.Path, "/") + "/openai"
+				case models.SystemRoleDefaultGemini:
+					u.Path = strings.TrimRight(u.Path, "/") + "/gemini"
+				case models.SystemRoleDefaultAnthropic:
+					u.Path = strings.TrimRight(u.Path, "/") + "/anthropic"
+				default:
+					u.Path = strings.TrimRight(u.Path, "/") + "/proxy/" + group.Name
+				}
+			} else {
+				u.Path = strings.TrimRight(u.Path, "/") + "/proxy/" + group.Name
+			}
 			endpoint = u.String()
 		}
 	}

@@ -378,6 +378,7 @@ function resetPage() {
               </template>
             </n-button>
             <n-button
+              v-if="!group?.is_system"
               quaternary
               circle
               size="small"
@@ -888,6 +889,7 @@ function resetPage() {
   padding-bottom: 8px;
   border-bottom: 2px solid var(--border-color);
 }
+
 
 .upstream-url {
   font-family: monospace;

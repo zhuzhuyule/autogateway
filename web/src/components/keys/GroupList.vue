@@ -90,16 +90,24 @@ onBeforeUpdate(() => {
 });
 
 const filteredGroups = computed(() => {
-  if (!searchText.value.trim()) {
-    return displayGroups.value;
+  let list = displayGroups.value;
+  if (searchText.value.trim()) {
+    const search = searchText.value.toLowerCase().trim();
+    list = list.filter(
+      group =>
+        group.name.toLowerCase().includes(search) ||
+        group.display_name?.toLowerCase().includes(search)
+    );
   }
-  const search = searchText.value.toLowerCase().trim();
-  return displayGroups.value.filter(
-    group =>
-      group.name.toLowerCase().includes(search) ||
-      group.display_name?.toLowerCase().includes(search)
-  );
+  // 系统默认聚合分组始终置顶,且不能拖拽改动顺序
+  const sys = list.filter(g => g.is_system);
+  const rest = list.filter(g => !g.is_system);
+  return [...sys, ...rest];
 });
+
+const systemGroupCount = computed(
+  () => filteredGroups.value.filter(g => g.is_system).length,
+);
 
 // 监听选中项 ID 的变化，并自动滚动到该项
 watch(
@@ -363,12 +371,15 @@ function handleDragEnd() {
           </div>
           <div v-else class="groups-list">
             <div
-              v-for="group in filteredGroups"
+              v-for="(group, idx) in filteredGroups"
               :key="group.id"
               class="group-item"
               :class="{
                 active: selectedGroup?.id === group.id,
                 aggregate: group.group_type === 'aggregate',
+                'system-group': group.is_system,
+                'first-user-group':
+                  systemGroupCount > 0 && idx === systemGroupCount && !group.is_system,
                 dragging: draggingGroupId === group.id,
                 'drop-before':
                   dropTarget?.groupId === group.id &&
@@ -411,7 +422,10 @@ function handleDragEnd() {
                   <n-tag size="tiny" :type="getChannelTagType(group.channel_type)">
                     {{ group.channel_type }}
                   </n-tag>
-                  <n-tag v-if="group.group_type === 'aggregate'" size="tiny" type="warning" round>
+                  <n-tag v-if="group.is_system" size="tiny" type="success" round>
+                    {{ t("keys.systemDefault") }}
+                  </n-tag>
+                  <n-tag v-else-if="group.group_type === 'aggregate'" size="tiny" type="warning" round>
                     {{ t("keys.aggregateGroup") }}
                   </n-tag>
                   <span v-if="group.group_type !== 'aggregate'" class="group-id">
@@ -556,6 +570,48 @@ function handleDragEnd() {
 :root.dark .group-item.aggregate {
   background: linear-gradient(135deg, rgba(102, 126, 234, 0.05) 0%, rgba(102, 126, 234, 0.1) 100%);
   border-color: rgba(102, 126, 234, 0.2);
+}
+
+/* 系统默认聚合分组样式: 与用户聚合明显区分(绿色调 + 圆环左竖线 + 不可拖拽视觉) */
+.group-item.system-group {
+  border-style: solid;
+  border-color: rgba(24, 160, 88, 0.35);
+  background: linear-gradient(135deg, rgba(24, 160, 88, 0.04) 0%, rgba(24, 160, 88, 0.10) 100%);
+  position: relative;
+  cursor: pointer;
+}
+
+.group-item.system-group::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--primary-color, #18a058);
+}
+
+:root.dark .group-item.system-group {
+  background: linear-gradient(135deg, rgba(24, 160, 88, 0.08) 0%, rgba(24, 160, 88, 0.16) 100%);
+  border-color: rgba(24, 160, 88, 0.4);
+}
+
+/* 系统聚合区与用户分组区之间加分隔线 */
+.group-item.first-user-group {
+  margin-top: 12px;
+  border-top-width: 1px;
+  position: relative;
+}
+
+.group-item.first-user-group::before {
+  content: "";
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  top: -7px;
+  height: 1px;
+  background: var(--border-color);
 }
 
 .group-item:hover,

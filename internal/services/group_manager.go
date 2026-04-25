@@ -171,6 +171,20 @@ func (gm *GroupManager) GetAllGroups() map[string]*models.Group {
 	return gm.syncer.Get()
 }
 
+// GetGroupBySystemRole 通过 system_role 查找系统默认聚合分组(如 'default-openai').
+// 找不到时返回 ErrRecordNotFound;不依赖于分组名,避免用户改名后路由失效.
+func (gm *GroupManager) GetGroupBySystemRole(role string) (*models.Group, error) {
+	if gm.syncer == nil {
+		return nil, fmt.Errorf("GroupManager is not initialized")
+	}
+	for _, g := range gm.syncer.Get() {
+		if g.IsSystem && g.SystemRole == role {
+			return g, nil
+		}
+	}
+	return nil, gorm.ErrRecordNotFound
+}
+
 // Invalidate triggers a cache reload across all instances.
 func (gm *GroupManager) Invalidate() error {
 	if gm.syncer == nil {

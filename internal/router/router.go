@@ -210,11 +210,10 @@ func registerProxyRoutes(
 	serverHandler *handler.Server,
 	autoRouteConfigManager *autoroute.ConfigManager,
 ) {
+	// 1) 标准命名路由: /proxy/{group_name}/*
 	proxyGroup := router.Group("/proxy/:group_name")
-
 	proxyGroup.Use(middleware.ProxyRouteDispatcher(serverHandler))
 	proxyGroup.Use(middleware.ProxyAuth(groupManager))
-
 	if autoRouteConfigManager != nil {
 		classifier := autoroute.NewClassifier(nil)
 		configProvider := func() *autoroute.RouteConfig {
@@ -222,8 +221,46 @@ func registerProxyRoutes(
 		}
 		proxyGroup.Use(autoroute.Middleware(classifier, configProvider, nil))
 	}
-
 	proxyGroup.Any("/*path", proxyServer.HandleProxy)
+
+	// 2) 系统默认聚合分组的快捷路由(无 /proxy 前缀): /openai/*, /gemini/*, /anthropic/*
+	systemShortcuts := []struct {
+		Prefix string
+		Role   string
+	}{
+		{"/openai", "default-openai"},
+		{"/gemini", "default-gemini"},
+		{"/anthropic", "default-anthropic"},
+	}
+	for _, sc := range systemShortcuts {
+		role := sc.Role
+		grp := router.Group(sc.Prefix)
+		grp.Use(injectSystemGroupName(groupManager, role))
+		grp.Use(middleware.ProxyAuth(groupManager))
+		if autoRouteConfigManager != nil {
+			classifier := autoroute.NewClassifier(nil)
+			configProvider := func() *autoroute.RouteConfig {
+				return autoRouteConfigManager.GetConfig()
+			}
+			grp.Use(autoroute.Middleware(classifier, configProvider, nil))
+		}
+		grp.Any("/*path", proxyServer.HandleProxy)
+	}
+}
+
+// injectSystemGroupName 把 c.Param("group_name") 注入为对应 system_role 分组的名字.
+// 失败(找不到/未初始化)返回 404,避免让请求穿透到 SPA 兜底.
+func injectSystemGroupName(gm *services.GroupManager, role string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		group, err := gm.GetGroupBySystemRole(role)
+		if err != nil || group == nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "system aggregate group not initialized: " + role})
+			c.Abort()
+			return
+		}
+		c.Params = append(c.Params, gin.Param{Key: "group_name", Value: group.Name})
+		c.Next()
+	}
 }
 
 // registerFrontendRoutes 注册前端路由
@@ -238,7 +275,12 @@ func registerFrontendRoutes(router *gin.Engine, buildFS embed.FS, indexPage []by
 
 	router.Use(static.Serve("/", EmbedFolder(buildFS, "web/dist")))
 	router.NoRoute(func(c *gin.Context) {
-		if strings.HasPrefix(c.Request.RequestURI, "/api") || strings.HasPrefix(c.Request.RequestURI, "/proxy") {
+		uri := c.Request.RequestURI
+		if strings.HasPrefix(uri, "/api") ||
+			strings.HasPrefix(uri, "/proxy") ||
+			strings.HasPrefix(uri, "/openai/") ||
+			strings.HasPrefix(uri, "/gemini/") ||
+			strings.HasPrefix(uri, "/anthropic/") {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Not Found"})
 			return
 		}

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { keysApi } from "@/api/keys";
+import { findProviderByUpstreams } from "@/data/freeProviders";
 import type { APIKey, Group, KeyStatus } from "@/types/models";
 import { appState, triggerSyncOperationRefresh } from "@/utils/app-state";
 import { copy } from "@/utils/clipboard";
@@ -11,6 +12,7 @@ import {
   CopyOutline,
   EyeOffOutline,
   EyeOutline,
+  OpenOutline,
   Pencil,
   RemoveCircleOutline,
   Search,
@@ -25,10 +27,11 @@ import {
   NSelect,
   NSpace,
   NSpin,
+  NTooltip,
   useDialog,
   type MessageReactive,
 } from "naive-ui";
-import { h, ref, watch } from "vue";
+import { computed, h, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import KeyCreateDialog from "./KeyCreateDialog.vue";
 import KeyDeleteDialog from "./KeyDeleteDialog.vue";
@@ -88,6 +91,11 @@ const moreOptions = [
 
 let testingMsg: MessageReactive | null = null;
 const isDeling = ref(false);
+
+const matchedProvider = computed(() =>
+  findProviderByUpstreams(props.selectedGroup?.upstreams || []),
+);
+const hasNoKeys = computed(() => total.value === 0);
 const isRestoring = ref(false);
 
 const createDialogShow = ref(false);
@@ -631,12 +639,33 @@ function resetPage() {
           </template>
           {{ t("keys.addKey") }}
         </n-button>
-        <n-button type="error" size="small" @click="deleteDialogShow = true">
-          <template #icon>
-            <n-icon :component="RemoveCircleOutline" />
+        <n-tooltip :disabled="!hasNoKeys" trigger="hover">
+          <template #trigger>
+            <n-button
+              type="error"
+              size="small"
+              :disabled="hasNoKeys"
+              @click="deleteDialogShow = true"
+            >
+              <template #icon>
+                <n-icon :component="RemoveCircleOutline" />
+              </template>
+              {{ t("keys.deleteKey") }}
+            </n-button>
           </template>
-          {{ t("keys.deleteKey") }}
-        </n-button>
+          {{ t("keys.noKeysToDelete") }}
+        </n-tooltip>
+        <a
+          v-if="matchedProvider"
+          :href="matchedProvider.signupUrl"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="provider-quick-link"
+        >
+          <n-icon :component="OpenOutline" />
+          <span>{{ t("keys.providerGetKey") }}</span>
+          <span class="provider-quick-link-name">· {{ matchedProvider.name }}</span>
+        </a>
       </div>
       <div class="toolbar-right">
         <n-space :size="12" align="center">
@@ -893,6 +922,32 @@ function resetPage() {
   display: flex;
   gap: 8px;
   flex-shrink: 0;
+  align-items: center;
+}
+
+.provider-quick-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  margin-left: 4px;
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--primary-color, #18a058);
+  background: var(--primary-color-suppl, rgba(24, 160, 88, 0.1));
+  border: 1px solid transparent;
+  text-decoration: none;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.provider-quick-link:hover {
+  border-color: var(--primary-color, #18a058);
+  background: var(--primary-color-hover, rgba(24, 160, 88, 0.16));
+}
+
+.provider-quick-link-name {
+  color: var(--text-color-3, #999);
+  font-size: 12px;
 }
 
 .toolbar-right {

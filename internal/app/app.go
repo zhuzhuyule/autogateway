@@ -27,50 +27,53 @@ import (
 
 // App holds all services and manages the application lifecycle.
 type App struct {
-	engine            *gin.Engine
-	configManager     types.ConfigManager
-	settingsManager   *config.SystemSettingsManager
-	groupManager      *services.GroupManager
-	logCleanupService *services.LogCleanupService
-	requestLogService *services.RequestLogService
-	cronChecker       *keypool.CronChecker
-	keyPoolProvider   *keypool.KeyProvider
-	proxyServer       *proxy.ProxyServer
-	storage           store.Store
-	db                *gorm.DB
-	httpServer        *http.Server
+	engine                *gin.Engine
+	configManager         types.ConfigManager
+	settingsManager       *config.SystemSettingsManager
+	groupManager          *services.GroupManager
+	aggregateGroupService *services.AggregateGroupService
+	logCleanupService     *services.LogCleanupService
+	requestLogService     *services.RequestLogService
+	cronChecker           *keypool.CronChecker
+	keyPoolProvider       *keypool.KeyProvider
+	proxyServer           *proxy.ProxyServer
+	storage               store.Store
+	db                    *gorm.DB
+	httpServer            *http.Server
 }
 
 // AppParams defines the dependencies for the App.
 type AppParams struct {
 	dig.In
-	Engine            *gin.Engine
-	ConfigManager     types.ConfigManager
-	SettingsManager   *config.SystemSettingsManager
-	GroupManager      *services.GroupManager
-	LogCleanupService *services.LogCleanupService
-	RequestLogService *services.RequestLogService
-	CronChecker       *keypool.CronChecker
-	KeyPoolProvider   *keypool.KeyProvider
-	ProxyServer       *proxy.ProxyServer
-	Storage           store.Store
-	DB                *gorm.DB
+	Engine                *gin.Engine
+	ConfigManager         types.ConfigManager
+	SettingsManager       *config.SystemSettingsManager
+	GroupManager          *services.GroupManager
+	AggregateGroupService *services.AggregateGroupService
+	LogCleanupService     *services.LogCleanupService
+	RequestLogService     *services.RequestLogService
+	CronChecker           *keypool.CronChecker
+	KeyPoolProvider       *keypool.KeyProvider
+	ProxyServer           *proxy.ProxyServer
+	Storage               store.Store
+	DB                    *gorm.DB
 }
 
 // NewApp is the constructor for App, with dependencies injected by dig.
 func NewApp(params AppParams) *App {
 	return &App{
-		engine:            params.Engine,
-		configManager:     params.ConfigManager,
-		settingsManager:   params.SettingsManager,
-		groupManager:      params.GroupManager,
-		logCleanupService: params.LogCleanupService,
-		requestLogService: params.RequestLogService,
-		cronChecker:       params.CronChecker,
-		keyPoolProvider:   params.KeyPoolProvider,
-		proxyServer:       params.ProxyServer,
-		storage:           params.Storage,
-		db:                params.DB,
+		engine:                params.Engine,
+		configManager:         params.ConfigManager,
+		settingsManager:       params.SettingsManager,
+		groupManager:          params.GroupManager,
+		aggregateGroupService: params.AggregateGroupService,
+		logCleanupService:     params.LogCleanupService,
+		requestLogService:     params.RequestLogService,
+		cronChecker:           params.CronChecker,
+		keyPoolProvider:       params.KeyPoolProvider,
+		proxyServer:           params.ProxyServer,
+		storage:               params.Storage,
+		db:                    params.DB,
 	}
 }
 
@@ -113,6 +116,17 @@ func (a *App) Start() error {
 			return fmt.Errorf("failed to initialize system settings: %w", err)
 		}
 		logrus.Info("System settings initialized in DB.")
+
+		// 确保 3 个系统默认聚合分组存在(default-openai/gemini/anthropic)
+		// 共享 AUTH_KEY 作为 proxy_keys,实现"一个 key 调所有 default"
+		if err := a.aggregateGroupService.EnsureSystemAggregates(
+			context.Background(),
+			a.configManager.GetAuthConfig().Key,
+		); err != nil {
+			logrus.WithError(err).Warn("ensure system aggregates failed (non-fatal)")
+		}
+		// 把启用本特性之前就存在的 standard 分组挂入对应系统默认聚合
+		a.aggregateGroupService.BackfillSystemAggregates(context.Background())
 
 		a.settingsManager.Initialize(a.storage, a.groupManager, a.configManager.IsMaster())
 

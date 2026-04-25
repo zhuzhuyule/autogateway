@@ -208,4 +208,6 @@ var MessagesZhCN = map[string]string{
 	"group.not_aggregate":              "该分组不是聚合分组",
 	"group.sub_group_already_exists":   "子分组{{.sub_group_id}}已存在",
 	"group.sub_group_not_found":        "子分组不存在",
+	"group.system_cannot_delete":       "系统默认聚合分组不可删除",
+	"group.system_immutable_field":     "系统默认聚合分组的 {{.field}} 不允许修改",
 }

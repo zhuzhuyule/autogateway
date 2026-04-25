@@ -208,4 +208,6 @@ var MessagesEnUS = map[string]string{
 	"group.not_aggregate":              "Group is not an aggregate group",
 	"group.sub_group_already_exists":   "Sub group {{.sub_group_id}} already exists",
 	"group.sub_group_not_found":        "Sub group not found",
+	"group.system_cannot_delete":       "System default aggregate group cannot be deleted",
+	"group.system_immutable_field":     "Field {{.field}} cannot be modified for system default aggregate group",
 }

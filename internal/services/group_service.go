@@ -267,6 +267,11 @@ func (s *GroupService) CreateGroup(ctx context.Context, params GroupCreateParams
 		logrus.WithContext(ctx).WithError(err).Error("failed to invalidate group cache")
 	}
 
+	// 自动挂入对应 channel_type 的系统默认聚合(仅 standard 分组)
+	if group.GroupType == "standard" && s.aggregateGroupService != nil {
+		s.aggregateGroupService.AutoJoinSystemAggregate(ctx, &group)
+	}
+
 	return &group, nil
 }
 
@@ -358,6 +363,16 @@ func (s *GroupService) UpdateGroup(ctx context.Context, id uint, params GroupUpd
 		return nil, app_errors.ErrDatabase
 	}
 	defer tx.Rollback()
+
+	// 系统默认聚合分组禁止改名/换 channel_type
+	if group.IsSystem {
+		if params.Name != nil && strings.TrimSpace(*params.Name) != group.Name {
+			return nil, NewI18nError(app_errors.ErrBadRequest, "group.system_immutable_field", map[string]any{"field": "name"})
+		}
+		if params.ChannelType != nil && strings.TrimSpace(*params.ChannelType) != group.ChannelType {
+			return nil, NewI18nError(app_errors.ErrBadRequest, "group.system_immutable_field", map[string]any{"field": "channel_type"})
+		}
+	}
 
 	if params.Name != nil {
 		cleanedName := strings.TrimSpace(*params.Name)
@@ -524,6 +539,10 @@ func (s *GroupService) DeleteGroup(ctx context.Context, id uint) error {
 	var group models.Group
 	if err := tx.First(&group, id).Error; err != nil {
 		return app_errors.ParseDBError(err)
+	}
+
+	if group.IsSystem {
+		return NewI18nError(app_errors.ErrBadRequest, "group.system_cannot_delete", nil)
 	}
 
 	if err := tx.Where("group_id = ? OR sub_group_id = ?", id, id).Delete(&models.GroupSubGroup{}).Error; err != nil {

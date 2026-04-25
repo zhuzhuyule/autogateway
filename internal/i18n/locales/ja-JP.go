@@ -208,4 +208,6 @@ var MessagesJaJP = map[string]string{
 	"group.not_aggregate":              "グループはアグリゲートグループではありません",
 	"group.sub_group_already_exists":   "サブグループ{{.sub_group_id}}は既に存在します",
 	"group.sub_group_not_found":        "サブグループが見つかりません",
+	"group.system_cannot_delete":       "システム既定の集約グループは削除できません",
+	"group.system_immutable_field":     "システム既定の集約グループの {{.field}} は変更できません",
 }

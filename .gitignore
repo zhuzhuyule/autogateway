@@ -1,0 +1,17 @@
+# 本地敏感配置(含 AUTH_KEY)
+.env
+.env.local
+.env.*.local
+
+# 运行时数据(SQLite DB / 缓存等),仅根目录
+/data/
+
+# Node 依赖
+web/node_modules/
+node_modules/
+
+# 编辑器/系统
+.DS_Store
+*.swp
+.idea/
+.vscode/

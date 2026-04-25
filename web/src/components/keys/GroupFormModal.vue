@@ -1,12 +1,16 @@
 <script setup lang="ts">
+import { getGroupList } from "@/api/dashboard";
 import { keysApi } from "@/api/keys";
 import { settingsApi } from "@/api/settings";
 import ProxyKeysInput from "@/components/common/ProxyKeysInput.vue";
+import { FREE_PROVIDERS, findProviderByUpstreams, type FreeProvider } from "@/data/freeProviders";
 import type { Group, GroupConfigOption, UpstreamInfo } from "@/types/models";
-import { Add, Close, HelpCircleOutline, Remove } from "@vicons/ionicons5";
+import { Add, Close, HelpCircleOutline, OpenOutline, Remove, RocketOutline } from "@vicons/ionicons5";
 import {
   NButton,
   NCard,
+  NCollapse,
+  NCollapseItem,
   NForm,
   NFormItem,
   NIcon,
@@ -15,6 +19,7 @@ import {
   NModal,
   NSelect,
   NSwitch,
+  NTag,
   NTooltip,
   useMessage,
   type FormRules,
@@ -117,6 +122,59 @@ const userModifiedFields = ref({
   upstream: false,
 });
 
+// Free provider 快速预填
+const providerSearch = ref("");
+const providerPanelExpanded = ref<string[]>(["picker"]);
+const usedProviderIds = ref<Set<string>>(new Set());
+
+const filteredProviders = computed<FreeProvider[]>(() => {
+  const q = providerSearch.value.trim().toLowerCase();
+  if (!q) return FREE_PROVIDERS;
+  return FREE_PROVIDERS.filter((p) =>
+    [p.id, p.name, p.description, p.freeTier, ...p.models].some((s) =>
+      s.toLowerCase().includes(q),
+    ),
+  );
+});
+
+async function refreshUsedProviders() {
+  try {
+    const response = await getGroupList();
+    const list = (response as unknown as { data?: Array<{ upstreams?: Array<{ url?: string }> }> }).data || [];
+    const ids = new Set<string>();
+    for (const g of list) {
+      const matched = findProviderByUpstreams(g.upstreams || []);
+      if (matched) ids.add(matched.id);
+    }
+    usedProviderIds.value = ids;
+  } catch {
+    // 忽略,徽标仅做提示用
+  }
+}
+
+const showProviderPicker = computed(
+  () => !props.group && formData.group_type !== "aggregate",
+);
+
+function applyProvider(p: FreeProvider) {
+  const alreadyUsed = usedProviderIds.value.has(p.id);
+  formData.channel_type = p.channelType;
+  formData.name = alreadyUsed ? `${p.recommendedGroupName}-2` : p.recommendedGroupName;
+  formData.display_name = p.recommendedDisplayName;
+  formData.description = `${p.name} · ${p.freeTier}`;
+  formData.test_model = p.testModel;
+  formData.upstreams = [{ url: p.baseUrl, weight: 1 }];
+  formData.validation_endpoint = "";
+  // 重置"用户已修改"标记,避免 channel_type watcher 又覆盖回 channel 默认值
+  userModifiedFields.value = { test_model: true, upstream: true };
+  providerPanelExpanded.value = [];
+  if (alreadyUsed) {
+    message.warning(t("keys.providerAlreadyUsed", { name: p.name }));
+  } else {
+    message.success(t("keys.providerApplied", { name: p.name }));
+  }
+}
+
 // 根据渠道类型动态生成占位符提示
 const testModelPlaceholder = computed(() => {
   switch (formData.channel_type) {
@@ -213,6 +271,9 @@ watch(
       resetForm();
       if (props.group) {
         loadGroupData();
+      } else {
+        // 仅创建模式下,实时刷新"已添加"徽标
+        refreshUsedProviders();
       }
     }
   }
@@ -589,6 +650,73 @@ async function handleSubmit() {
         require-mark-placement="right-hanging"
         class="group-form"
       >
+        <!-- 免费 Provider 快速预填(仅创建标准分组时显示) -->
+        <div v-if="showProviderPicker" class="form-section provider-picker">
+          <n-collapse v-model:expanded-names="providerPanelExpanded">
+            <n-collapse-item name="picker">
+              <template #header>
+                <div class="provider-picker-header">
+                  <n-icon :component="RocketOutline" class="provider-picker-icon" />
+                  <span class="section-title" style="margin: 0">
+                    {{ t("keys.useFreeProvider") }}
+                  </span>
+                  <n-tag size="small" type="success" round style="margin-left: 8px">
+                    {{ t("keys.providerCount", { n: FREE_PROVIDERS.length }) }}
+                  </n-tag>
+                </div>
+              </template>
+              <p class="provider-picker-tip">{{ t("keys.providerPickerTip") }}</p>
+              <n-input
+                v-model:value="providerSearch"
+                :placeholder="t('keys.providerSearchPlaceholder')"
+                clearable
+                style="margin-bottom: 12px"
+              />
+              <div class="provider-grid">
+                <div
+                  v-for="p in filteredProviders"
+                  :key="p.id"
+                  class="provider-card"
+                  :class="{ 'provider-card-used': usedProviderIds.has(p.id) }"
+                  @click="applyProvider(p)"
+                >
+                  <div class="provider-card-head">
+                    <span class="provider-card-name">{{ p.name }}</span>
+                    <div class="provider-card-tags">
+                      <n-tag
+                        v-if="usedProviderIds.has(p.id)"
+                        size="tiny"
+                        type="success"
+                        :bordered="false"
+                      >
+                        {{ t("keys.providerAdded") }}
+                      </n-tag>
+                      <n-tag
+                        v-if="p.badge"
+                        size="tiny"
+                        :type="p.badge === 'fast' ? 'warning' : p.badge === 'high-quota' ? 'success' : 'info'"
+                      >
+                        {{ t(`keys.providerBadge_${p.badge.replace('-', '_')}`) }}
+                      </n-tag>
+                    </div>
+                  </div>
+                  <div class="provider-card-tier">{{ p.freeTier }}</div>
+                  <a
+                    :href="p.signupUrl"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="provider-card-signup"
+                    @click.stop
+                  >
+                    <n-icon :component="OpenOutline" />
+                    {{ t("keys.providerSignup") }}
+                  </a>
+                </div>
+              </div>
+            </n-collapse-item>
+          </n-collapse>
+        </div>
+
         <!-- 基础信息 -->
         <div class="form-section">
           <h4 class="section-title">{{ t("keys.basicInfo") }}</h4>
@@ -1199,6 +1327,107 @@ async function handleSubmit() {
   margin: 0 0 16px 0;
   padding-bottom: 8px;
   border-bottom: 2px solid var(--border-color);
+}
+
+.provider-picker {
+  margin-top: 0;
+}
+
+.provider-picker-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.provider-picker-icon {
+  font-size: 18px;
+  color: var(--primary-color, #18a058);
+}
+
+.provider-picker-tip {
+  color: var(--text-color-3, #999);
+  font-size: 13px;
+  margin: 0 0 12px 0;
+}
+
+.provider-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 8px;
+}
+
+.provider-card {
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 6px 10px;
+  cursor: pointer;
+  transition: border-color 0.15s, box-shadow 0.15s, transform 0.05s;
+  background: var(--card-color, transparent);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.provider-card:hover {
+  border-color: var(--primary-color, #18a058);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.05);
+}
+
+.provider-card:active {
+  transform: scale(0.99);
+}
+
+.provider-card-used {
+  background: var(--primary-color-suppl, rgba(24, 160, 88, 0.06));
+  border-style: dashed;
+}
+
+.provider-card-used .provider-card-name::after {
+  content: " ✓";
+  color: var(--primary-color, #18a058);
+  font-weight: 700;
+}
+
+.provider-card-tags {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.provider-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+}
+
+.provider-card-name {
+  font-weight: 600;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.provider-card-tier {
+  font-size: 11px;
+  color: var(--primary-color, #18a058);
+  line-height: 1.3;
+}
+
+.provider-card-signup {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 11px;
+  color: var(--text-color-3, #999);
+  text-decoration: none;
+  margin-top: 2px;
+}
+
+.provider-card-signup:hover {
+  color: var(--primary-color, #18a058);
+  text-decoration: underline;
 }
 
 :deep(.n-form-item-label) {
