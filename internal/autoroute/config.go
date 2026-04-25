@@ -1,6 +1,7 @@
 package autoroute
 
 import (
+	"gpt-load/internal/config"
 	"sync"
 )
 
@@ -34,6 +35,28 @@ func (s *MemoryConfigStore) Save(key string, value string) error {
 	defer s.mu.Unlock()
 	s.data[key] = value
 	return nil
+}
+
+type DBPersistedConfigStore struct {
+	settingsManager *config.SystemSettingsManager
+}
+
+func NewDBPersistedConfigStore(settingsManager *config.SystemSettingsManager) *DBPersistedConfigStore {
+	return &DBPersistedConfigStore{
+		settingsManager: settingsManager,
+	}
+}
+
+func (s *DBPersistedConfigStore) Load(key string) (string, error) {
+	settings := s.settingsManager.GetSettings()
+	if key == "auto_routing_config" && settings.AutoRoutingConfig != "" {
+		return settings.AutoRoutingConfig, nil
+	}
+	return "", nil
+}
+
+func (s *DBPersistedConfigStore) Save(key string, value string) error {
+	return s.settingsManager.UpdateSettings(map[string]any{key: value})
 }
 
 type ConfigManager struct {
