@@ -1,8 +1,17 @@
 <script setup lang="ts">
-import { type MenuOption } from "naive-ui";
+import { type MenuOption, NIcon } from "naive-ui";
 import { computed, h, watch } from "vue";
 import { RouterLink, useRoute } from "vue-router";
 import { useI18n } from "vue-i18n";
+import {
+  Home,
+  Key,
+  DocumentText,
+  GitBranch,
+  Folder,
+  Sync,
+  Settings,
+} from "@vicons/ionicons5";
 
 const { t } = useI18n();
 
@@ -17,13 +26,13 @@ const emit = defineEmits(["close"]);
 
 const menuOptions = computed<MenuOption[]>(() => {
   const options: MenuOption[] = [
-    renderMenuItem("dashboard", t("nav.dashboard"), "📊"),
-    renderMenuItem("keys", t("nav.keys"), "🔑"),
-    renderMenuItem("logs", t("nav.logs"), "📋"),
-    renderMenuItem("auto-routing", t("nav.autoRouting"), "🔀"),
-    renderMenuItem("model-catalog", t("nav.modelCatalog"), "📁"),
-    renderMenuItem("model-dedup", t("nav.modelDedup"), "🔄"),
-    renderMenuItem("settings", t("nav.settings"), "⚙️"),
+    renderMenuItem("dashboard", t("nav.dashboard"), Home),
+    renderMenuItem("keys", t("nav.keys"), Key),
+    renderMenuItem("logs", t("nav.logs"), DocumentText),
+    renderMenuItem("auto-routing", t("nav.autoRouting"), GitBranch),
+    renderMenuItem("model-catalog", t("nav.modelCatalog"), Folder),
+    renderMenuItem("model-dedup", t("nav.modelDedup"), Sync),
+    renderMenuItem("settings", t("nav.settings"), Settings),
   ];
 
   return options;
@@ -38,7 +47,7 @@ watch(activeMenu, () => {
   }
 });
 
-function renderMenuItem(key: string, label: string, icon: string): MenuOption {
+function renderMenuItem(key: string, label: string, icon: any): MenuOption {
   return {
     label: () =>
       h(
@@ -51,7 +60,11 @@ function renderMenuItem(key: string, label: string, icon: string): MenuOption {
         },
         {
           default: () => [
-            h("span", { class: "nav-item-icon" }, icon),
+            h(
+              NIcon,
+              { size: 16, class: "nav-item-icon" },
+              () => h(icon)
+            ),
             h("span", { class: "nav-item-text" }, label),
           ],
         }
@@ -63,51 +76,61 @@ function renderMenuItem(key: string, label: string, icon: string): MenuOption {
 
 <template>
   <div>
-    <n-menu :mode="mode" :options="menuOptions" :value="activeMenu" class="modern-menu" />
+    <n-menu
+      :mode="mode"
+      :options="menuOptions"
+      :value="activeMenu"
+      :indent="18"
+      class="compact-menu"
+    />
   </div>
 </template>
 
 <style scoped>
-:deep(.nav-menu-item) {
+.compact-menu :deep(.n-menu-item-content) {
+  padding: 0 10px !important;
+  height: 34px;
+  margin: 2px 3px;
+}
+
+.compact-menu :deep(.nav-menu-item) {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   text-decoration: none;
   color: inherit;
-  padding: 8px;
-  border-radius: var(--border-radius-md);
+  font-size: 12px;
   transition: all 0.2s ease;
-  font-weight: 500;
 }
 
-:deep(.n-menu-item) {
-  border-radius: var(--border-radius-md);
+.compact-menu :deep(.n-menu-item) {
+  border-radius: 6px;
 }
 
-:deep(.n-menu--vertical .n-menu-item-content) {
-  justify-content: center;
+.compact-menu :deep(.n-menu--vertical .n-menu-item-content) {
+  justify-content: flex-start;
+  padding: 0 16px !important;
 }
 
-:deep(.n-menu--vertical .n-menu-item) {
-  margin: 4px 8px;
-}
-
-:deep(.n-menu-item:hover) {
+.compact-menu :deep(.n-menu-item:hover) {
   background: rgba(102, 126, 234, 0.1);
-  transform: translateY(-1px);
-  border-radius: var(--border-radius-md);
 }
 
-:deep(.n-menu-item--selected) {
+.compact-menu :deep(.n-menu-item--selected) {
   background: var(--primary-gradient);
   color: white;
-  font-weight: 600;
-  box-shadow: var(--shadow-md);
-  border-radius: var(--border-radius-md);
 }
 
-:deep(.n-menu-item--selected:hover) {
+.compact-menu :deep(.n-menu-item--selected:hover) {
   background: linear-gradient(135deg, #5a6fd8 0%, #6a4190 100%);
-  transform: translateY(-1px);
+}
+
+.compact-menu :deep(.n-menu-item-content-header) {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-color-3);
+  padding: 8px 16px 4px;
 }
 </style>
