@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"fmt"
 	app_errors "autogateway/internal/errors"
 	"autogateway/internal/models"
@@ -106,7 +107,23 @@ func (s *Server) AddMultipleKeys(c *gin.Context) {
 		return
 	}
 
+	// 添加 key 后,若该分组的上游模型列表为空,异步拉取一次以填充缓存.
+	if result != nil && result.AddedCount > 0 {
+		s.tryRefreshModelsAsync(req.GroupID)
+	}
+
 	response.Success(c, result)
+}
+
+// tryRefreshModelsAsync 启动一个后台 goroutine 拉取上游模型列表.
+// 失败/超时静默,只在 service 层判定是否需要执行.
+func (s *Server) tryRefreshModelsAsync(groupID uint) {
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		// MaybeRefreshAvailableModels 内部判断:仅 standard + available_models 为空才真正拉取
+		_ = s.GroupService.MaybeRefreshAvailableModels(ctx, groupID)
+	}()
 }
 
 // AddMultipleKeysAsync handles creating new keys from a text block or file within a specific group.

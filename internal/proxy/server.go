@@ -57,6 +57,21 @@ func NewProxyServer(
 	}, nil
 }
 
+// extractRequestedModel 从请求体中粗解析 "model" 字段;OpenAI/Anthropic/Gemini 三种 channel 都用这个字段.
+// 解析失败或不存在 → 返回空字符串(等价于不做模型过滤).
+func extractRequestedModel(body []byte) string {
+	if len(body) == 0 {
+		return ""
+	}
+	var probe struct {
+		Model string `json:"model"`
+	}
+	if err := json.Unmarshal(body, &probe); err != nil {
+		return ""
+	}
+	return probe.Model
+}
+
 // HandleProxy is the main entry point for proxy requests, refactored based on the stable .bak logic.
 func (ps *ProxyServer) HandleProxy(c *gin.Context) {
 	startTime := time.Now()
@@ -68,11 +83,23 @@ func (ps *ProxyServer) HandleProxy(c *gin.Context) {
 		return
 	}
 
-	// Select sub-group if this is an aggregate group
-	subGroupName, err := ps.subGroupManager.SelectSubGroup(originalGroup)
+	// 先读 body 一次,以便:(1) 模型感知的子分组路由,(2) 后续 applyParamOverrides 复用.
+	// 中间件可能已经读过 body 并 Restore (如 autoroute),所以 c.Request.Body 总是可读.
+	bodyBytes, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		logrus.Errorf("Failed to read request body: %v", err)
+		response.Error(c, app_errors.NewAPIError(app_errors.ErrBadRequest, "Failed to read request body"))
+		return
+	}
+	c.Request.Body.Close()
+	requestedModel := extractRequestedModel(bodyBytes)
+
+	// 模型感知的 sub-group 选择(聚合分组才走;请求 model 为空时退化为普通 SWRR)
+	subGroupName, err := ps.subGroupManager.SelectSubGroupForModel(originalGroup, requestedModel)
 	if err != nil {
 		logrus.WithFields(logrus.Fields{
 			"aggregate_group": originalGroup.Name,
+			"requested_model": requestedModel,
 			"error":           err,
 		}).Error("Failed to select sub-group from aggregate")
 		response.Error(c, app_errors.NewAPIError(app_errors.ErrNoKeysAvailable, "No available sub-groups"))
@@ -93,14 +120,6 @@ func (ps *ProxyServer) HandleProxy(c *gin.Context) {
 		response.Error(c, app_errors.NewAPIError(app_errors.ErrInternalServer, fmt.Sprintf("Failed to get channel for group '%s': %v", groupName, err)))
 		return
 	}
-
-	bodyBytes, err := io.ReadAll(c.Request.Body)
-	if err != nil {
-		logrus.Errorf("Failed to read request body: %v", err)
-		response.Error(c, app_errors.NewAPIError(app_errors.ErrBadRequest, "Failed to read request body"))
-		return
-	}
-	c.Request.Body.Close()
 
 	finalBodyBytes, err := ps.applyParamOverrides(bodyBytes, group)
 	if err != nil {

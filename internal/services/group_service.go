@@ -285,6 +285,27 @@ func (s *GroupService) ListGroups(ctx context.Context) ([]models.Group, error) {
 	return groups, nil
 }
 
+// MaybeRefreshAvailableModels 仅在该 standard 分组尚未缓存上游模型列表时触发拉取.
+// 用于"添加 key 后自动拉一次"等场景,失败静默不阻断主流程.
+func (s *GroupService) MaybeRefreshAvailableModels(ctx context.Context, groupID uint) error {
+	var group models.Group
+	if err := s.db.WithContext(ctx).First(&group, groupID).Error; err != nil {
+		return err
+	}
+	if group.GroupType != "standard" {
+		return nil
+	}
+	// 已缓存(非空 JSON 数组)就跳过;空字符串 / "[]" / nil 视为未缓存.
+	if len(group.AvailableModels) > 2 {
+		return nil
+	}
+	_, err := s.RefreshAvailableModels(ctx, groupID)
+	if err != nil {
+		logrus.WithError(err).Debugf("MaybeRefreshAvailableModels skipped for group %d", groupID)
+	}
+	return err
+}
+
 // RefreshAvailableModels 拉取分组对应上游的真实模型列表并缓存到 group.AvailableModels.
 // 仅 standard 分组有意义;聚合分组无独立 upstream,直接报错.
 func (s *GroupService) RefreshAvailableModels(ctx context.Context, groupID uint) ([]string, error) {
