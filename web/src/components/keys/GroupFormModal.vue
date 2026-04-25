@@ -3,7 +3,7 @@ import { getGroupList } from "@/api/dashboard";
 import { keysApi } from "@/api/keys";
 import { settingsApi } from "@/api/settings";
 import ProxyKeysInput from "@/components/common/ProxyKeysInput.vue";
-import { FREE_PROVIDERS, findProviderByUpstreams, type FreeProvider } from "@/data/freeProviders";
+import { FREE_PROVIDERS, findFreeModel, findProviderByUpstreams, type FreeProvider, type ModelTier } from "@/data/freeProviders";
 import type { Group, GroupConfigOption, UpstreamInfo } from "@/types/models";
 import { Add, Close, HelpCircleOutline, OpenOutline, RefreshOutline, Remove, RocketOutline } from "@vicons/ionicons5";
 import {
@@ -11,6 +11,7 @@ import {
   NCard,
   NCollapse,
   NCollapseItem,
+  NEmpty,
   NForm,
   NFormItem,
   NIcon,
@@ -131,6 +132,59 @@ const usedProviderIds = ref<Set<string>>(new Set());
 const availableModels = ref<string[]>([]);
 const modelsRefreshLoading = ref(false);
 const modelsRefreshedAt = ref<string | null>(null);
+const modelsListExpanded = ref<string[]>([]);
+const modelsListSearch = ref("");
+
+const filteredAvailableModels = computed(() => {
+  const q = modelsListSearch.value.trim().toLowerCase();
+  const list = availableModels.value.filter((m) => !q || m.toLowerCase().includes(q));
+  // 免费在前 + 按 id 排序
+  return list.sort((a, b) => {
+    const fa = !!findFreeModel(a);
+    const fb = !!findFreeModel(b);
+    if (fa !== fb) return fa ? -1 : 1;
+    return a.localeCompare(b);
+  });
+});
+
+function tierTagType(tier?: ModelTier): "success" | "warning" | "error" | "default" {
+  switch (tier) {
+    case "fast": return "success";
+    case "balanced": return "warning";
+    case "max": return "error";
+    default: return "default";
+  }
+}
+
+function tierLabel(tier?: ModelTier): string {
+  if (!tier) return "";
+  return t(`modelcatalog.tier${tier.charAt(0).toUpperCase() + tier.slice(1)}`);
+}
+
+function refreshedAtDisplay(iso: string | null): string {
+  if (!iso) return "";
+  try {
+    return new Date(iso).toLocaleString();
+  } catch {
+    return iso;
+  }
+}
+
+async function copyModelId(modelId: string) {
+  try {
+    await navigator.clipboard.writeText(modelId);
+    message.success(t("keys.modelIdCopied"));
+  } catch {
+    message.error(t("common.requestFailed"));
+  }
+}
+
+function setAsTestModel(modelId: string) {
+  formData.test_model = modelId;
+  if (!props.group) userModifiedFields.value.test_model = true;
+  message.success(t("keys.setAsTestModelSuccess", { model: modelId }));
+}
+
 const testModelOptions = computed(() => {
   // 合并 freeProviders 内置示例(用于新建尚未拉取时给点提示) + 真实拉取
   const merged = new Set<string>();
@@ -472,6 +526,7 @@ async function refreshModels() {
     const list = (result.data?.models || []) as string[];
     availableModels.value = list;
     modelsRefreshedAt.value = new Date().toISOString();
+    if (list.length > 0) modelsListExpanded.value = ["models"];
     message.success(t("keys.refreshModelsSuccess", { n: list.length }));
   } catch (e) {
     message.error((e as Error).message);
@@ -988,6 +1043,92 @@ async function handleSubmit() {
           </n-form-item>
         </div>
 
+        <!-- Upstream available models -->
+        <div class="form-section upstream-models-section" style="margin-top: 10px">
+          <n-collapse v-model:expanded-names="modelsListExpanded">
+            <n-collapse-item name="models">
+              <template #header>
+                <div class="upstream-models-header">
+                  <span class="section-title" style="margin: 0; padding: 0; border: none">
+                    {{ t("keys.upstreamModelsList") }}
+                  </span>
+                  <n-tag size="tiny" type="info" :bordered="false">
+                    {{ availableModels.length }}
+                  </n-tag>
+                  <span v-if="modelsRefreshedAt" class="hint" style="margin-left: 8px">
+                    {{ t("keys.lastRefreshed", { at: refreshedAtDisplay(modelsRefreshedAt) }) }}
+                  </span>
+                </div>
+              </template>
+
+              <div v-if="availableModels.length === 0" class="empty-models-hint">
+                <n-empty
+                  size="small"
+                  :description="props.group ? t('keys.upstreamModelsEmpty') : t('keys.refreshModelsRequiresSave')"
+                />
+              </div>
+
+              <template v-else>
+                <div class="models-toolbar">
+                  <n-input
+                    v-model:value="modelsListSearch"
+                    :placeholder="t('keys.searchModelPlaceholder')"
+                    clearable
+                    style="width: 240px"
+                  />
+                  <n-button
+                    size="small"
+                    :loading="modelsRefreshLoading"
+                    :disabled="!props.group"
+                    @click="refreshModels"
+                  >
+                    <template #icon>
+                      <n-icon :component="RefreshOutline" />
+                    </template>
+                    {{ t("common.refresh") }}
+                  </n-button>
+                </div>
+
+                <div class="models-grid">
+                  <div
+                    v-for="m in filteredAvailableModels"
+                    :key="m"
+                    class="model-item"
+                  >
+                    <div class="model-item-main">
+                      <span class="model-item-id">{{ m }}</span>
+                      <n-tag
+                        v-if="findFreeModel(m)"
+                        size="tiny"
+                        type="success"
+                        :bordered="false"
+                      >
+                        🆓 {{ t("modelcatalog.freeTag") }}
+                      </n-tag>
+                      <n-tag
+                        v-if="findFreeModel(m)?.tier"
+                        size="tiny"
+                        :type="tierTagType(findFreeModel(m)?.tier)"
+                        :bordered="false"
+                      >
+                        {{ tierLabel(findFreeModel(m)?.tier) }}
+                      </n-tag>
+                    </div>
+                    <div class="model-item-actions">
+                      <n-button size="tiny" text @click="copyModelId(m)">
+                        {{ t("common.copy") }}
+                      </n-button>
+                      <n-button size="tiny" text type="primary" @click="setAsTestModel(m)">
+                        {{ t("keys.setAsTestModel") }}
+                      </n-button>
+                    </div>
+                  </div>
+                </div>
+              </template>
+            </n-collapse-item>
+          </n-collapse>
+        </div>
+
         <!-- Upstream addresses -->
         <div class="form-section" style="margin-top: 10px">
           <h4 class="section-title">{{ t("keys.upstreamAddresses") }}</h4>
@@ -1480,6 +1621,84 @@ async function handleSubmit() {
   display: inline-flex;
   align-items: center;
   gap: 4px;
+}
+
+.upstream-models-section {
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 6px 12px;
+}
+
+.upstream-models-header {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.empty-models-hint {
+  padding: 12px 0 4px;
+}
+
+.models-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0 12px;
+}
+
+.models-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 6px;
+  max-height: 360px;
+  overflow-y: auto;
+  padding: 4px 2px;
+}
+
+.model-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 6px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--card-color, transparent);
+  font-size: 12px;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.model-item:hover {
+  border-color: var(--primary-color, #18a058);
+  background: var(--primary-color-suppl, rgba(24, 160, 88, 0.04));
+}
+
+.model-item-main {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  flex: 1;
+}
+
+.model-item-id {
+  font-family: monospace;
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.model-item-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.hint {
+  color: var(--text-color-3, #999);
+  font-size: 12px;
 }
 
 .provider-card-head {
