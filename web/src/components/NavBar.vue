@@ -20,6 +20,9 @@ const menuOptions = computed<MenuOption[]>(() => {
     renderMenuItem("dashboard", t("nav.dashboard"), "📊"),
     renderMenuItem("keys", t("nav.keys"), "🔑"),
     renderMenuItem("logs", t("nav.logs"), "📋"),
+    renderMenuItem("auto-routing", t("nav.autoRouting"), "🔀"),
+    renderMenuItem("model-catalog", t("nav.modelCatalog"), "📁"),
+    renderMenuItem("model-dedup", t("nav.modelDedup"), "🔄"),
     renderMenuItem("settings", t("nav.settings"), "⚙️"),
   ];
 

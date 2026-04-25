@@ -27,6 +27,21 @@ const routes: Array<RouteRecordRaw> = [
         name: "settings",
         component: () => import("@/views/Settings.vue"),
       },
+      {
+        path: "auto-routing",
+        name: "auto-routing",
+        component: () => import("@/views/AutoRouting.vue"),
+      },
+      {
+        path: "model-catalog",
+        name: "model-catalog",
+        component: () => import("@/views/ModelCatalog.vue"),
+      },
+      {
+        path: "model-dedup",
+        name: "model-dedup",
+        component: () => import("@/views/ModelDedup.vue"),
+      },
     ],
   },
   {
