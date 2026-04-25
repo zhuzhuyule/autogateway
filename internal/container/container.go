@@ -105,7 +105,10 @@ func BuildContainer() (*dig.Container, error) {
 	}
 
 	// Auto Route
-	if err := container.Provide(autoroute.NewConfigManager); err != nil {
+	if err := container.Provide(func(settingsManager *config.SystemSettingsManager) *autoroute.ConfigManager {
+		store := autoroute.NewDBPersistedConfigStore(settingsManager)
+		return autoroute.NewConfigManager(store)
+	}); err != nil {
 		return nil, err
 	}
 
