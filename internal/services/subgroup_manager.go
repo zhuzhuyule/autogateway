@@ -44,6 +44,15 @@ func (m *SubGroupManager) SelectSubGroup(group *models.Group) (string, error) {
 // SelectSubGroupForModel 在 SelectSubGroup 基础上加一层"必须包含 requestedModel"的过滤.
 // requestedModel 为空 → 等同 SelectSubGroup. 过滤后无候选 → 退化到全量(graceful degrade).
 func (m *SubGroupManager) SelectSubGroupForModel(group *models.Group, requestedModel string) (string, error) {
+	return m.SelectSubGroupForModelExcluding(group, requestedModel, nil)
+}
+
+// SelectSubGroupForModelExcluding 与 SelectSubGroupForModel 类似,但额外排除 attempted 集合中的子分组.
+// 用于聚合 failover: 上一个子分组刚耗尽配额/全部失败,应跳到下一个候选.
+// 全部子分组都被排除时返回 ""(调用方据此结束 failover).
+func (m *SubGroupManager) SelectSubGroupForModelExcluding(
+	group *models.Group, requestedModel string, attempted map[string]bool,
+) (string, error) {
 	if group.GroupType != "aggregate" {
 		return "", nil
 	}
@@ -53,7 +62,7 @@ func (m *SubGroupManager) SelectSubGroupForModel(group *models.Group, requestedM
 		return "", fmt.Errorf("no valid sub-groups available for aggregate group '%s'", group.Name)
 	}
 
-	selectedName := selector.selectNextForModel(requestedModel)
+	selectedName := selector.selectNextForModelExcluding(requestedModel, attempted)
 	if selectedName == "" {
 		return "", fmt.Errorf("no sub-groups with active keys for aggregate group '%s'", group.Name)
 	}
@@ -62,6 +71,7 @@ func (m *SubGroupManager) SelectSubGroupForModel(group *models.Group, requestedM
 		"aggregate_group": group.Name,
 		"selected_group":  selectedName,
 		"requested_model": requestedModel,
+		"excluded":        len(attempted),
 	}).Debug("Selected sub-group from aggregate")
 
 	return selectedName, nil
@@ -197,6 +207,11 @@ func (s *selector) selectNext() string {
 // selectNextForModel 基于 SWRR 选可用子分组,可选按 requestedModel 过滤.
 // 若按 model 过滤后无候选(可能因为 available_models 还没缓存),退化到不过滤的 SWRR.
 func (s *selector) selectNextForModel(requestedModel string) string {
+	return s.selectNextForModelExcluding(requestedModel, nil)
+}
+
+// selectNextForModelExcluding 在 selectNextForModel 基础上排除 attempted 集合中的子分组(按 name).
+func (s *selector) selectNextForModelExcluding(requestedModel string, attempted map[string]bool) string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -204,26 +219,32 @@ func (s *selector) selectNextForModel(requestedModel string) string {
 		return ""
 	}
 
+	notAttempted := func(it *subGroupItem) bool {
+		return !attempted[it.name]
+	}
+
 	// 第一遍: 严格按 model 过滤(只考虑 hasModelsCache 且包含 model 的子分组,
 	// 以及尚未拉取过 model 列表的 sub-group——它们的能力未知,先给它们一次机会)
 	if requestedModel != "" {
 		if name := s.selectAmong(func(it *subGroupItem) bool {
+			if !notAttempted(it) {
+				return false
+			}
 			if !it.hasModelsCache {
-				return true // 未知,允许尝试
+				return true
 			}
 			_, ok := it.availableModels[requestedModel]
 			return ok
 		}); name != "" {
 			return name
 		}
-		// 严格过滤无候选 → 优雅降级走全量
 		logrus.WithFields(logrus.Fields{
 			"aggregate_group": s.groupName,
 			"requested_model": requestedModel,
 		}).Debug("No sub-group matched requested model, falling back to full SWRR")
 	}
 
-	return s.selectAmong(func(_ *subGroupItem) bool { return true })
+	return s.selectAmong(notAttempted)
 }
 
 // selectAmong 在 SWRR 之上按 predicate 过滤,直到选到有 active keys 的子分组.

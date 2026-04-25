@@ -129,10 +129,18 @@ func (ps *ProxyServer) HandleProxy(c *gin.Context) {
 
 	isStream := channelHandler.IsStreamRequest(c, bodyBytes)
 
-	ps.executeRequestWithRetry(c, channelHandler, originalGroup, group, finalBodyBytes, isStream, startTime, 0)
+	// 聚合分组的 failover 状态:已尝试过的子分组(防止重复)
+	attemptedSubGroups := make(map[string]bool)
+	if originalGroup.GroupType == "aggregate" && group != originalGroup {
+		attemptedSubGroups[group.Name] = true
+	}
+
+	ps.executeRequestWithRetry(c, channelHandler, originalGroup, group, finalBodyBytes, isStream, startTime, 0, attemptedSubGroups, requestedModel)
 }
 
 // executeRequestWithRetry is the core recursive function for handling requests and retries.
+// attemptedSubGroups 在聚合分组场景下记录已经尝试过的子分组,用于跨子分组 failover.
+// requestedModel 在切换到下一个子分组时仍按 model 过滤候选.
 func (ps *ProxyServer) executeRequestWithRetry(
 	c *gin.Context,
 	channelHandler channel.ChannelProxy,
@@ -142,6 +150,8 @@ func (ps *ProxyServer) executeRequestWithRetry(
 	isStream bool,
 	startTime time.Time,
 	retryCount int,
+	attemptedSubGroups map[string]bool,
+	requestedModel string,
 ) {
 	cfg := group.EffectiveConfig
 
@@ -254,8 +264,44 @@ func (ps *ProxyServer) executeRequestWithRetry(
 		// 使用解析后的错误信息更新密钥状态
 		ps.keyProvider.UpdateStatus(apiKey, group, false, parsedError)
 
+		// 当前子分组的 retry 用尽后,如果是聚合分组,尝试切换到下一个候选子分组(跨 sub-group failover)
+		subGroupExhausted := retryCount >= cfg.MaxRetries
+		canFailover := subGroupExhausted &&
+			originalGroup.GroupType == "aggregate" &&
+			!c.Writer.Written() // 已经向客户端写过数据(stream first byte)就不能再切
+
+		if canFailover {
+			if attemptedSubGroups == nil {
+				attemptedSubGroups = make(map[string]bool)
+			}
+			attemptedSubGroups[group.Name] = true
+			nextName, selErr := ps.subGroupManager.SelectSubGroupForModelExcluding(originalGroup, requestedModel, attemptedSubGroups)
+			if selErr == nil && nextName != "" && nextName != group.Name {
+				if nextGroup, ge := ps.groupManager.GetGroupByName(nextName); ge == nil && nextGroup != nil {
+					if nextChannel, ce := ps.channelFactory.GetChannel(nextGroup); ce == nil {
+						logrus.WithFields(logrus.Fields{
+							"aggregate_group": originalGroup.Name,
+							"from_sub_group":  group.Name,
+							"to_sub_group":    nextName,
+							"requested_model": requestedModel,
+							"reason":          parsedError,
+						}).Info("Aggregate failover: switching sub-group")
+						// 该子分组的失败也算一次最终,但请求整体继续
+						ps.logRequest(c, originalGroup, group, apiKey, startTime, statusCode, errors.New(parsedError), isStream, upstreamURL, channelHandler, bodyBytes, models.RequestTypeRetry)
+						// 重新做 param overrides(不同子分组可能有不同 overrides)
+						nextBody, oerr := ps.applyParamOverrides(bodyBytes, nextGroup)
+						if oerr != nil {
+							nextBody = bodyBytes
+						}
+						ps.executeRequestWithRetry(c, nextChannel, originalGroup, nextGroup, nextBody, isStream, startTime, 0, attemptedSubGroups, requestedModel)
+						return
+					}
+				}
+			}
+		}
+
 		// 判断是否为最后一次尝试
-		isLastAttempt := retryCount >= cfg.MaxRetries
+		isLastAttempt := subGroupExhausted
 		requestType := models.RequestTypeRetry
 		if isLastAttempt {
 			requestType = models.RequestTypeFinal
@@ -263,7 +309,7 @@ func (ps *ProxyServer) executeRequestWithRetry(
 
 		ps.logRequest(c, originalGroup, group, apiKey, startTime, statusCode, errors.New(parsedError), isStream, upstreamURL, channelHandler, bodyBytes, requestType)
 
-		// 如果是最后一次尝试，直接返回错误，不再递归
+		// 如果是最后一次尝试,直接返回错误,不再递归
 		if isLastAttempt {
 			var errorJSON map[string]any
 			if err := json.Unmarshal([]byte(errorMessage), &errorJSON); err == nil {
@@ -274,7 +320,7 @@ func (ps *ProxyServer) executeRequestWithRetry(
 			return
 		}
 
-		ps.executeRequestWithRetry(c, channelHandler, originalGroup, group, bodyBytes, isStream, startTime, retryCount+1)
+		ps.executeRequestWithRetry(c, channelHandler, originalGroup, group, bodyBytes, isStream, startTime, retryCount+1, attemptedSubGroups, requestedModel)
 		return
 	}
 
