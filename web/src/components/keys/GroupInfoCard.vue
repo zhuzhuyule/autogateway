@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { keysApi } from "@/api/keys";
+import { findFreeModel, type ModelTier } from "@/data/freeProviders";
 import type {
   Group,
   GroupConfigOption,
@@ -10,13 +11,14 @@ import type {
 import { appState } from "@/utils/app-state";
 import { copy } from "@/utils/clipboard";
 import { getGroupDisplayName, maskProxyKeys } from "@/utils/display";
-import { CopyOutline, EyeOffOutline, EyeOutline, Pencil, Trash } from "@vicons/ionicons5";
+import { CopyOutline, EyeOffOutline, EyeOutline, Pencil, RefreshOutline, Trash } from "@vicons/ionicons5";
 import {
   NButton,
   NButtonGroup,
   NCard,
   NCollapse,
   NCollapseItem,
+  NEmpty,
   NForm,
   NFormItem,
   NGrid,
@@ -27,6 +29,7 @@ import {
   NTag,
   NTooltip,
   useDialog,
+  useMessage,
 } from "naive-ui";
 import { computed, h, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
@@ -56,6 +59,134 @@ const emit = defineEmits<Emits>();
 const stats = ref<GroupStatsResponse | null>(null);
 const loading = ref(false);
 const dialog = useDialog();
+const message = useMessage();
+
+// 上游模型(只读浏览)
+const modelsExpanded = ref<string[]>([]);
+const modelsSearch = ref("");
+const modelsRefreshLoading = ref(false);
+
+// 解析 group.available_models (后端返回 datatypes.JSON,前端可能是 array 或 string)
+function parseAvailable(raw: unknown): string[] {
+  if (Array.isArray(raw)) {
+    return raw.filter((m): m is string => typeof m === "string");
+  }
+  if (typeof raw === "string" && raw.trim().length > 0) {
+    try {
+      const arr = JSON.parse(raw);
+      return Array.isArray(arr) ? arr.filter((m): m is string => typeof m === "string") : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
+const groupAvailableModels = computed<string[]>(() => {
+  if (!props.group) return [];
+  return parseAvailable((props.group as unknown as { available_models?: unknown }).available_models);
+});
+
+const filteredGroupModels = computed<string[]>(() => {
+  const q = modelsSearch.value.trim().toLowerCase();
+  return groupAvailableModels.value
+    .filter((m) => !q || m.toLowerCase().includes(q))
+    .slice()
+    .sort((a, b) => {
+      const fa = !!findFreeModel(a);
+      const fb = !!findFreeModel(b);
+      if (fa !== fb) return fa ? -1 : 1;
+      return a.localeCompare(b);
+    });
+});
+
+// 聚合分组: 各子分组贡献的模型并集 + 来源
+interface AggregatedModel {
+  modelId: string;
+  providers: string[]; // 子分组 displayName 或 name
+}
+const aggregateModels = computed<AggregatedModel[]>(() => {
+  if (!props.subGroups || props.subGroups.length === 0) return [];
+  const map = new Map<string, Set<string>>();
+  for (const sg of props.subGroups) {
+    const list = parseAvailable((sg.group as unknown as { available_models?: unknown }).available_models);
+    const label = sg.group.display_name || sg.group.name;
+    for (const m of list) {
+      if (!map.has(m)) map.set(m, new Set());
+      map.get(m)!.add(label);
+    }
+  }
+  return Array.from(map.entries()).map(([modelId, set]) => ({
+    modelId,
+    providers: Array.from(set),
+  }));
+});
+
+const filteredAggregateModels = computed<AggregatedModel[]>(() => {
+  const q = modelsSearch.value.trim().toLowerCase();
+  return aggregateModels.value
+    .filter((r) => !q || r.modelId.toLowerCase().includes(q))
+    .slice()
+    .sort((a, b) => {
+      const fa = !!findFreeModel(a.modelId);
+      const fb = !!findFreeModel(b.modelId);
+      if (fa !== fb) return fa ? -1 : 1;
+      return a.modelId.localeCompare(b.modelId);
+    });
+});
+
+const modelsRefreshedAtDisplay = computed(() => {
+  const at = (props.group as unknown as { models_refreshed_at?: string | null })?.models_refreshed_at;
+  if (!at) return "";
+  try {
+    return new Date(at).toLocaleString();
+  } catch {
+    return at;
+  }
+});
+
+function tierTagType(tier?: ModelTier): "success" | "warning" | "error" | "default" {
+  switch (tier) {
+    case "fast": return "success";
+    case "balanced": return "warning";
+    case "max": return "error";
+    default: return "default";
+  }
+}
+function tierLabel(tier?: ModelTier): string {
+  if (!tier) return "";
+  return t(`modelcatalog.tier${tier.charAt(0).toUpperCase() + tier.slice(1)}`);
+}
+
+async function refreshGroupModels() {
+  if (!props.group?.id) return;
+  modelsRefreshLoading.value = true;
+  try {
+    const response = await fetch(`/api/groups/${props.group.id}/refresh-models`, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${localStorage.getItem("authKey") || ""}`,
+        "Content-Type": "application/json",
+      },
+    });
+    const result = await response.json();
+    if (!response.ok || result.code !== 0) {
+      throw new Error(result.message || `HTTP ${response.status}`);
+    }
+    const list = (result.data?.models || []) as string[];
+    message.success(t("keys.refreshModelsSuccess", { n: list.length }));
+    emit("refresh", props.group);
+  } catch (e) {
+    message.error((e as Error).message);
+  } finally {
+    modelsRefreshLoading.value = false;
+  }
+}
+
+async function copyModelId(id: string) {
+  await copy(id);
+  message.success(t("keys.modelIdCopied"));
+}
 const showEditModal = ref(false);
 const showCopyModal = ref(false);
 const showAggregateEditModal = ref(false);
@@ -676,6 +807,114 @@ function resetPage() {
                 </n-form>
               </div>
 
+              <!-- 上游模型列表(标准分组) / 聚合后模型(聚合分组) -->
+              <div class="detail-section">
+                <n-collapse v-model:expanded-names="modelsExpanded">
+                  <n-collapse-item name="models">
+                    <template #header>
+                      <div class="upstream-models-header">
+                        <span class="section-title" style="margin: 0; padding: 0; border: none">
+                          {{ isAggregateGroup ? t("keys.aggregatedModelsList") : t("keys.upstreamModelsList") }}
+                        </span>
+                        <n-tag size="tiny" type="info" :bordered="false">
+                          {{ isAggregateGroup ? aggregateModels.length : groupAvailableModels.length }}
+                        </n-tag>
+                        <span v-if="!isAggregateGroup && modelsRefreshedAtDisplay" class="hint">
+                          {{ t("keys.lastRefreshed", { at: modelsRefreshedAtDisplay }) }}
+                        </span>
+                      </div>
+                    </template>
+
+                    <!-- 标准分组: 列出本分组上游模型 -->
+                    <template v-if="!isAggregateGroup">
+                      <div class="models-toolbar">
+                        <n-input
+                          v-model:value="modelsSearch"
+                          :placeholder="t('keys.searchModelPlaceholder')"
+                          clearable
+                          style="width: 240px"
+                        />
+                        <n-button size="small" :loading="modelsRefreshLoading" @click="refreshGroupModels">
+                          <template #icon>
+                            <n-icon :component="RefreshOutline" />
+                          </template>
+                          {{ t("common.refresh") }}
+                        </n-button>
+                      </div>
+                      <div v-if="filteredGroupModels.length === 0">
+                        <n-empty
+                          size="small"
+                          :description="groupAvailableModels.length === 0 ? t('keys.upstreamModelsEmpty') : t('common.noData')"
+                        />
+                      </div>
+                      <div v-else class="models-grid">
+                        <div v-for="m in filteredGroupModels" :key="m" class="model-item">
+                          <div class="model-item-main">
+                            <span class="model-item-id">{{ m }}</span>
+                            <n-tag v-if="findFreeModel(m)" size="tiny" type="success" :bordered="false">
+                              🆓 {{ t("modelcatalog.freeTag") }}
+                            </n-tag>
+                            <n-tag
+                              v-if="findFreeModel(m)?.tier"
+                              size="tiny"
+                              :type="tierTagType(findFreeModel(m)?.tier)"
+                              :bordered="false"
+                            >
+                              {{ tierLabel(findFreeModel(m)?.tier) }}
+                            </n-tag>
+                          </div>
+                          <n-button size="tiny" text @click="copyModelId(m)">
+                            {{ t("common.copy") }}
+                          </n-button>
+                        </div>
+                      </div>
+                    </template>
+
+                    <!-- 聚合分组: 列出合并去重后的模型 + 各子分组来源 -->
+                    <template v-else>
+                      <div class="models-toolbar">
+                        <n-input
+                          v-model:value="modelsSearch"
+                          :placeholder="t('keys.searchModelPlaceholder')"
+                          clearable
+                          style="width: 240px"
+                        />
+                        <span class="hint">
+                          {{ t("keys.aggregatedModelsHint", { sub: subGroups?.length || 0, total: aggregateModels.length }) }}
+                        </span>
+                      </div>
+                      <div v-if="filteredAggregateModels.length === 0">
+                        <n-empty size="small" :description="t('keys.aggregatedModelsEmpty')" />
+                      </div>
+                      <div v-else class="models-grid">
+                        <div v-for="r in filteredAggregateModels" :key="r.modelId" class="model-item model-item-tall">
+                          <div class="model-item-main">
+                            <span class="model-item-id">{{ r.modelId }}</span>
+                            <n-tag v-if="findFreeModel(r.modelId)" size="tiny" type="success" :bordered="false">
+                              🆓 {{ t("modelcatalog.freeTag") }}
+                            </n-tag>
+                            <n-tag
+                              v-if="findFreeModel(r.modelId)?.tier"
+                              size="tiny"
+                              :type="tierTagType(findFreeModel(r.modelId)?.tier)"
+                              :bordered="false"
+                            >
+                              {{ tierLabel(findFreeModel(r.modelId)?.tier) }}
+                            </n-tag>
+                            <span class="model-providers">
+                              {{ r.providers.join(", ") }}
+                            </span>
+                          </div>
+                          <n-button size="tiny" text @click="copyModelId(r.modelId)">
+                            {{ t("common.copy") }}
+                          </n-button>
+                        </div>
+                      </div>
+                    </template>
+                  </n-collapse-item>
+                </n-collapse>
+              </div>
+
               <!-- 标准分组才显示高级配置 -->
               <div class="detail-section" v-if="!isAggregateGroup && hasAdvancedConfig">
                 <h4 class="section-title">{{ t("keys.advancedConfig") }}</h4>
@@ -888,6 +1127,70 @@ function resetPage() {
   margin: 0 0 12px 0;
   padding-bottom: 8px;
   border-bottom: 2px solid var(--border-color);
+}
+
+.upstream-models-header {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.models-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0 12px;
+  flex-wrap: wrap;
+}
+
+.models-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 6px;
+  max-height: 360px;
+  overflow-y: auto;
+  padding: 4px 2px;
+}
+
+.model-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 6px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+.model-item-tall {
+  align-items: flex-start;
+}
+
+.model-item-main {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  min-width: 0;
+  flex: 1;
+}
+
+.model-item-id {
+  font-family: monospace;
+  font-size: 12px;
+}
+
+.model-providers {
+  flex-basis: 100%;
+  color: var(--text-color-3, #999);
+  font-size: 11px;
+  margin-top: 2px;
+}
+
+.hint {
+  color: var(--text-color-3, #999);
+  font-size: 12px;
 }
 
 

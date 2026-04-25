@@ -256,6 +256,9 @@ export default {
     setAsTestModel: "Use as test model",
     setAsTestModelSuccess: "{model} set as test model",
     modelIdCopied: "Model ID copied",
+    aggregatedModelsList: "Aggregated models (deduplicated)",
+    aggregatedModelsHint: "{sub} sub-groups · {total} unique models",
+    aggregatedModelsEmpty: "Sub-groups have no cached model lists. Refresh in each sub-group first.",
     displayName: "Display Name",
     channelType: "Channel Type",
     sortOrder: "Sort Order",
@@ -697,6 +700,7 @@ export default {
     selectModelPlaceholder: "Pick a model (searchable, custom typing allowed)",
     autoFilledFromCatalog: "Groups auto-filled from catalog",
     modelGroupsHint: "This model is served by: {groups}",
+    modelsSuffix: "models",
   },
   modelcatalog: {
     title: "Model Catalog",

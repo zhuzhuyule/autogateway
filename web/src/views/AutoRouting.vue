@@ -194,17 +194,56 @@ async function fetchConfig() {
   }
 }
 
+interface GroupRow {
+  name: string;
+  display_name?: string;
+  available_models?: unknown;
+}
+const groupModelMap = ref<Record<string, string[]>>({});
+
+function parseModels(raw: unknown): string[] {
+  if (Array.isArray(raw)) return raw.filter((m): m is string => typeof m === "string");
+  if (typeof raw === "string" && raw.trim().length > 0) {
+    try {
+      const arr = JSON.parse(raw);
+      return Array.isArray(arr) ? arr.filter((m): m is string => typeof m === "string") : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
 async function fetchGroups() {
   try {
     const response = await getGroupList();
-    const list = (response as unknown as { data: Array<{ name: string; display_name?: string }> }).data || [];
-    groupOptions.value = list.map((g) => ({
-      label: g.display_name ? `${g.display_name} (${g.name})` : g.name,
-      value: g.name,
-    }));
+    const list = (response as unknown as { data: GroupRow[] }).data || [];
+    const map: Record<string, string[]> = {};
+    groupOptions.value = list.map((g) => {
+      const models = parseModels(g.available_models);
+      map[g.name] = models;
+      const display = g.display_name ? `${g.display_name} (${g.name})` : g.name;
+      const suffix = models.length > 0
+        ? ` · ${models.length} ${t("autoroute.modelsSuffix")}`
+        : "";
+      return {
+        label: display + suffix,
+        value: g.name,
+      };
+    });
+    groupModelMap.value = map;
   } catch {
     // 拉取失败时退化为可手填(tag mode)
   }
+}
+
+function groupModelHint(groupName: string | null | undefined, max = 3): string {
+  if (!groupName) return "";
+  const models = groupModelMap.value[groupName] || [];
+  if (models.length === 0) return "";
+  const sample = models.slice(0, max).join(", ");
+  const more = models.length > max ? ` +${models.length - max}` : "";
+  return `${sample}${more}`;
 }
 
 async function handleSubmit() {
@@ -418,6 +457,20 @@ function levelTagType(level?: string) {
                 {{ t("common.delete") }}
               </n-button>
             </n-space>
+            <div class="mapping-hints">
+              <div v-if="groupModelHint(mapping.simple_group)" class="mapping-hint">
+                <n-tag size="tiny" type="success" :bordered="false">simple</n-tag>
+                <span class="mapping-hint-text">{{ groupModelHint(mapping.simple_group) }}</span>
+              </div>
+              <div v-if="groupModelHint(mapping.medium_group)" class="mapping-hint">
+                <n-tag size="tiny" type="warning" :bordered="false">medium</n-tag>
+                <span class="mapping-hint-text">{{ groupModelHint(mapping.medium_group) }}</span>
+              </div>
+              <div v-if="groupModelHint(mapping.complex_group)" class="mapping-hint">
+                <n-tag size="tiny" type="error" :bordered="false">complex</n-tag>
+                <span class="mapping-hint-text">{{ groupModelHint(mapping.complex_group) }}</span>
+              </div>
+            </div>
           </div>
         </div>
         <n-empty v-else :description="t('autoroute.noMappings')" />
@@ -562,6 +615,26 @@ function levelTagType(level?: string) {
 </template>
 
 <style scoped>
+.mapping-hints {
+  margin: 4px 0 0 168px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text-color-3, #999);
+}
+
+.mapping-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.mapping-hint-text {
+  font-family: monospace;
+  font-size: 11px;
+}
+
 .mapping-item {
   padding: 8px 0;
   border-bottom: 1px solid var(--border-color);

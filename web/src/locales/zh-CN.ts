@@ -252,6 +252,9 @@ export default {
     setAsTestModel: "设为测试模型",
     setAsTestModelSuccess: "已将 {model} 设为测试模型",
     modelIdCopied: "模型 ID 已复制",
+    aggregatedModelsList: "聚合后可用模型(去重)",
+    aggregatedModelsHint: "{sub} 个子分组,合计去重 {total} 个模型",
+    aggregatedModelsEmpty: "子分组尚未拉取过模型列表,请先在子分组中刷新",
     displayName: "显示名称",
     channelType: "渠道类型",
     sortOrder: "排序",
@@ -680,6 +683,7 @@ export default {
     selectModelPlaceholder: "选择模型 (可搜索/手填)",
     autoFilledFromCatalog: "已根据模型目录自动填充分组",
     modelGroupsHint: "该模型在以下分组提供: {groups}",
+    modelsSuffix: "个模型",
   },
   modelcatalog: {
     title: "模型目录",

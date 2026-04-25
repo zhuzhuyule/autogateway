@@ -255,6 +255,9 @@ export default {
     setAsTestModel: "テストモデルに設定",
     setAsTestModelSuccess: "{model} をテストモデルに設定しました",
     modelIdCopied: "モデル ID をコピーしました",
+    aggregatedModelsList: "集約後の利用可能モデル(重複排除)",
+    aggregatedModelsHint: "{sub} サブグループ · 重複排除後 {total} モデル",
+    aggregatedModelsEmpty: "サブグループにモデル一覧のキャッシュがありません。先にサブグループで更新してください",
     displayName: "表示名",
     channelType: "チャンネルタイプ",
     sortOrder: "並び順",
@@ -698,6 +701,7 @@ export default {
     selectModelPlaceholder: "モデルを選択 (検索/手入力可)",
     autoFilledFromCatalog: "モデルカタログから自動入力しました",
     modelGroupsHint: "このモデルを提供するグループ: {groups}",
+    modelsSuffix: "件",
   },
   modelcatalog: {
     title: "モデルカタログ",
