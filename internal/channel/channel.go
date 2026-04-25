@@ -2,7 +2,7 @@ package channel
 
 import (
 	"context"
-	"gpt-load/internal/models"
+	"autogateway/internal/models"
 	"net/http"
 	"net/url"
 

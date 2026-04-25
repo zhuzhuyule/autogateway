@@ -6,11 +6,11 @@ import (
 	"net/http"
 	"time"
 
-	"gpt-load/internal/config"
-	"gpt-load/internal/encryption"
-	"gpt-load/internal/i18n"
-	"gpt-load/internal/services"
-	"gpt-load/internal/types"
+	"autogateway/internal/config"
+	"autogateway/internal/encryption"
+	"autogateway/internal/i18n"
+	"autogateway/internal/services"
+	"autogateway/internal/types"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/dig"

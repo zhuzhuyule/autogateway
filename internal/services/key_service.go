@@ -3,9 +3,9 @@ package services
 import (
 	"encoding/json"
 	"fmt"
-	"gpt-load/internal/encryption"
-	"gpt-load/internal/keypool"
-	"gpt-load/internal/models"
+	"autogateway/internal/encryption"
+	"autogateway/internal/keypool"
+	"autogateway/internal/models"
 	"io"
 	"regexp"
 	"strings"

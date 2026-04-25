@@ -8,16 +8,16 @@ import (
 	"sync"
 	"time"
 
-	"gpt-load/internal/config"
-	db "gpt-load/internal/db/migrations"
-	"gpt-load/internal/i18n"
-	"gpt-load/internal/keypool"
-	"gpt-load/internal/models"
-	"gpt-load/internal/proxy"
-	"gpt-load/internal/services"
-	"gpt-load/internal/store"
-	"gpt-load/internal/types"
-	"gpt-load/internal/version"
+	"autogateway/internal/config"
+	db "autogateway/internal/db/migrations"
+	"autogateway/internal/i18n"
+	"autogateway/internal/keypool"
+	"autogateway/internal/models"
+	"autogateway/internal/proxy"
+	"autogateway/internal/services"
+	"autogateway/internal/store"
+	"autogateway/internal/types"
+	"autogateway/internal/version"
 
 	"github.com/gin-gonic/gin"
 	"github.com/sirupsen/logrus"
@@ -163,7 +163,7 @@ func (a *App) Start() error {
 
 	// Start HTTP server in a new goroutine
 	go func() {
-		logrus.Infof("GPT-Load proxy server started successfully on Version: %s", version.Version)
+		logrus.Infof("AutoGateway proxy server started successfully on Version: %s", version.Version)
 		logrus.Infof("Server address: http://%s:%d", serverConfig.Host, serverConfig.Port)
 		logrus.Info("")
 		if err := a.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {

@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"gpt-load/internal/services"
+	"autogateway/internal/services"
 
 	"github.com/gin-gonic/gin"
 )
@@ -100,7 +100,7 @@ func (h *ModelCatalogHandler) ListModels(c *gin.Context) {
 			"id":           m.ID,
 			"object":       "model",
 			"created":      0,
-			"owned_by":     "gpt-load",
+			"owned_by":     "autogateway",
 			"display_name": m.DisplayName,
 			"groups":       m.Groups,
 		}

@@ -3,13 +3,13 @@ package commands
 import (
 	"flag"
 	"fmt"
-	"gpt-load/internal/container"
-	db "gpt-load/internal/db/migrations"
-	"gpt-load/internal/encryption"
-	"gpt-load/internal/models"
-	"gpt-load/internal/store"
-	"gpt-load/internal/types"
-	"gpt-load/internal/utils"
+	"autogateway/internal/container"
+	db "autogateway/internal/db/migrations"
+	"autogateway/internal/encryption"
+	"autogateway/internal/models"
+	"autogateway/internal/store"
+	"autogateway/internal/types"
+	"autogateway/internal/utils"
 	"os"
 
 	"github.com/sirupsen/logrus"
@@ -25,7 +25,7 @@ func RunMigrateKeys(args []string) {
 
 	// Set custom usage message
 	migrateCmd.Usage = func() {
-		fmt.Println("GPT-Load Key Migration Tool")
+		fmt.Println("AutoGateway Key Migration Tool")
 		fmt.Println()
 		fmt.Println("Usage:")
 		fmt.Println("  Enable encryption: gpt-load migrate-keys --to new-key")

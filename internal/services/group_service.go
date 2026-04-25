@@ -12,12 +12,12 @@ import (
 	"sync"
 	"time"
 
-	"gpt-load/internal/channel"
-	"gpt-load/internal/config"
-	"gpt-load/internal/encryption"
-	app_errors "gpt-load/internal/errors"
-	"gpt-load/internal/models"
-	"gpt-load/internal/utils"
+	"autogateway/internal/channel"
+	"autogateway/internal/config"
+	"autogateway/internal/encryption"
+	app_errors "autogateway/internal/errors"
+	"autogateway/internal/models"
+	"autogateway/internal/utils"
 
 	"github.com/sirupsen/logrus"
 	"gorm.io/datatypes"

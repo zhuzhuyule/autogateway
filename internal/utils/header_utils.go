@@ -1,7 +1,7 @@
 package utils
 
 import (
-	"gpt-load/internal/models"
+	"autogateway/internal/models"
 	"net/http"
 	"strconv"
 	"strings"

@@ -2,8 +2,8 @@ package db
 
 import (
 	"fmt"
-	"gpt-load/internal/encryption"
-	"gpt-load/internal/models"
+	"autogateway/internal/encryption"
+	"autogateway/internal/models"
 
 	"github.com/sirupsen/logrus"
 	"gorm.io/gorm"

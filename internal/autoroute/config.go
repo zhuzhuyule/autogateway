@@ -1,7 +1,7 @@
 package autoroute
 
 import (
-	"gpt-load/internal/config"
+	"autogateway/internal/config"
 	"sync"
 )
 

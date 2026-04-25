@@ -1,4 +1,4 @@
-module gpt-load
+module autogateway
 
 go 1.24.0
 

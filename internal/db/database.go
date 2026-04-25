@@ -2,7 +2,7 @@ package db
 
 import (
 	"fmt"
-	"gpt-load/internal/types"
+	"autogateway/internal/types"
 	"log"
 	"os"
 	"path/filepath"

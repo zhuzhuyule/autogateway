@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"gpt-load/internal/autoroute"
-	"gpt-load/internal/services"
+	"autogateway/internal/autoroute"
+	"autogateway/internal/services"
 
 	"github.com/gin-gonic/gin"
 )

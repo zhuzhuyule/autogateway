@@ -2,9 +2,9 @@ package handler
 
 import (
 	"fmt"
-	app_errors "gpt-load/internal/errors"
-	"gpt-load/internal/models"
-	"gpt-load/internal/response"
+	app_errors "autogateway/internal/errors"
+	"autogateway/internal/models"
+	"autogateway/internal/response"
 	"io"
 	"log"
 	"path/filepath"

@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"gpt-load/internal/store"
+	"autogateway/internal/store"
 
 	"github.com/sirupsen/logrus"
 )

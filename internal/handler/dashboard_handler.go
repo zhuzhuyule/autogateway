@@ -2,11 +2,11 @@ package handler
 
 import (
 	"fmt"
-	"gpt-load/internal/encryption"
-	app_errors "gpt-load/internal/errors"
-	"gpt-load/internal/i18n"
-	"gpt-load/internal/models"
-	"gpt-load/internal/response"
+	"autogateway/internal/encryption"
+	app_errors "autogateway/internal/errors"
+	"autogateway/internal/i18n"
+	"autogateway/internal/models"
+	"autogateway/internal/response"
 	"strings"
 	"time"
 

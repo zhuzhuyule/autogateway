@@ -93,7 +93,7 @@ onMounted(() => {
       <div class="footer-main">
         <span class="project-info">
           <a href="https://github.com/tbphp/gpt-load" target="_blank" rel="noopener noreferrer">
-            <b>GPT-Load</b>
+            <b>AutoGateway</b>
           </a>
         </span>
 

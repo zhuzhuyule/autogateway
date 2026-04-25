@@ -1,10 +1,11 @@
 services:
-  gpt-load:
+  autogateway:
+    # 也可改用上游 GPT-Load 官方镜像(不含本项目的免费 Provider/系统聚合等增强):
     # image: ghcr.io/tbphp/gpt-load:latest
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: gpt-load
+    container_name: autogateway
     ports:
       - "${PORT:-3001}:${PORT:-3001}"
     env_file:
@@ -35,11 +36,11 @@ services:
 
   # mysql:
   #   image: mysql:8.2
-  #   container_name: gpt-load-mysql
+  #   container_name: autogateway-mysql
   #   restart: always
   #   environment:
   #     MYSQL_ROOT_PASSWORD: 123456
-  #     MYSQL_DATABASE: gpt-load
+  #     MYSQL_DATABASE: autogateway
   #   volumes:
   #     - ./data/mysql:/var/lib/mysql
   #   healthcheck:
@@ -50,22 +51,22 @@ services:
 
   # postgres:
   #   image: "postgres:16"
-  #   container_name: gpt-load-postgres
+  #   container_name: autogateway-postgres
   #   environment:
   #     POSTGRES_USER: postgres
   #     POSTGRES_PASSWORD: 123456
-  #     POSTGRES_DB: gpt-load
+  #     POSTGRES_DB: autogateway
   #   volumes:
   #     - ./data/postgres:/var/lib/postgresql/data
   #   healthcheck:
-  #     test: ["CMD-SHELL", "pg_isready -U postgres -d gpt-load"]
+  #     test: ["CMD-SHELL", "pg_isready -U postgres -d autogateway"]
   #     interval: 5s
   #     timeout: 5s
   #     retries: 10
 
   # redis:
   #   image: redis:latest
-  #   container_name: gpt-load-redis
+  #   container_name: autogateway-redis
   #   restart: always
   #   healthcheck:
   #     test: ["CMD", "redis-cli", "ping"]

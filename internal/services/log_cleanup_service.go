@@ -2,8 +2,8 @@ package services
 
 import (
 	"context"
-	"gpt-load/internal/config"
-	"gpt-load/internal/models"
+	"autogateway/internal/config"
+	"autogateway/internal/models"
 	"sync"
 	"time"
 

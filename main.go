@@ -1,4 +1,4 @@
-// Package main provides the entry point for the GPT-Load proxy server
+// Package main provides the entry point for the AutoGateway proxy server
 package main
 
 import (
@@ -10,11 +10,11 @@ import (
 	"syscall"
 	"time"
 
-	"gpt-load/internal/app"
-	"gpt-load/internal/commands"
-	"gpt-load/internal/container"
-	"gpt-load/internal/types"
-	"gpt-load/internal/utils"
+	"autogateway/internal/app"
+	"autogateway/internal/commands"
+	"autogateway/internal/container"
+	"autogateway/internal/types"
+	"autogateway/internal/utils"
 
 	"github.com/sirupsen/logrus"
 )
@@ -52,7 +52,7 @@ func runCommand() {
 
 // printHelp displays the general help information
 func printHelp() {
-	fmt.Println("GPT-Load - Multi-channel AI proxy with intelligent key rotation.")
+	fmt.Println("AutoGateway - Multi-channel AI proxy with intelligent key rotation.")
 	fmt.Println()
 	fmt.Println("Usage:")
 	fmt.Println("  gpt-load                    Start the proxy server")

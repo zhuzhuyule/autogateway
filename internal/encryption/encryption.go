@@ -8,7 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"gpt-load/internal/utils"
+	"autogateway/internal/utils"
 	"io"
 )
 

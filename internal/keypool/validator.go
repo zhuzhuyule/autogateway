@@ -3,10 +3,10 @@ package keypool
 import (
 	"context"
 	"fmt"
-	"gpt-load/internal/channel"
-	"gpt-load/internal/config"
-	"gpt-load/internal/encryption"
-	"gpt-load/internal/models"
+	"autogateway/internal/channel"
+	"autogateway/internal/config"
+	"autogateway/internal/encryption"
+	"autogateway/internal/models"
 	"time"
 
 	"github.com/sirupsen/logrus"

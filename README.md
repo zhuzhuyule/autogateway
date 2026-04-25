@@ -177,7 +177,7 @@ POST /proxy/{group_name}/v1/chat/completions
 |---|---|---|
 | `AUTH_KEY` | — | **必填**,管理面板登录密钥 + 默认聚合 proxy_keys |
 | `PORT` | 3001 | HTTP 端口 |
-| `DATABASE_DSN` | `./data/gpt-load.db` | SQLite / MySQL / PostgreSQL DSN |
+| `DATABASE_DSN` | `./data/autogateway.db` | SQLite / MySQL / PostgreSQL DSN |
 | `REDIS_DSN` | (空) | 留空走内存存储 |
 | `SERVER_GRACEFUL_SHUTDOWN_TIMEOUT` | 10 | 优雅关停超时(秒) |
 

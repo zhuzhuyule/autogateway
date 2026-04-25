@@ -1,7 +1,7 @@
 package utils
 
 import (
-	"gpt-load/internal/types"
+	"autogateway/internal/types"
 	"io"
 	"os"
 	"path/filepath"

@@ -10,7 +10,7 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-// RedisKeyPrefix is the prefix for all Redis keys used by GPT-Load
+// RedisKeyPrefix is the prefix for all Redis keys used by AutoGateway
 const RedisKeyPrefix = "gpt-load:"
 
 // RedisStore is a Redis-backed key-value store.
@@ -212,8 +212,8 @@ func (s *RedisStore) Subscribe(channel string) (Subscription, error) {
 	return &redisSubscription{pubsub: pubsub}, nil
 }
 
-// Clear clears all keys with the GPT-Load prefix in the current Redis database.
-// This method only removes keys that belong to GPT-Load, preserving other applications' data.
+// Clear clears all keys with the AutoGateway prefix in the current Redis database.
+// This method only removes keys that belong to AutoGateway, preserving other applications' data.
 func (s *RedisStore) Clear() error {
 	ctx := context.Background()
 

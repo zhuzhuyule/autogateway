@@ -3,7 +3,7 @@ package handler
 import (
 	"net/http"
 
-	"gpt-load/internal/services"
+	"autogateway/internal/services"
 
 	"github.com/gin-gonic/gin"
 )
