@@ -5,7 +5,7 @@ import { settingsApi } from "@/api/settings";
 import ProxyKeysInput from "@/components/common/ProxyKeysInput.vue";
 import { FREE_PROVIDERS, findProviderByUpstreams, type FreeProvider } from "@/data/freeProviders";
 import type { Group, GroupConfigOption, UpstreamInfo } from "@/types/models";
-import { Add, Close, HelpCircleOutline, OpenOutline, Remove, RocketOutline } from "@vicons/ionicons5";
+import { Add, Close, HelpCircleOutline, OpenOutline, RefreshOutline, Remove, RocketOutline } from "@vicons/ionicons5";
 import {
   NButton,
   NCard,
@@ -126,6 +126,24 @@ const userModifiedFields = ref({
 const providerSearch = ref("");
 const providerPanelExpanded = ref<string[]>(["picker"]);
 const usedProviderIds = ref<Set<string>>(new Set());
+
+// 上游真实模型列表(从 group.available_models 加载;可手动刷新)
+const availableModels = ref<string[]>([]);
+const modelsRefreshLoading = ref(false);
+const modelsRefreshedAt = ref<string | null>(null);
+const testModelOptions = computed(() => {
+  // 合并 freeProviders 内置示例(用于新建尚未拉取时给点提示) + 真实拉取
+  const merged = new Set<string>();
+  if (availableModels.value.length === 0 && !props.group) {
+    // 创建模式且未拉取过,从 channel_type 默认值给一个占位
+    const placeholder = formData.test_model;
+    if (placeholder) merged.add(placeholder);
+  }
+  availableModels.value.forEach((m) => merged.add(m));
+  // 当前已选值始终保留为合法选项
+  if (formData.test_model) merged.add(formData.test_model);
+  return Array.from(merged).map((id) => ({ label: id, value: id }));
+});
 
 const filteredProviders = computed<FreeProvider[]>(() => {
   const q = providerSearch.value.trim().toLowerCase();
@@ -413,6 +431,53 @@ function loadGroupData() {
     proxy_keys: props.group.proxy_keys || "",
     group_type: props.group.group_type || "standard",
   });
+
+  // 编辑模式下,从 group.available_models 加载缓存的真实模型列表
+  const cached = (props.group as unknown as { available_models?: unknown }).available_models;
+  if (Array.isArray(cached)) {
+    availableModels.value = cached.filter((m): m is string => typeof m === "string");
+  } else if (typeof cached === "string" && cached.length > 0) {
+    try {
+      const arr = JSON.parse(cached);
+      availableModels.value = Array.isArray(arr) ? arr.filter((m): m is string => typeof m === "string") : [];
+    } catch {
+      availableModels.value = [];
+    }
+  } else {
+    availableModels.value = [];
+  }
+  modelsRefreshedAt.value =
+    (props.group as unknown as { models_refreshed_at?: string | null }).models_refreshed_at || null;
+}
+
+// 调用 /api/groups/:id/refresh-models 拉上游真实模型列表
+async function refreshModels() {
+  if (!props.group?.id) {
+    message.warning(t("keys.refreshModelsRequiresSave"));
+    return;
+  }
+  modelsRefreshLoading.value = true;
+  try {
+    const response = await fetch(`/api/groups/${props.group.id}/refresh-models`, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${localStorage.getItem("authKey") || ""}`,
+        "Content-Type": "application/json",
+      },
+    });
+    const result = await response.json();
+    if (!response.ok || result.code !== 0) {
+      throw new Error(result.message || `HTTP ${response.status}`);
+    }
+    const list = (result.data?.models || []) as string[];
+    availableModels.value = list;
+    modelsRefreshedAt.value = new Date().toISOString();
+    message.success(t("keys.refreshModelsSuccess", { n: list.length }));
+  } catch (e) {
+    message.error((e as Error).message);
+  } finally {
+    modelsRefreshLoading.value = false;
+  }
 }
 
 async function fetchChannelTypes() {
@@ -810,11 +875,34 @@ async function handleSubmit() {
                   </n-tooltip>
                 </div>
               </template>
-              <n-input
-                v-model:value="formData.test_model"
-                :placeholder="testModelPlaceholder"
-                @input="() => !props.group && (userModifiedFields.test_model = true)"
-              />
+              <div style="display: flex; gap: 6px; width: 100%">
+                <n-select
+                  v-model:value="formData.test_model"
+                  :options="testModelOptions"
+                  :placeholder="testModelPlaceholder"
+                  filterable
+                  tag
+                  clearable
+                  style="flex: 1"
+                  @update:value="() => !props.group && (userModifiedFields.test_model = true)"
+                />
+                <n-tooltip trigger="hover" :disabled="!!props.group">
+                  <template #trigger>
+                    <n-button
+                      size="small"
+                      :loading="modelsRefreshLoading"
+                      :disabled="!props.group"
+                      @click="refreshModels"
+                      style="flex-shrink: 0"
+                    >
+                      <template #icon>
+                        <n-icon :component="RefreshOutline" />
+                      </template>
+                    </n-button>
+                  </template>
+                  {{ t("keys.refreshModelsRequiresSave") }}
+                </n-tooltip>
+              </div>
             </n-form-item>
 
             <n-form-item

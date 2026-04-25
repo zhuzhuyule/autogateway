@@ -210,4 +210,7 @@ var MessagesZhCN = map[string]string{
 	"group.sub_group_not_found":        "子分组不存在",
 	"group.system_cannot_delete":       "系统默认聚合分组不可删除",
 	"group.system_immutable_field":     "系统默认聚合分组的 {{.field}} 不允许修改",
+	"group.refresh_models_not_supported": "仅标准分组支持拉取模型列表",
+	"group.refresh_models_no_key":      "当前分组没有可用密钥,无法调用上游模型列表接口",
+	"group.refresh_models_failed":      "拉取上游模型列表失败: {{.error}}",
 }

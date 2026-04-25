@@ -123,6 +123,8 @@ type Group struct {
 	APIKeys             []APIKey             `gorm:"foreignKey:GroupID" json:"api_keys"`
 	SubGroups           []GroupSubGroup      `gorm:"-" json:"sub_groups,omitempty"`
 	LastValidatedAt     *time.Time           `json:"last_validated_at"`
+	AvailableModels     datatypes.JSON       `gorm:"type:json" json:"available_models"` // 由上游 /v1/models 缓存的真实模型列表
+	ModelsRefreshedAt   *time.Time           `json:"models_refreshed_at"`
 	CreatedAt           time.Time            `json:"created_at"`
 	UpdatedAt           time.Time            `json:"updated_at"`
 

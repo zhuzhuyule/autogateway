@@ -5,6 +5,20 @@
 
 export type ChannelType = "openai" | "openai-response" | "gemini" | "anthropic";
 
+/** 模型能力档位:
+ *  - fast    : 小模型 / 优化速度,适合简单分类、改写、摘要
+ *  - balanced: 中型模型(30-70B 级),日常对话/编码主力
+ *  - max     : 旗舰 / 多模态 / 长上下文 / 复杂推理
+ */
+export type ModelTier = "fast" | "balanced" | "max";
+
+export interface FreeModel {
+  providerId: string; // FreeProvider.id
+  modelId: string;    // 上游真实模型 ID
+  tier: ModelTier;
+  notes?: string;     // 限速/特性等
+}
+
 export interface FreeProvider {
   id: string;
   name: string;
@@ -230,4 +244,74 @@ export function findProviderByUpstreams(
     if (matched) return matched;
   }
   return undefined;
+}
+
+// ============================================================================
+// 已知免费模型清单(ModelCatalog 用):为模型打上"免费"徽标和能力档位.
+// 不影响后端,纯前端展示数据;同 model id 在不同 provider 都免费的话各列一行.
+// ============================================================================
+
+export const FREE_MODELS: FreeModel[] = [
+  // Groq
+  { providerId: "groq", modelId: "llama-3.1-8b-instant", tier: "fast", notes: "极速小模型" },
+  { providerId: "groq", modelId: "llama-3.3-70b-versatile", tier: "balanced", notes: "日常主力" },
+  { providerId: "groq", modelId: "mixtral-8x7b-32768", tier: "balanced" },
+  { providerId: "groq", modelId: "deepseek-r1-distill-llama-70b", tier: "max", notes: "推理增强" },
+
+  // Cerebras
+  { providerId: "cerebras", modelId: "llama3.1-8b", tier: "fast" },
+  { providerId: "cerebras", modelId: "llama-3.3-70b", tier: "balanced" },
+  { providerId: "cerebras", modelId: "qwen-3-235b-a22b-instruct-2507", tier: "max", notes: "MoE 235B" },
+
+  // OpenRouter (含 :free 后缀)
+  { providerId: "openrouter", modelId: "deepseek/deepseek-chat-v3:free", tier: "balanced" },
+  { providerId: "openrouter", modelId: "meta-llama/llama-3.1-8b-instruct:free", tier: "fast" },
+  { providerId: "openrouter", modelId: "google/gemini-2.0-flash-exp:free", tier: "balanced", notes: "实验版" },
+  { providerId: "openrouter", modelId: "qwen/qwen-2.5-72b-instruct:free", tier: "balanced" },
+  { providerId: "openrouter", modelId: "mistralai/mistral-7b-instruct:free", tier: "fast" },
+
+  // Together AI(免费档模型)
+  { providerId: "together", modelId: "meta-llama/Llama-3.3-70B-Instruct-Turbo-Free", tier: "balanced" },
+  { providerId: "together", modelId: "deepseek-ai/DeepSeek-R1-Distill-Llama-70B-free", tier: "max", notes: "推理增强" },
+
+  // Cloudflare Workers AI
+  { providerId: "cloudflare", modelId: "@cf/meta/llama-3.1-8b-instruct", tier: "fast" },
+  { providerId: "cloudflare", modelId: "@cf/qwen/qwen2.5-coder-32b-instruct", tier: "balanced", notes: "代码专用" },
+
+  // Mistral Experimental
+  { providerId: "mistral", modelId: "mistral-small-latest", tier: "fast" },
+  { providerId: "mistral", modelId: "open-mistral-nemo", tier: "fast" },
+  { providerId: "mistral", modelId: "codestral-latest", tier: "balanced", notes: "代码专用" },
+
+  // Google AI Studio
+  { providerId: "google-aistudio", modelId: "gemini-2.0-flash", tier: "balanced", notes: "原生多模态" },
+  { providerId: "google-aistudio", modelId: "gemini-2.5-flash", tier: "balanced", notes: "原生多模态" },
+  { providerId: "google-aistudio", modelId: "gemini-2.5-pro", tier: "max", notes: "长上下文+视觉" },
+
+  // Cohere
+  { providerId: "cohere", modelId: "command-r7b-12-2024", tier: "fast" },
+  { providerId: "cohere", modelId: "command-r-08-2024", tier: "balanced" },
+  { providerId: "cohere", modelId: "command-r-plus-08-2024", tier: "max" },
+
+  // GitHub Models (Azure 托管)
+  { providerId: "github-models", modelId: "gpt-4o-mini", tier: "fast" },
+  { providerId: "github-models", modelId: "gpt-4o", tier: "max", notes: "多模态" },
+  { providerId: "github-models", modelId: "Meta-Llama-3.1-70B-Instruct", tier: "balanced" },
+  { providerId: "github-models", modelId: "Mistral-large-2407", tier: "balanced" },
+
+  // Hugging Face Router
+  { providerId: "huggingface", modelId: "meta-llama/Llama-3.1-8B-Instruct", tier: "fast" },
+  { providerId: "huggingface", modelId: "Qwen/Qwen2.5-72B-Instruct", tier: "balanced" },
+];
+
+const freeModelMap = new Map<string, FreeModel>();
+for (const m of FREE_MODELS) {
+  freeModelMap.set(m.modelId, m);
+  freeModelMap.set(m.modelId.toLowerCase(), m);
+}
+
+/** 按 modelId 反查是否为已知免费模型(返回 tier/provider 等). */
+export function findFreeModel(modelId: string): FreeModel | undefined {
+  if (!modelId) return undefined;
+  return freeModelMap.get(modelId) || freeModelMap.get(modelId.toLowerCase());
 }

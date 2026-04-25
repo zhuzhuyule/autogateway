@@ -285,6 +285,73 @@ func (s *GroupService) ListGroups(ctx context.Context) ([]models.Group, error) {
 	return groups, nil
 }
 
+// RefreshAvailableModels 拉取分组对应上游的真实模型列表并缓存到 group.AvailableModels.
+// 仅 standard 分组有意义;聚合分组无独立 upstream,直接报错.
+func (s *GroupService) RefreshAvailableModels(ctx context.Context, groupID uint) ([]string, error) {
+	var group models.Group
+	if err := s.db.WithContext(ctx).First(&group, groupID).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, NewI18nError(app_errors.ErrResourceNotFound, "group.not_found", nil)
+		}
+		return nil, app_errors.ParseDBError(err)
+	}
+	if group.GroupType != "standard" {
+		return nil, NewI18nError(app_errors.ErrBadRequest, "group.refresh_models_not_supported", nil)
+	}
+
+	apiKey, err := s.pickActiveDecryptedKey(ctx, group.ID)
+	if err != nil {
+		return nil, err
+	}
+
+	modelIDs, err := FetchUpstreamModels(ctx, &group, apiKey)
+	if err != nil {
+		logrus.WithError(err).WithField("group_id", group.ID).Warn("fetch upstream models failed")
+		return nil, NewI18nError(app_errors.ErrInternalServer, "group.refresh_models_failed", map[string]any{"error": err.Error()})
+	}
+
+	data, err := json.Marshal(modelIDs)
+	if err != nil {
+		return nil, fmt.Errorf("marshal models list: %w", err)
+	}
+	now := time.Now()
+	if err := s.db.WithContext(ctx).Model(&models.Group{}).
+		Where("id = ?", group.ID).
+		Updates(map[string]any{
+			"available_models":     datatypes.JSON(data),
+			"models_refreshed_at":  &now,
+		}).Error; err != nil {
+		return nil, app_errors.ParseDBError(err)
+	}
+
+	if err := s.groupManager.Invalidate(); err != nil {
+		logrus.WithContext(ctx).WithError(err).Warn("invalidate group cache after refresh-models failed")
+	}
+	return modelIDs, nil
+}
+
+// pickActiveDecryptedKey 取该分组当前活跃 key 中的一个,用于调用上游 /v1/models.
+func (s *GroupService) pickActiveDecryptedKey(ctx context.Context, groupID uint) (string, error) {
+	var key models.APIKey
+	if err := s.db.WithContext(ctx).
+		Where("group_id = ? AND status = ?", groupID, models.KeyStatusActive).
+		Order("id ASC").
+		First(&key).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return "", NewI18nError(app_errors.ErrBadRequest, "group.refresh_models_no_key", nil)
+		}
+		return "", app_errors.ParseDBError(err)
+	}
+	if s.encryptionSvc == nil {
+		return key.KeyValue, nil
+	}
+	plain, err := s.encryptionSvc.Decrypt(key.KeyValue)
+	if err != nil {
+		return "", fmt.Errorf("decrypt key: %w", err)
+	}
+	return plain, nil
+}
+
 // ReorderGroups updates sort values in a single transaction.
 func (s *GroupService) ReorderGroups(ctx context.Context, items []GroupReorderItem) error {
 	if len(items) == 0 {

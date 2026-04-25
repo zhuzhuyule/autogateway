@@ -210,4 +210,7 @@ var MessagesJaJP = map[string]string{
 	"group.sub_group_not_found":        "サブグループが見つかりません",
 	"group.system_cannot_delete":       "システム既定の集約グループは削除できません",
 	"group.system_immutable_field":     "システム既定の集約グループの {{.field}} は変更できません",
+	"group.refresh_models_not_supported": "標準グループのみモデル一覧の取得に対応しています",
+	"group.refresh_models_no_key":      "このグループに有効なキーがないため、上流のモデル一覧APIを呼び出せません",
+	"group.refresh_models_failed":      "上流のモデル一覧取得に失敗: {{.error}}",
 }

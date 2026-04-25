@@ -99,6 +99,23 @@ func (s *Server) CreateGroup(c *gin.Context) {
 	response.Success(c, s.newGroupResponse(group))
 }
 
+// RefreshGroupModels triggers an upstream /v1/models fetch and caches the result.
+func (s *Server) RefreshGroupModels(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		response.ErrorI18nFromAPIError(c, app_errors.ErrBadRequest, "validation.invalid_group_id")
+		return
+	}
+	models, err := s.GroupService.RefreshAvailableModels(c.Request.Context(), uint(id))
+	if s.handleGroupError(c, err) {
+		return
+	}
+	response.Success(c, gin.H{
+		"models": models,
+		"count":  len(models),
+	})
+}
+
 // ListGroups handles listing all groups.
 func (s *Server) ListGroups(c *gin.Context) {
 	groups, err := s.GroupService.ListGroups(c.Request.Context())
@@ -264,6 +281,10 @@ type GroupResponse struct {
 	HeaderRules         []models.HeaderRule `json:"header_rules"`
 	ProxyKeys           string              `json:"proxy_keys"`
 	LastValidatedAt     *time.Time          `json:"last_validated_at"`
+	IsSystem            bool                `json:"is_system"`
+	SystemRole          string              `json:"system_role"`
+	AvailableModels     datatypes.JSON      `json:"available_models,omitempty"`
+	ModelsRefreshedAt   *time.Time          `json:"models_refreshed_at,omitempty"`
 	CreatedAt           time.Time           `json:"created_at"`
 	UpdatedAt           time.Time           `json:"updated_at"`
 }
@@ -322,6 +343,10 @@ func (s *Server) newGroupResponse(group *models.Group) *GroupResponse {
 		HeaderRules:         headerRules,
 		ProxyKeys:           group.ProxyKeys,
 		LastValidatedAt:     group.LastValidatedAt,
+		IsSystem:            group.IsSystem,
+		SystemRole:          group.SystemRole,
+		AvailableModels:     group.AvailableModels,
+		ModelsRefreshedAt:   group.ModelsRefreshedAt,
 		CreatedAt:           group.CreatedAt,
 		UpdatedAt:           group.UpdatedAt,
 	}

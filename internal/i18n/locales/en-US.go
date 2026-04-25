@@ -210,4 +210,7 @@ var MessagesEnUS = map[string]string{
 	"group.sub_group_not_found":        "Sub group not found",
 	"group.system_cannot_delete":       "System default aggregate group cannot be deleted",
 	"group.system_immutable_field":     "Field {{.field}} cannot be modified for system default aggregate group",
+	"group.refresh_models_not_supported": "Only standard groups support fetching the model list",
+	"group.refresh_models_no_key":      "No active key available in this group; cannot call upstream model list endpoint",
+	"group.refresh_models_failed":      "Failed to fetch upstream models: {{.error}}",
 }
