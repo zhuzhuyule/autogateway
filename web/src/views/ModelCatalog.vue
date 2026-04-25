@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from "vue";
+import { ref, onMounted, h } from "vue";
 import {
   NCard,
   NDataTable,
@@ -10,37 +10,38 @@ import {
   type DataTableColumns,
 } from "naive-ui";
 
-interface ModelCatalogItem {
-  model_name: string;
+interface ModelItem {
+  id: string;
   display_name: string;
-  group_name: string;
-  is_aggregate: boolean;
+  owned_by: string;
+  groups: string[];
 }
 
 const message = useMessage();
 const loading = ref(false);
-const catalogData = ref<ModelCatalogItem[]>([]);
+const catalogData = ref<ModelItem[]>([]);
 
-const columns: DataTableColumns<ModelCatalogItem> = [
+const columns: DataTableColumns<ModelItem> = [
   {
-    title: "Model Name",
-    key: "model_name",
+    title: "Model ID",
+    key: "id",
   },
   {
     title: "Display Name",
     key: "display_name",
   },
   {
-    title: "Group",
-    key: "group_name",
+    title: "Owned By",
+    key: "owned_by",
   },
   {
-    title: "Type",
-    key: "is_aggregate",
+    title: "Groups",
+    key: "groups",
     render: (row) => {
-      return row.is_aggregate
-        ? h(NTag, { type: "success", size: "small" }, () => "Aggregate")
-        : h(NTag, { type: "info", size: "small" }, () => "Single");
+      if (!row.groups || row.groups.length === 0) {
+        return h(NTag, { size: "small", type: "warning" }, () => "No groups");
+      }
+      return row.groups.map((g) => h(NTag, { size: "small", type: "info", style: "margin-right: 4px;" }, () => g));
     },
   },
 ];
@@ -52,10 +53,12 @@ onMounted(async () => {
 async function fetchCatalog() {
   loading.value = true;
   try {
-    const response = await fetch("/api/model-catalog/list");
+    const response = await fetch("/api/models");
     if (response.ok) {
-      const data = await response.json();
-      catalogData.value = data;
+      const result = await response.json();
+      if (result.data) {
+        catalogData.value = result.data;
+      }
     } else {
       message.error("Failed to load model catalog");
     }
@@ -65,8 +68,6 @@ async function fetchCatalog() {
     loading.value = false;
   }
 }
-
-import { h } from "vue";
 </script>
 
 <template>

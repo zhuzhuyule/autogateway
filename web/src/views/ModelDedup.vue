@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from "vue";
+import { ref, onMounted, h } from "vue";
 import {
   NCard,
   NDataTable,
@@ -34,7 +34,7 @@ const columns: DataTableColumns<DedupSuggestion> = [
     title: "Source Groups",
     key: "source_groups",
     render: (row) => {
-      return row.source_groups.map((g) => h(NTag, { size: "small", type: "info" }, () => g));
+      return row.source_groups.map((g) => h(NTag, { size: "small", type: "info", style: "margin-right: 4px;" }, () => g));
     },
   },
   {
@@ -65,7 +65,7 @@ onMounted(async () => {
 async function fetchSuggestions() {
   loading.value = true;
   try {
-    const response = await fetch("/api/model-dedup/suggestions");
+    const response = await fetch("/api/dedup/suggestions");
     if (response.ok) {
       const data = await response.json();
       suggestions.value = data;
@@ -89,7 +89,7 @@ async function handleCreateAggregate() {
   if (!selectedSuggestion.value) return;
 
   try {
-    const response = await fetch("/api/model-dedup/create-aggregate", {
+    const response = await fetch("/api/dedup/create", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -110,8 +110,6 @@ async function handleCreateAggregate() {
     message.error("Failed to create aggregate");
   }
 }
-
-import { h } from "vue";
 </script>
 
 <template>
