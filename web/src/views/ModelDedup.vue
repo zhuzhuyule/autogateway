@@ -34,6 +34,11 @@ const selectedSuggestion = ref<DedupSuggestion | null>(null);
 const aggregateName = ref("");
 const submitting = ref(false);
 
+const authHeader = computed(() => {
+  const authKey = localStorage.getItem("authKey");
+  return authKey ? `Bearer ${authKey}` : "";
+});
+
 const columns: DataTableColumns<DedupSuggestion> = [
   {
     title: t("dedup.modelName"),
@@ -83,7 +88,11 @@ async function fetchSuggestions() {
   loading.value = true;
   fetchError.value = false;
   try {
-    const response = await fetch("/api/dedup/suggestions");
+    const response = await fetch("/api/dedup/suggestions", {
+      headers: {
+        "Authorization": authHeader.value,
+      },
+    });
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`);
     }
@@ -119,7 +128,10 @@ async function handleCreateAggregate() {
   try {
     const response = await fetch("/api/dedup/create", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Authorization": authHeader.value,
+        "Content-Type": "application/json",
+      },
       body: JSON.stringify({
         model_name: selectedSuggestion.value.model_name,
         aggregate_name: aggregateName.value,
@@ -177,7 +189,7 @@ async function handleCreateAggregate() {
       :title="t('dedup.createAggregateTitle')"
       positive-text=""
       negative-text=""
-      @positive-click="handleCreateAggregate"
+      @positive-click="() => handleCreateAggregate()"
       @negative-click="closeModal"
       @close="closeModal"
     >

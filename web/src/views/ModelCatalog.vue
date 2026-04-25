@@ -29,6 +29,11 @@ const loading = ref(false);
 const fetchError = ref(false);
 const catalogData = ref<ModelItem[]>([]);
 
+const authHeader = computed(() => {
+  const authKey = localStorage.getItem("authKey");
+  return authKey ? `Bearer ${authKey}` : "";
+});
+
 const columns: DataTableColumns<ModelItem> = [
   {
     title: t("modelcatalog.modelId"),
@@ -70,7 +75,11 @@ async function fetchCatalog() {
   loading.value = true;
   fetchError.value = false;
   try {
-    const response = await fetch("/api/models");
+    const response = await fetch("/api/models", {
+      headers: {
+        "Authorization": authHeader.value,
+      },
+    });
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`);
     }

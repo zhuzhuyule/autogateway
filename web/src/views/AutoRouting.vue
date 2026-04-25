@@ -49,6 +49,11 @@ const newMappingSimple = ref("");
 const newMappingMedium = ref("");
 const newMappingComplex = ref("");
 
+const authHeader = computed(() => {
+  const authKey = localStorage.getItem("authKey");
+  return authKey ? `Bearer ${authKey}` : "";
+});
+
 onMounted(async () => {
   await fetchConfig();
 });
@@ -57,7 +62,12 @@ async function fetchConfig() {
   fetchLoading.value = true;
   fetchError.value = false;
   try {
-    const response = await fetch("/api/auto-routing/config");
+    const response = await fetch("/api/auto-routing/config", {
+      headers: {
+        "Authorization": authHeader.value,
+        "Content-Type": "application/json",
+      },
+    });
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`);
     }
@@ -78,7 +88,10 @@ async function handleSubmit() {
   try {
     const response = await fetch("/api/auto-routing/config", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Authorization": authHeader.value,
+        "Content-Type": "application/json",
+      },
       body: JSON.stringify(config.value),
     });
     if (!response.ok) {
