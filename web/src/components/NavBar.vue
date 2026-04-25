@@ -3,6 +3,7 @@ import { type MenuOption, NIcon } from "naive-ui";
 import { computed, h, watch } from "vue";
 import { RouterLink, useRoute } from "vue-router";
 import { useI18n } from "vue-i18n";
+import { useMediaQuery } from "@vueuse/core";
 import {
   Home,
   Key,
@@ -23,6 +24,10 @@ const props = defineProps({
 });
 
 const emit = defineEmits(["close"]);
+
+const isTablet = useMediaQuery("(max-width: 1024px)");
+
+const showLabels = computed(() => !isTablet.value);
 
 const menuOptions = computed<MenuOption[]>(() => {
   const options: MenuOption[] = [
@@ -62,7 +67,7 @@ function renderMenuItem(key: string, label: string, icon: any): MenuOption {
           default: () => [
             h(
               NIcon,
-              { size: 16, class: "nav-item-icon" },
+              { size: 18, class: "nav-item-icon" },
               () => h(icon)
             ),
             h("span", { class: "nav-item-text" }, label),
@@ -75,62 +80,79 @@ function renderMenuItem(key: string, label: string, icon: any): MenuOption {
 </script>
 
 <template>
-  <div>
+  <div :class="['nav-container', { 'nav-icon-only': !showLabels }]">
     <n-menu
       :mode="mode"
       :options="menuOptions"
       :value="activeMenu"
-      :indent="18"
-      class="compact-menu"
+      :indent="showLabels ? 16 : 0"
+      :collapsed="!showLabels"
+      :collapsed-width="44"
+      :collapsed-icon-size="18"
+      class="adaptive-menu"
     />
   </div>
 </template>
 
 <style scoped>
-.compact-menu :deep(.n-menu-item-content) {
-  padding: 0 10px !important;
-  height: 34px;
-  margin: 2px 3px;
-}
-
-.compact-menu :deep(.nav-menu-item) {
+.nav-container {
   display: flex;
   align-items: center;
-  gap: 6px;
+}
+
+.adaptive-menu :deep(.n-menu-item-content) {
+  padding: 0 6px !important;
+  height: 32px;
+  margin: 2px;
+  border-radius: var(--border-radius-sm);
+}
+
+.adaptive-menu :deep(.nav-menu-item) {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   text-decoration: none;
-  color: inherit;
-  font-size: 12px;
-  transition: all 0.2s ease;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  transition: color 0.15s;
 }
 
-.compact-menu :deep(.n-menu-item) {
-  border-radius: 6px;
+.adaptive-menu :deep(.n-menu-item:hover) {
+  background: var(--hover-bg);
 }
 
-.compact-menu :deep(.n-menu--vertical .n-menu-item-content) {
-  justify-content: flex-start;
-  padding: 0 16px !important;
-}
-
-.compact-menu :deep(.n-menu-item:hover) {
-  background: rgba(102, 126, 234, 0.1);
-}
-
-.compact-menu :deep(.n-menu-item--selected) {
-  background: var(--primary-gradient);
+.adaptive-menu :deep(.n-menu-item--selected) {
+  background: var(--primary-color);
   color: white;
 }
 
-.compact-menu :deep(.n-menu-item--selected:hover) {
-  background: linear-gradient(135deg, #5a6fd8 0%, #6a4190 100%);
+.adaptive-menu :deep(.n-menu-item--selected:hover) {
+  background: var(--primary-color-hover);
 }
 
-.compact-menu :deep(.n-menu-item-content-header) {
-  font-size: 12px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  color: var(--text-color-3);
-  padding: 8px 16px 4px;
+.adaptive-menu :deep(.n-menu-item--selected .nav-menu-item) {
+  color: white;
+}
+
+/* Icon-only mode */
+.nav-icon-only.adaptive-menu :deep(.n-menu-item-content) {
+  padding: 0 !important;
+  justify-content: center;
+}
+
+.nav-icon-only.adaptive-menu :deep(.nav-menu-item) {
+  justify-content: center;
+  padding: 6px;
+}
+
+.nav-icon-only.adaptive-menu :deep(.nav-item-text) {
+  display: none;
+}
+
+/* Vertical mode */
+.adaptive-menu :deep(.n-menu--vertical .n-menu-item-content) {
+  padding: 0 12px !important;
+  justify-content: flex-start;
 }
 </style>

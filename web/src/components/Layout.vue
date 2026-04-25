@@ -30,10 +30,10 @@ const toggleMenu = () => {
           <div class="brand-icon">
             <img src="@/assets/logo.png" alt="" />
           </div>
-          <h1 v-if="!isMobile" class="brand-title">GPT Load</h1>
+          <h1 class="brand-title">GPT Load</h1>
         </div>
 
-        <nav v-if="!isMobile" class="header-nav">
+        <nav class="header-nav">
           <nav-bar />
         </nav>
 
@@ -41,8 +41,8 @@ const toggleMenu = () => {
           <language-selector />
           <theme-toggle />
           <logout v-if="!isMobile" />
-          <n-button v-if="isMobile" text @click="toggleMenu">
-            <svg viewBox="0 0 24 24" width="24" height="24">
+          <n-button text @click="toggleMenu" class="menu-toggle">
+            <svg viewBox="0 0 24 24" width="20" height="20">
               <path fill="currentColor" d="M3,6H21V8H3V6M3,11H21V13H3V11M3,16H21V18H3V16Z" />
             </svg>
           </n-button>
@@ -50,7 +50,7 @@ const toggleMenu = () => {
       </div>
     </n-layout-header>
 
-    <n-drawer v-model:show="isMenuOpen" :width="260" placement="right">
+    <n-drawer v-model:show="isMenuOpen" :width="280" placement="right">
       <n-drawer-content
         title="GPT Load"
         body-content-style="padding: 0; display: flex; flex-direction: column; height: 100%;"
@@ -82,7 +82,7 @@ const toggleMenu = () => {
 
 <style scoped>
 .main-layout {
-  background: transparent;
+  background: var(--bg-primary);
   min-height: 100vh;
   display: flex;
   flex-direction: column;
@@ -90,75 +90,79 @@ const toggleMenu = () => {
 
 .layout-header {
   background: var(--header-bg);
-  backdrop-filter: blur(20px);
-  border-bottom: 1px solid var(--border-color-light);
-  box-shadow: var(--shadow-sm);
+  border-bottom: 1px solid var(--border-color);
   position: sticky;
   top: 0;
   z-index: 100;
-  padding: 0 12px;
+  padding: 0 24px;
 }
 
 .header-content {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 0;
-  overflow-x: auto;
-  max-width: 1200px;
+  height: 56px;
+  max-width: 1400px;
   margin: 0 auto;
-  position: relative;
-}
-
-.header-nav {
-  position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 1;
+  gap: 16px;
 }
 
 .header-brand {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 10px;
   flex-shrink: 0;
-  z-index: 2;
 }
 
 .brand-icon {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 35px;
-  height: 35px;
-  img {
-    height: 100%;
-    width: 100%;
-  }
+  width: 28px;
+  height: 28px;
+}
+
+.brand-icon img {
+  height: 100%;
+  width: 100%;
 }
 
 .brand-title {
-  font-size: 1.4rem;
-  font-weight: 700;
-  background: var(--primary-gradient);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--text-primary);
   margin: 0;
   letter-spacing: -0.3px;
 }
 
+.header-nav {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+  min-width: 0;
+  overflow: hidden;
+}
+
 .header-actions {
-  flex-shrink: 0;
   display: flex;
   align-items: center;
-  gap: 8px;
-  z-index: 2;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.menu-toggle {
+  padding: 8px;
+  border-radius: var(--border-radius-sm);
+  transition: background 0.15s;
+}
+
+.menu-toggle:hover {
+  background: var(--hover-bg);
 }
 
 .mobile-actions {
   padding: 16px;
-  border-top: 1px solid var(--border-color-light);
+  border-top: 1px solid var(--border-color);
   display: flex;
   flex-direction: column;
   align-items: stretch;
@@ -169,15 +173,14 @@ const toggleMenu = () => {
 .layout-content {
   flex: 1;
   overflow: auto;
-  background: transparent;
-  max-width: 1200px;
-  margin: 0 auto;
-  width: 100%;
+  background: var(--bg-secondary);
 }
 
 .content-wrapper {
-  padding: 16px;
-  min-height: calc(100vh - 111px);
+  padding: 24px;
+  max-width: 1400px;
+  margin: 0 auto;
+  min-height: calc(100vh - 56px);
 }
 
 .layout-footer {
@@ -185,19 +188,26 @@ const toggleMenu = () => {
   padding: 0;
 }
 
-/* Mobile specific styles */
+/* Tablet */
+@media (max-width: 1024px) {
+  .header-brand .brand-title {
+    display: none;
+  }
+}
+
+/* Mobile */
 @media (max-width: 768px) {
   .header-nav {
-    position: static;
-    transform: none;
+    display: none;
   }
 
   .header-content {
-    overflow-x: visible;
+    height: 52px;
+    padding: 0 16px;
   }
 
-  .mobile-actions > :deep(*) {
-    width: 100%;
+  .content-wrapper {
+    padding: 16px;
   }
 }
 </style>
