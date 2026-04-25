@@ -45,6 +45,9 @@ func NewRouter(
 	configManager types.ConfigManager,
 	groupManager *services.GroupManager,
 	autoRouteConfigManager *autoroute.ConfigManager,
+	autoRouteHandler *handler.AutoRouteHandler,
+	modelCatalogHandler *handler.ModelCatalogHandler,
+	dedupHandler *handler.DedupHandler,
 	buildFS embed.FS,
 	indexPage []byte,
 ) *gin.Engine {
@@ -67,7 +70,7 @@ func NewRouter(
 
 	// 注册路由
 	registerSystemRoutes(router, serverHandler)
-	registerAPIRoutes(router, serverHandler, configManager)
+	registerAPIRoutes(router, serverHandler, configManager, autoRouteHandler, modelCatalogHandler, dedupHandler)
 	registerProxyRoutes(router, proxyServer, groupManager, serverHandler, autoRouteConfigManager)
 	registerFrontendRoutes(router, buildFS, indexPage)
 
@@ -84,6 +87,9 @@ func registerAPIRoutes(
 	router *gin.Engine,
 	serverHandler *handler.Server,
 	configManager types.ConfigManager,
+	autoRouteHandler *handler.AutoRouteHandler,
+	modelCatalogHandler *handler.ModelCatalogHandler,
+	dedupHandler *handler.DedupHandler,
 ) {
 	api := router.Group("/api")
 	api.Use(i18n.Middleware())
@@ -96,7 +102,7 @@ func registerAPIRoutes(
 	// 认证
 	protectedAPI := api.Group("")
 	protectedAPI.Use(middleware.Auth(authConfig))
-	registerProtectedAPIRoutes(protectedAPI, serverHandler)
+	registerProtectedAPIRoutes(protectedAPI, serverHandler, autoRouteHandler, modelCatalogHandler, dedupHandler)
 }
 
 // registerPublicAPIRoutes 公开API路由
@@ -106,8 +112,32 @@ func registerPublicAPIRoutes(api *gin.RouterGroup, serverHandler *handler.Server
 }
 
 // registerProtectedAPIRoutes 认证API路由
-func registerProtectedAPIRoutes(api *gin.RouterGroup, serverHandler *handler.Server) {
+func registerProtectedAPIRoutes(
+	api *gin.RouterGroup,
+	serverHandler *handler.Server,
+	autoRouteHandler *handler.AutoRouteHandler,
+	modelCatalogHandler *handler.ModelCatalogHandler,
+	dedupHandler *handler.DedupHandler,
+) {
 	api.GET("/channel-types", serverHandler.CommonHandler.GetChannelTypes)
+
+	// Auto Route API
+	autoRoute := api.Group("/auto-routing")
+	{
+		autoRoute.GET("/config", autoRouteHandler.GetConfig)
+		autoRoute.POST("/config", autoRouteHandler.SaveConfig)
+		autoRoute.POST("/test", autoRouteHandler.TestRoute)
+	}
+
+	// Model Catalog API
+	api.GET("/models", modelCatalogHandler.ListModels)
+
+	// Model Dedup API
+	dedup := api.Group("/dedup")
+	{
+		dedup.GET("/suggestions", dedupHandler.GetSuggestions)
+		dedup.POST("/create", dedupHandler.CreateAggregate)
+	}
 
 	groups := api.Group("/groups")
 	{

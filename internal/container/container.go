@@ -109,6 +109,22 @@ func BuildContainer() (*dig.Container, error) {
 		return nil, err
 	}
 
+	// Auto Route Handlers
+	if err := container.Provide(handler.NewAutoRouteHandler); err != nil {
+		return nil, err
+	}
+	if err := container.Provide(handler.NewModelCatalogHandler); err != nil {
+		return nil, err
+	}
+
+	// Model Dedup Service
+	if err := container.Provide(services.NewModelDedupService); err != nil {
+		return nil, err
+	}
+	if err := container.Provide(handler.NewDedupHandler); err != nil {
+		return nil, err
+	}
+
 	// Proxy & Router
 	if err := container.Provide(proxy.NewProxyServer); err != nil {
 		return nil, err

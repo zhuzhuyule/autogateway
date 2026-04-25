@@ -163,6 +163,14 @@ func (gm *GroupManager) GetGroupByName(name string) (*models.Group, error) {
 	return group, nil
 }
 
+// GetAllGroups returns all groups from the cache.
+func (gm *GroupManager) GetAllGroups() map[string]*models.Group {
+	if gm.syncer == nil {
+		return nil
+	}
+	return gm.syncer.Get()
+}
+
 // Invalidate triggers a cache reload across all instances.
 func (gm *GroupManager) Invalidate() error {
 	if gm.syncer == nil {
