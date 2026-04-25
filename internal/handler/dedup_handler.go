@@ -20,22 +20,13 @@ func NewDedupHandler(dedupService *services.ModelDedupService) *DedupHandler {
 
 func (h *DedupHandler) GetSuggestions(c *gin.Context) {
 	suggestions := h.dedupService.GetDedupSuggestions()
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"data":    suggestions,
-	})
-}
-
-type SubGroupConfig struct {
-	Name     string            `json:"name"`
-	Weight   int               `json:"weight"`
-	Redirect map[string]string `json:"redirect"`
+	c.JSON(http.StatusOK, suggestions)
 }
 
 type CreateAggregateRequest struct {
-	AggregateName string           `json:"aggregate_name"`
-	ModelName     string           `json:"model_name"`
-	SubGroups     []SubGroupConfig `json:"sub_groups"`
+	AggregateName string   `json:"aggregate_name"`
+	ModelName     string   `json:"model_name"`
+	SourceGroups  []string `json:"source_groups"`
 }
 
 func (h *DedupHandler) CreateAggregate(c *gin.Context) {
@@ -53,12 +44,7 @@ func (h *DedupHandler) CreateAggregate(c *gin.Context) {
 		"data": map[string]interface{}{
 			"aggregate_name": req.AggregateName,
 			"model_name":     req.ModelName,
-			"config": map[string]interface{}{
-				"name":       req.AggregateName,
-				"type":       "aggregate",
-				"sub_groups": req.SubGroups,
-				"model_list": []string{req.ModelName},
-			},
+			"source_groups":   req.SourceGroups,
 		},
 	})
 }
