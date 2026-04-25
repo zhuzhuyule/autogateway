@@ -648,6 +648,10 @@ export default {
     complexGroup: "複雑グループ",
     addNewMapping: "新しいマッピングを追加",
     modelNamePlaceholder: "モデル名 (例: gpt-4o)",
+    loadConfigFailed: "設定の読み込みに失敗",
+    noMappings: "マッピングが設定されていません",
+    pleaseEnterModelName: "モデル名を入力してください",
+    modelAlreadyExists: "モデルは既に存在します",
   },
   modelcatalog: {
     title: "モデルカタログ",
@@ -656,6 +660,8 @@ export default {
     ownedBy: "所有",
     groups: "グループ",
     noGroups: "グループなし",
+    noData: "データがありません",
+    loadFailed: "モデルカタログの読み込みに失敗",
   },
   dedup: {
     title: "モデル重複排除",
@@ -666,5 +672,8 @@ export default {
     createAggregateTitle: "集約モデルを作成",
     createAggregateConfirm: "「{model}」の集約モデルを作成しますか？",
     aggregateNamePlaceholder: "集約モデル名",
+    loadFailed: "重複削除の提案の読み込みに失敗",
+    noSuggestions: "重複削除の提案がありません",
+    pleaseEnterAggregateName: "集約モデル名を入力してください",
   },
 };

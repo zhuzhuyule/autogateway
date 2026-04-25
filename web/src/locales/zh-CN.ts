@@ -630,6 +630,10 @@ export default {
     complexGroup: "复杂分组",
     addNewMapping: "添加新映射",
     modelNamePlaceholder: "模型名称 (如 gpt-4o)",
+    loadConfigFailed: "加载配置失败",
+    noMappings: "暂无映射配置",
+    pleaseEnterModelName: "请输入模型名称",
+    modelAlreadyExists: "模型已存在",
   },
   modelcatalog: {
     title: "模型目录",
@@ -638,6 +642,8 @@ export default {
     ownedBy: "所属",
     groups: "分组",
     noGroups: "无分组",
+    noData: "暂无数据",
+    loadFailed: "加载模型目录失败",
   },
   dedup: {
     title: "模型去重",
@@ -648,5 +654,8 @@ export default {
     createAggregateTitle: "创建聚合模型",
     createAggregateConfirm: "确定要为「{model}」创建聚合模型吗？",
     aggregateNamePlaceholder: "聚合模型名称",
+    loadFailed: "加载去重建议失败",
+    noSuggestions: "暂无去重建议",
+    pleaseEnterAggregateName: "请输入聚合模型名称",
   },
 };

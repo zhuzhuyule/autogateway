@@ -647,6 +647,10 @@ export default {
     complexGroup: "Complex Group",
     addNewMapping: "Add New Mapping",
     modelNamePlaceholder: "Model name (e.g., gpt-4o)",
+    loadConfigFailed: "Failed to load configuration",
+    noMappings: "No mappings configured",
+    pleaseEnterModelName: "Please enter model name",
+    modelAlreadyExists: "Model already exists",
   },
   modelcatalog: {
     title: "Model Catalog",
@@ -655,6 +659,8 @@ export default {
     ownedBy: "Owned By",
     groups: "Groups",
     noGroups: "No Groups",
+    noData: "No data available",
+    loadFailed: "Failed to load model catalog",
   },
   dedup: {
     title: "Model Deduplication",
@@ -665,5 +671,8 @@ export default {
     createAggregateTitle: "Create Aggregate Model",
     createAggregateConfirm: "Create aggregate model for \"{model}\"?",
     aggregateNamePlaceholder: "Aggregate model name",
+    loadFailed: "Failed to load dedup suggestions",
+    noSuggestions: "No dedup suggestions",
+    pleaseEnterAggregateName: "Please enter aggregate name",
   },
 };
