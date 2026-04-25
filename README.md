@@ -57,9 +57,20 @@ AutoGateway 是自托管的 AI API 网关。它在 [GPT-Load](https://github.com
 管理面板提供:
 - **三档预设**(省钱/平衡/性能)一键应用
 - **路由测试器** 粘贴请求 JSON,实时看到分类等级、估算 tokens、命中分组
-- **分组下拉** 从已有分组里选,不用记名字
+- **分组下拉带模型计数**,例如 `Groq Cloud (groq) · 18 个模型`
+- **每行映射下方显示样例**:`simple: gpt-4o-mini, llama-3.1-8b...  +5`,配置时不用切页找
 
-### 🔄 模型目录 + 自动去重
+### 🔍 上游真实模型一键拉取 + 浏览
+- 一键调用上游 `/v1/models` (OpenAI / Anthropic / Gemini 三种协议自动识别),把真实可用模型缓存到分组
+- **`test_model` 字段从输入框升级为下拉选项**(可搜索 + 自由手填兜底),不用再手输全名
+- **多处可视化**:
+  - **创建/编辑分组弹窗**:折叠面板"上游可用模型",可搜索/复制/"设为测试模型"/即时刷新
+  - **分组详情(只读)**:无需点编辑,选中分组即可浏览
+  - **聚合分组详情**:展示**子分组合并去重后**的总模型数,每条显示由哪些子分组提供——一眼看出"我这个聚合一共能调多少模型 / 哪些模型有冗余"
+  - **Model Catalog 全局页**:跨分组聚合的总模型,带筛选(搜索/档位/Provider/仅免费)
+- **🆓 免费徽标 + 能力档位标签**(Fast / Balanced / Max),内置 30+ 条已知免费模型清单,免费优先排序
+
+### 🔄 自动模型去重
 跨分组扫描相同模型(比如多家都提供 `llama-3.3-70b`),给出聚合建议;`GET /openai/v1/models` 暴露统一目录。
 
 ### 🔐 多档隔离
@@ -149,8 +160,17 @@ POST /proxy/{group_name}/v1/chat/completions
 ```
 每个分组可以单独设 `proxy_keys` 做团队隔离。
 
-### 管理 API
-完整列表见运行后 `http://localhost:3001/api`。常用:`/api/groups`、`/api/groups/{id}/keys`、`/api/auto-routing/config`、`/api/models`。
+### 管理 API(常用)
+| 端点 | 说明 |
+|---|---|
+| `GET    /api/groups` / `/api/groups/list` | 分组列表(含 `available_models` 缓存 + `models_refreshed_at`) |
+| `POST   /api/groups` / `PUT /api/groups/{id}` | 增删改分组 |
+| `POST   /api/groups/{id}/refresh-models` | **拉取上游真实模型列表**(自动按 channel_type 选择 endpoint) |
+| `POST   /api/groups/{id}/keys` 等 | Key 管理 |
+| `GET    /api/models` | 跨分组聚合的统一模型目录 |
+| `GET    /api/auto-routing/config` / `POST /api/auto-routing/config` | Auto Routing 配置 |
+| `POST   /api/auto-routing/test` | 路由测试器(粘贴请求 JSON,返回分类与目标分组) |
+| `GET    /api/dedup/suggestions` / `POST /api/dedup/create` | 模型去重建议 |
 
 ---
 
@@ -213,6 +233,11 @@ POST /proxy/{group_name}/v1/chat/completions
 
 ## Roadmap
 
+- [x] 系统默认聚合(default-openai/gemini/anthropic)+ 快捷路径
+- [x] 免费 Provider 一键预填 + 已添加状态徽标
+- [x] 智能复杂度路由 + 三档预设 + 路由测试器
+- [x] 上游 `/v1/models` 实时拉取 + 多处模型浏览
+- [x] 免费 / 能力档位(Fast/Balanced/Max)模型徽标
 - [ ] 跨 channel 协议翻译(OpenAI ↔ Anthropic ↔ Gemini)
 - [ ] 用量配额、预算告警、按 Key 计费
 - [ ] OAuth / SSO 登录
