@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { keysApi } from "@/api/keys";
 import { appState } from "@/utils/app-state";
-import { Close, CloudUploadOutline } from "@vicons/ionicons5";
-import { NButton, NCard, NInput, NModal, NUpload, type UploadFileInfo } from "naive-ui";
+import { CloudUploadOutline, DocumentTextOutline } from "@vicons/ionicons5";
+import { NButton, NCard, NIcon, NInput, NModal, NUpload, type UploadFileInfo } from "naive-ui";
 import { ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 
@@ -28,7 +28,6 @@ const keysText = ref("");
 const inputMode = ref<"text" | "file">("text");
 const fileList = ref<UploadFileInfo[]>([]);
 
-// 监听弹窗显示状态
 watch(
   () => props.show,
   show => {
@@ -38,19 +37,16 @@ watch(
   }
 );
 
-// 重置表单
 function resetForm() {
   keysText.value = "";
   inputMode.value = "text";
   fileList.value = [];
 }
 
-// 关闭弹窗
 function handleClose() {
   emit("update:show", false);
 }
 
-// 切换输入模式
 function toggleInputMode() {
   if (inputMode.value === "text") {
     inputMode.value = "file";
@@ -61,7 +57,6 @@ function toggleInputMode() {
   }
 }
 
-// 文件上传前的检查
 function beforeUpload(data: { file: UploadFileInfo; fileList: UploadFileInfo[] }) {
   if (!data.file.name?.endsWith(".txt")) {
     window.$message.error(t("keys.onlyTxtFileSupported"));
@@ -70,12 +65,10 @@ function beforeUpload(data: { file: UploadFileInfo; fileList: UploadFileInfo[] }
   return true;
 }
 
-// 文件变化处理
 function handleFileChange(options: { fileList: UploadFileInfo[] }) {
   fileList.value = options.fileList;
 }
 
-// 提交表单
 async function handleSubmit() {
   if (loading.value) {
     return;
@@ -110,7 +103,6 @@ async function handleSubmit() {
   }
 }
 
-// 计算提交按钮是否可用
 function isSubmitDisabled() {
   if (inputMode.value === "text") {
     return !keysText.value.trim();
@@ -121,9 +113,9 @@ function isSubmitDisabled() {
 </script>
 
 <template>
-  <n-modal :show="show" @update:show="handleClose" class="form-modal">
+  <n-modal :show="show" @update:show="handleClose" class="v3-modal">
     <n-card
-      style="width: 800px"
+      class="v3-modal-card"
       :title="t('keys.addKeysToGroup', { group: groupName || t('keys.currentGroup') })"
       :bordered="false"
       size="huge"
@@ -131,53 +123,68 @@ function isSubmitDisabled() {
       aria-modal="true"
     >
       <template #header-extra>
-        <n-button quaternary circle @click="handleClose">
+        <n-button quaternary circle size="small" @click="handleClose" class="v3-modal-close">
           <template #icon>
-            <n-icon :component="Close" />
+            <n-icon :component="DocumentTextOutline" />
           </template>
         </n-button>
       </template>
 
-      <!-- 文本输入模式 -->
-      <n-input
-        v-if="inputMode === 'text'"
-        v-model:value="keysText"
-        type="textarea"
-        :placeholder="t('keys.enterKeysPlaceholder')"
-        :rows="8"
-        style="margin-top: 20px"
-      />
-
-      <!-- 文件上传模式 -->
-      <n-upload
-        v-else
-        v-model:file-list="fileList"
-        :max="1"
-        accept=".txt"
-        :before-upload="beforeUpload"
-        @change="handleFileChange"
-        style="margin-top: 20px"
-      >
-        <div class="upload-area">
-          <n-icon size="48" :component="CloudUploadOutline" style="color: #18a058" />
-          <div class="upload-text">{{ t("keys.clickOrDragFile") }}</div>
-          <div class="upload-hint">{{ t("keys.onlyTxtFileSupported") }}</div>
+      <div class="v3-modal-body">
+        <div class="v3-input-toggle">
+          <button
+            class="v3-toggle-btn"
+            :class="{ active: inputMode === 'text' }"
+            @click="inputMode = 'text'"
+          >
+            <n-icon :component="DocumentTextOutline" />
+            {{ t("keys.manualInput") }}
+          </button>
+          <button
+            class="v3-toggle-btn"
+            :class="{ active: inputMode === 'file' }"
+            @click="inputMode = 'file'"
+          >
+            <n-icon :component="CloudUploadOutline" />
+            {{ t("keys.uploadFile") }}
+          </button>
         </div>
-      </n-upload>
 
-      <template #footer>
-        <div style="display: flex; justify-content: space-between; align-items: center">
-          <n-button @click="toggleInputMode" secondary>
+        <div v-if="inputMode === 'text'" class="v3-textarea-wrapper">
+          <textarea
+            v-model="keysText"
+            class="v3-textarea"
+            :placeholder="t('keys.enterKeysPlaceholder')"
+            rows="8"
+          />
+        </div>
+
+        <div v-else class="v3-upload-wrapper">
+          <n-upload
+            v-model:file-list="fileList"
+            :max="1"
+            accept=".txt"
+            :before-upload="beforeUpload"
+            @change="handleFileChange"
+            drag
+          >
+            <div class="v3-upload-area">
+              <n-icon size="32" :component="CloudUploadOutline" class="v3-upload-icon" />
+              <div class="v3-upload-text">{{ t("keys.clickOrDragFile") }}</div>
+              <div class="v3-upload-hint">{{ t("keys.onlyTxtFileSupported") }}</div>
+            </div>
+          </n-upload>
+        </div>
+      </div>
+
+      <template #action>
+        <div class="v3-modal-footer">
+          <n-button size="small" @click="toggleInputMode">
             {{ inputMode === "text" ? t("keys.uploadFile") : t("keys.manualInput") }}
           </n-button>
-          <div style="display: flex; gap: 12px">
-            <n-button @click="handleClose">{{ t("common.cancel") }}</n-button>
-            <n-button
-              type="primary"
-              @click="handleSubmit"
-              :loading="loading"
-              :disabled="isSubmitDisabled()"
-            >
+          <div class="v3-modal-actions">
+            <n-button size="small" @click="handleClose">{{ t("common.cancel") }}</n-button>
+            <n-button type="primary" size="small" @click="handleSubmit" :loading="loading" :disabled="isSubmitDisabled()">
               {{ t("common.add") }}
             </n-button>
           </div>
@@ -188,56 +195,138 @@ function isSubmitDisabled() {
 </template>
 
 <style scoped>
-.form-modal {
-  --n-color: rgba(255, 255, 255, 0.95);
+.v3-modal {
+  width: 600px;
+  max-width: 90vw;
 }
 
-:deep(.n-input) {
-  --n-border-radius: 6px;
+.v3-modal-card {
+  border-radius: var(--v3-radius-md);
+  border: 1px solid var(--v3-line);
+  box-shadow: var(--v3-shadow-md);
 }
 
-:deep(.n-card-header) {
-  border-bottom: 1px solid rgba(239, 239, 245, 0.8);
-  padding: 10px 20px;
+.v3-modal-close {
+  opacity: 0.6;
 }
 
-:deep(.n-card__content) {
-  max-height: calc(100vh - 68px - 61px - 50px);
-  overflow-y: auto;
+.v3-modal-close:hover {
+  opacity: 1;
 }
 
-:deep(.n-card__footer) {
-  border-top: 1px solid rgba(239, 239, 245, 0.8);
-  padding: 10px 15px;
+.v3-modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
 }
 
-.upload-area {
+.v3-input-toggle {
+  display: flex;
+  gap: 8px;
+  padding: 4px;
+  background: var(--v3-surface-2);
+  border-radius: var(--v3-radius);
+}
+
+.v3-toggle-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border: none;
+  background: transparent;
+  color: var(--v3-ink-2);
+  font: 500 12px/1 var(--v3-sans);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 120ms;
+}
+
+.v3-toggle-btn:hover {
+  background: var(--v3-surface);
+  color: var(--v3-ink);
+}
+
+.v3-toggle-btn.active {
+  background: var(--v3-surface);
+  color: var(--v3-ink);
+  box-shadow: 0 1px 3px oklch(0 0 0 / 0.1);
+}
+
+.v3-textarea-wrapper {
+  border: 1px solid var(--v3-line);
+  border-radius: var(--v3-radius);
+  overflow: hidden;
+}
+
+.v3-textarea {
+  width: 100%;
+  min-height: 180px;
+  padding: 12px;
+  border: none;
+  background: var(--v3-surface);
+  font: 500 12px/1.5 var(--v3-mono);
+  color: var(--v3-ink);
+  resize: vertical;
+  outline: none;
+}
+
+.v3-textarea::placeholder {
+  color: var(--v3-ink-4);
+}
+
+.v3-textarea:focus {
+  background: var(--v3-surface);
+}
+
+.v3-upload-wrapper {
+  border: 1px dashed var(--v3-line-strong);
+  border-radius: var(--v3-radius);
+  overflow: hidden;
+}
+
+.v3-upload-area {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 40px;
-  border: 2px dashed #d9d9d9;
-  border-radius: 6px;
-  background-color: #fafafa;
+  padding: 48px 24px;
+  background: var(--v3-surface);
   cursor: pointer;
-  transition: all 0.3s;
+  transition: all 120ms;
 }
 
-.upload-area:hover {
-  border-color: #18a058;
-  background-color: #f0f9f4;
+.v3-upload-area:hover {
+  background: var(--v3-surface-2);
+  border-color: var(--v3-accent);
 }
 
-.upload-text {
-  margin-top: 12px;
-  font-size: 16px;
-  color: #333;
+.v3-upload-icon {
+  color: var(--v3-ink-3);
+  margin-bottom: 12px;
 }
 
-.upload-hint {
-  margin-top: 8px;
-  font-size: 14px;
-  color: #999;
+.v3-upload-text {
+  font: 500 13px/1 var(--v3-sans);
+  color: var(--v3-ink);
+  margin-bottom: 4px;
+}
+
+.v3-upload-hint {
+  font: 400 11px/1 var(--v3-sans);
+  color: var(--v3-ink-3);
+}
+
+.v3-modal-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.v3-modal-actions {
+  display: flex;
+  gap: 8px;
 }
 </style>

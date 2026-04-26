@@ -744,9 +744,9 @@ async function handleSubmit() {
 </script>
 
 <template>
-  <n-modal :show="show" @update:show="handleClose" class="group-form-modal">
+  <n-modal :show="show" @update:show="handleClose" class="v3-modal">
     <n-card
-      class="group-form-card"
+      class="v3-modal-card"
       :title="group ? t('keys.editGroup') : t('keys.createGroup')"
       :bordered="false"
       size="huge"
@@ -754,22 +754,23 @@ async function handleSubmit() {
       aria-modal="true"
     >
       <template #header-extra>
-        <n-button quaternary circle @click="handleClose">
+        <n-button quaternary circle @click="handleClose" class="v3-modal-close">
           <template #icon>
             <n-icon :component="Close" />
           </template>
         </n-button>
       </template>
 
-      <n-form
-        ref="formRef"
-        :model="formData"
-        :rules="rules"
-        label-placement="left"
-        label-width="120px"
-        require-mark-placement="right-hanging"
-        class="group-form"
-      >
+      <div class="v3-modal-body">
+        <n-form
+          ref="formRef"
+          :model="formData"
+          :rules="rules"
+          label-placement="left"
+          label-width="120px"
+          require-mark-placement="right-hanging"
+          class="group-form"
+        >
         <!-- 免费 Provider 快速预填(仅创建标准分组时显示) -->
         <div v-if="showProviderPicker" class="form-section provider-picker">
           <n-collapse v-model:expanded-names="providerPanelExpanded">
@@ -1527,13 +1528,17 @@ async function handleSubmit() {
           </n-collapse>
         </div>
       </n-form>
+      </div>
 
-      <template #footer>
-        <div style="display: flex; justify-content: flex-end; gap: 12px">
-          <n-button @click="handleClose">{{ t("common.cancel") }}</n-button>
-          <n-button type="primary" @click="handleSubmit" :loading="loading">
-            {{ group ? t("common.update") : t("common.create") }}
-          </n-button>
+      <template #action>
+        <div class="v3-modal-footer">
+          <div></div>
+          <div class="v3-modal-actions">
+            <n-button size="small" @click="handleClose" :disabled="loading">{{ t("common.cancel") }}</n-button>
+            <n-button type="primary" size="small" @click="handleSubmit" :loading="loading">
+              {{ group ? t("common.update") : t("common.create") }}
+            </n-button>
+          </div>
         </div>
       </template>
     </n-card>
@@ -1541,8 +1546,29 @@ async function handleSubmit() {
 </template>
 
 <style scoped>
-.group-form-modal {
+.v3-modal {
   width: 800px;
+  max-width: 90vw;
+}
+
+.v3-modal-card {
+  border-radius: var(--v3-radius-md);
+  border: 1px solid var(--v3-line);
+  box-shadow: var(--v3-shadow-md);
+}
+
+.v3-modal-close {
+  opacity: 0.6;
+}
+
+.v3-modal-close:hover {
+  opacity: 1;
+}
+
+.v3-modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
 }
 
 .form-section {
@@ -1552,10 +1578,10 @@ async function handleSubmit() {
 .section-title {
   font-size: 1rem;
   font-weight: 600;
-  color: var(--text-primary);
+  color: var(--v3-text-primary);
   margin: 0 0 16px 0;
   padding-bottom: 8px;
-  border-bottom: 2px solid var(--border-color);
+  border-bottom: 2px solid var(--v3-line);
 }
 
 .provider-picker {
@@ -1570,11 +1596,11 @@ async function handleSubmit() {
 
 .provider-picker-icon {
   font-size: 18px;
-  color: var(--primary-color, #18a058);
+  color: var(--v3-primary);
 }
 
 .provider-picker-tip {
-  color: var(--text-color-3, #999);
+  color: var(--v3-text-secondary);
   font-size: 13px;
   margin: 0 0 12px 0;
 }
@@ -1586,19 +1612,19 @@ async function handleSubmit() {
 }
 
 .provider-card {
-  border: 1px solid var(--border-color);
-  border-radius: 6px;
+  border: 1px solid var(--v3-line);
+  border-radius: var(--v3-radius-sm);
   padding: 6px 10px;
   cursor: pointer;
   transition: border-color 0.15s, box-shadow 0.15s, transform 0.05s;
-  background: var(--card-color, transparent);
+  background: var(--v3-surface);
   display: flex;
   flex-direction: column;
   gap: 2px;
 }
 
 .provider-card:hover {
-  border-color: var(--primary-color, #18a058);
+  border-color: var(--v3-primary);
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.05);
 }
 
@@ -1607,13 +1633,13 @@ async function handleSubmit() {
 }
 
 .provider-card-used {
-  background: var(--primary-color-suppl, rgba(24, 160, 88, 0.06));
+  background: var(--v3-primary-bg);
   border-style: dashed;
 }
 
 .provider-card-used .provider-card-name::after {
   content: " ✓";
-  color: var(--primary-color, #18a058);
+  color: var(--v3-primary);
   font-weight: 700;
 }
 
@@ -1624,8 +1650,8 @@ async function handleSubmit() {
 }
 
 .upstream-models-section {
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
+  border: 1px solid var(--v3-line);
+  border-radius: var(--v3-radius-md);
   padding: 6px 12px;
 }
 
@@ -1661,16 +1687,16 @@ async function handleSubmit() {
   justify-content: space-between;
   gap: 6px;
   padding: 6px 10px;
-  border: 1px solid var(--border-color);
-  border-radius: 6px;
-  background: var(--card-color, transparent);
+  border: 1px solid var(--v3-line);
+  border-radius: var(--v3-radius-sm);
+  background: var(--v3-surface);
   font-size: 12px;
   transition: border-color 0.15s, background 0.15s;
 }
 
 .model-item:hover {
-  border-color: var(--primary-color, #18a058);
-  background: var(--primary-color-suppl, rgba(24, 160, 88, 0.04));
+  border-color: var(--v3-primary);
+  background: var(--v3-primary-bg);
 }
 
 .model-item-main {
@@ -1697,7 +1723,7 @@ async function handleSubmit() {
 }
 
 .hint {
-  color: var(--text-color-3, #999);
+  color: var(--v3-text-secondary);
   font-size: 12px;
 }
 
@@ -1718,7 +1744,7 @@ async function handleSubmit() {
 
 .provider-card-tier {
   font-size: 11px;
-  color: var(--primary-color, #18a058);
+  color: var(--v3-primary);
   line-height: 1.3;
 }
 
@@ -1727,13 +1753,13 @@ async function handleSubmit() {
   align-items: center;
   gap: 2px;
   font-size: 11px;
-  color: var(--text-color-3, #999);
+  color: var(--v3-text-secondary);
   text-decoration: none;
   margin-top: 2px;
 }
 
 .provider-card-signup:hover {
-  color: var(--primary-color, #18a058);
+  color: var(--v3-primary);
   text-decoration: underline;
 }
 
@@ -1746,19 +1772,19 @@ async function handleSubmit() {
 }
 
 :deep(.n-input) {
-  --n-border-radius: 6px;
+  --n-border-radius: var(--v3-radius-sm);
 }
 
 :deep(.n-select) {
-  --n-border-radius: 6px;
+  --n-border-radius: var(--v3-radius-sm);
 }
 
 :deep(.n-input-number) {
-  --n-border-radius: 6px;
+  --n-border-radius: var(--v3-radius-sm);
 }
 
 :deep(.n-card-header) {
-  border-bottom: 1px solid var(--border-color);
+  border-bottom: 1px solid var(--v3-line);
   padding: 10px 20px;
 }
 
@@ -1768,7 +1794,7 @@ async function handleSubmit() {
 }
 
 :deep(.n-card__footer) {
-  border-top: 1px solid var(--border-color);
+  border-top: 1px solid var(--v3-line);
   padding: 10px 15px;
 }
 
@@ -1783,7 +1809,7 @@ async function handleSubmit() {
 .config-title {
   font-size: 0.9rem;
   font-weight: 600;
-  color: var(--text-primary);
+  color: var(--v3-text-primary);
   margin: 0 0 12px 0;
 }
 
@@ -1795,7 +1821,7 @@ async function handleSubmit() {
   font-weight: 500;
 }
 
-/* Tooltip相关样式 */
+/* Tooltip related styles */
 .form-label-with-tooltip {
   display: flex;
   align-items: center;
@@ -1803,14 +1829,14 @@ async function handleSubmit() {
 }
 
 .help-icon {
-  color: var(--text-tertiary);
+  color: var(--v3-text-tertiary);
   font-size: 14px;
   cursor: help;
   transition: color 0.2s ease;
 }
 
 .help-icon:hover {
-  color: var(--primary-color);
+  color: var(--v3-primary);
 }
 
 .section-title-with-tooltip {
@@ -1841,7 +1867,7 @@ async function handleSubmit() {
   gap: 6px;
   font-size: 0.9rem;
   font-weight: 600;
-  color: var(--text-primary);
+  color: var(--v3-text-primary);
   margin: 0 0 12px 0;
 }
 
@@ -1849,33 +1875,33 @@ async function handleSubmit() {
   font-size: 13px;
 }
 
-/* 增强表单样式 */
+/* Enhanced form styles */
 :deep(.n-form-item-label) {
   font-weight: 500;
-  color: var(--text-primary);
+  color: var(--v3-text-primary);
 }
 
 :deep(.n-input) {
-  --n-border-radius: 8px;
-  --n-border: 1px solid var(--border-color);
-  --n-border-hover: 1px solid var(--primary-color);
-  --n-border-focus: 1px solid var(--primary-color);
-  --n-box-shadow-focus: 0 0 0 2px var(--primary-color-suppl);
+  --n-border-radius: var(--v3-radius-sm);
+  --n-border: 1px solid var(--v3-line);
+  --n-border-hover: 1px solid var(--v3-primary);
+  --n-border-focus: 1px solid var(--v3-primary);
+  --n-box-shadow-focus: 0 0 0 2px var(--v3-primary-bg);
 }
 
 :deep(.n-select) {
-  --n-border-radius: 8px;
+  --n-border-radius: var(--v3-radius-sm);
 }
 
 :deep(.n-input-number) {
-  --n-border-radius: 8px;
+  --n-border-radius: var(--v3-radius-sm);
 }
 
 :deep(.n-button) {
-  --n-border-radius: 8px;
+  --n-border-radius: var(--v3-radius-sm);
 }
 
-/* 美化tooltip */
+/* Tooltip styles */
 :deep(.n-tooltip__trigger) {
   display: inline-flex;
   align-items: center;
@@ -1883,7 +1909,7 @@ async function handleSubmit() {
 
 :deep(.n-tooltip) {
   --n-font-size: 13px;
-  --n-border-radius: 8px;
+  --n-border-radius: var(--v3-radius-sm);
 }
 
 :deep(.n-tooltip .n-tooltip__content) {
@@ -1895,10 +1921,10 @@ async function handleSubmit() {
   white-space: pre-line;
 }
 
-/* 折叠面板样式优化 */
+/* Collapse panel style optimization */
 :deep(.n-collapse-item__header) {
   font-weight: 500;
-  color: var(--text-primary);
+  color: var(--v3-text-primary);
 }
 
 :deep(.n-collapse-item) {
@@ -1942,7 +1968,7 @@ async function handleSubmit() {
 
 .weight-label {
   font-weight: 500;
-  color: var(--text-primary);
+  color: var(--v3-text-primary);
   white-space: nowrap;
 }
 
@@ -2049,14 +2075,14 @@ async function handleSubmit() {
 
 .header-value.removed-placeholder {
   justify-content: center;
-  background-color: var(--bg-secondary);
-  border: 1px solid var(--border-color);
-  border-radius: 6px;
+  background-color: var(--v3-surface);
+  border: 1px solid var(--v3-line);
+  border-radius: var(--v3-radius-sm);
   padding: 0 12px;
 }
 
 .removed-text {
-  color: var(--text-tertiary);
+  color: var(--v3-text-tertiary);
   font-style: italic;
   font-size: 13px;
 }
@@ -2082,11 +2108,94 @@ async function handleSubmit() {
   top: 100%;
   left: 0;
   font-size: 12px;
-  color: var(--error-color);
+  color: var(--v3-error);
   margin-top: 2px;
 }
 
+/* Header rule related styles */
+.header-rule-row {
+  margin-bottom: 12px;
+}
+
+.header-rule-content {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  width: 100%;
+}
+
+.header-name {
+  flex: 0 0 200px;
+  position: relative;
+}
+
+.header-value {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  min-height: 34px;
+}
+
+.header-action {
+  flex: 0 0 50px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 34px;
+}
+
+.header-actions {
+  flex: 0 0 32px;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  height: 34px;
+}
+
 @media (max-width: 768px) {
+  .v3-modal-card {
+    width: 100vw !important;
+  }
+
+  .group-form {
+    width: auto !important;
+  }
+
+  .form-row {
+    flex-direction: column;
+    gap: 0;
+  }
+
+  .form-item-half {
+    width: 100%;
+  }
+
+  .section-title {
+    font-size: 0.9rem;
+  }
+
+  .upstream-row,
+  .config-item-content {
+    flex-direction: column;
+    gap: 8px;
+    align-items: stretch;
+  }
+
+  .upstream-weight {
+    flex: 1;
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .config-value {
+    flex: 1;
+  }
+
+  .upstream-actions,
+  .config-actions {
+    justify-content: flex-end;
+  }
+
   .header-rule-content {
     flex-direction: column;
     gap: 8px;

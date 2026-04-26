@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { keysApi } from "@/api/keys";
 import { appState } from "@/utils/app-state";
-import { Close } from "@vicons/ionicons5";
-import { NButton, NCard, NInput, NModal } from "naive-ui";
+import { AlertCircleOutline, DocumentTextOutline } from "@vicons/ionicons5";
+import { NButton, NCard, NIcon, NModal } from "naive-ui";
 import { ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 
@@ -26,7 +26,6 @@ const { t } = useI18n();
 const loading = ref(false);
 const keysText = ref("");
 
-// 监听弹窗显示状态
 watch(
   () => props.show,
   show => {
@@ -36,17 +35,14 @@ watch(
   }
 );
 
-// 重置表单
 function resetForm() {
   keysText.value = "";
 }
 
-// 关闭弹窗
 function handleClose() {
   emit("update:show", false);
 }
 
-// 提交表单
 async function handleSubmit() {
   if (loading.value || !keysText.value.trim()) {
     return;
@@ -68,9 +64,9 @@ async function handleSubmit() {
 </script>
 
 <template>
-  <n-modal :show="show" @update:show="handleClose" class="form-modal">
+  <n-modal :show="show" @update:show="handleClose" class="v3-modal">
     <n-card
-      style="width: 800px"
+      class="v3-modal-card"
       :title="t('keys.deleteKeysFromGroup', { group: groupName || t('keys.currentGroup') })"
       :bordered="false"
       size="huge"
@@ -78,27 +74,38 @@ async function handleSubmit() {
       aria-modal="true"
     >
       <template #header-extra>
-        <n-button quaternary circle @click="handleClose">
+        <n-button quaternary circle size="small" @click="handleClose" class="v3-modal-close">
           <template #icon>
-            <n-icon :component="Close" />
+            <n-icon :component="DocumentTextOutline" />
           </template>
         </n-button>
       </template>
 
-      <n-input
-        v-model:value="keysText"
-        type="textarea"
-        :placeholder="t('keys.enterKeysToDeletePlaceholder')"
-        :rows="8"
-        style="margin-top: 20px"
-      />
+      <div class="v3-modal-body">
+        <div class="v3-danger-notice">
+          <n-icon :component="AlertCircleOutline" class="v3-danger-icon" />
+          <span>{{ t("keys.deleteKeysWarning") }}</span>
+        </div>
 
-      <template #footer>
-        <div style="display: flex; justify-content: flex-end; gap: 12px">
-          <n-button @click="handleClose">{{ t("common.cancel") }}</n-button>
-          <n-button type="error" @click="handleSubmit" :loading="loading" :disabled="!keysText">
-            {{ t("common.delete") }}
-          </n-button>
+        <div class="v3-textarea-wrapper">
+          <textarea
+            v-model="keysText"
+            class="v3-textarea"
+            :placeholder="t('keys.enterKeysToDeletePlaceholder')"
+            rows="8"
+          />
+        </div>
+      </div>
+
+      <template #action>
+        <div class="v3-modal-footer">
+          <div></div>
+          <div class="v3-modal-actions">
+            <n-button size="small" @click="handleClose">{{ t("common.cancel") }}</n-button>
+            <n-button type="error" size="small" @click="handleSubmit" :loading="loading" :disabled="!keysText">
+              {{ t("common.delete") }}
+            </n-button>
+          </div>
         </div>
       </template>
     </n-card>
@@ -106,26 +113,83 @@ async function handleSubmit() {
 </template>
 
 <style scoped>
-.form-modal {
-  --n-color: rgba(255, 255, 255, 0.95);
+.v3-modal {
+  width: 600px;
+  max-width: 90vw;
 }
 
-:deep(.n-input) {
-  --n-border-radius: 6px;
+.v3-modal-card {
+  border-radius: var(--v3-radius-md);
+  border: 1px solid var(--v3-line);
+  box-shadow: var(--v3-shadow-md);
 }
 
-:deep(.n-card-header) {
-  border-bottom: 1px solid rgba(239, 239, 245, 0.8);
-  padding: 10px 20px;
+.v3-modal-close {
+  opacity: 0.6;
 }
 
-:deep(.n-card__content) {
-  max-height: calc(100vh - 68px - 61px - 50px);
-  overflow-y: auto;
+.v3-modal-close:hover {
+  opacity: 1;
 }
 
-:deep(.n-card__footer) {
-  border-top: 1px solid rgba(239, 239, 245, 0.8);
-  padding: 10px 15px;
+.v3-modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.v3-danger-notice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  background: var(--v3-danger-soft);
+  border: 1px solid oklch(0.82 0.10 25);
+  border-radius: var(--v3-radius);
+  font: 500 12px/1.4 var(--v3-sans);
+  color: oklch(0.42 0.16 25);
+}
+
+.v3-danger-icon {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+}
+
+.v3-textarea-wrapper {
+  border: 1px solid var(--v3-line);
+  border-radius: var(--v3-radius);
+  overflow: hidden;
+}
+
+.v3-textarea {
+  width: 100%;
+  min-height: 180px;
+  padding: 12px;
+  border: none;
+  background: var(--v3-surface);
+  font: 500 12px/1.5 var(--v3-mono);
+  color: var(--v3-ink);
+  resize: vertical;
+  outline: none;
+}
+
+.v3-textarea::placeholder {
+  color: var(--v3-ink-4);
+}
+
+.v3-textarea:focus {
+  background: var(--v3-surface);
+}
+
+.v3-modal-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.v3-modal-actions {
+  display: flex;
+  gap: 8px;
 }
 </style>
