@@ -23,7 +23,7 @@
 | **P2** | Docs / Drag-reorder / Inline notes / V3 LogTable | ✅ 完成 | `9de589b` |
 | **P3** | sparkline / latency / Settings 4 卡 / Top Models channel filter / Copy AUTH_KEY / version | ❌ 未开始 | — |
 | **P2-8** | 7 modal 模板深度 v3 改写 | ✅ 完成 | `3d69011` |
-| **Model Routing 重写** | 删 `auto-routing` + 新 `model_aliases` 表 + SWRR + 429 cooldown | 📋 设计就绪，等实施 | — |
+| **Model Routing 重写** | 删 `auto-routing` + 新 `model_aliases` 表 + SWRR + 429 cooldown | ✅ Phase 1-4 完成（待重启验证） | 待提交 |
 | **后端** | latency / activity / version / models metadata API | ❌ 未开始 | — |
 
 ---
@@ -331,12 +331,12 @@
   - 估时：后端 0.5d + 前端 10 分钟
 
 ### 长线
-- [ ] **Model Routing 重写（决策已定，硬切）** —— 详细方案见 §13
-  - Phase 1：加 `model_aliases` 表 + CRUD API（~2 天）
-  - Phase 2：新建 `internal/router/`，包含 SWRR + 429 cooldown 选择器，删 `internal/autoroute/`（~2 天）
-  - Phase 3：新建 `V3AliasesView.vue`（别名管理）+ `V3RoutingThresholds.vue`（极简阈值卡），删 `AutoRouting.vue`（~2 天）
-  - Phase 4：drop `auto_routing_config.group_mapping` + 删测试 + 文档（~半天）
-  - 估时：**~6.5 天**
+- [x] **Model Routing 重写（决策已定，硬切）** —— 详细方案见 §13；实施进度：
+  - [x] Phase 1：`model_aliases` GORM model + AliasService CRUD + AliasHandler + 路由注册 + reserved 别名 seed
+  - [x] Phase 2：`internal/router_engine/` 包含 SWRR + 429 cooldown 选择器 + middleware；删 `internal/autoroute/` 包；删 `AutoRouteHandler`；移除 `AutoRoutingConfig` 字段；drop `auto_routing_config` 列
+  - [x] Phase 3：新建 `V3AliasesView.vue`（别名管理 + 阈值卡 + 三个 reserved 锁定显示）+ `aliases.ts` API client；删 `AutoRouting.vue`；router 加 redirect；rail 切换到 `aliases`；i18n 三语言全套
+  - [x] Phase 4：`selector_test.go` 覆盖 SWRR 分布 / 同权重优先级排序 / cooldown bump+reset / tier 选择
+  - ⚠️ **待 user 重启 Go 后端验证编译** — Go 代码按现有 patterns 写，前端 vue-tsc + vite build 均通过
 - [ ] **后端 Bell 通知系统**（事件流：key invalid / quota exhausted / upstream down）—— 2–3 天
 - [ ] 跨 channel 协议翻译（OpenAI ↔ Anthropic ↔ Gemini）
 - [ ] 用量配额、预算告警、按 Key 计费

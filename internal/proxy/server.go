@@ -84,7 +84,7 @@ func (ps *ProxyServer) HandleProxy(c *gin.Context) {
 	}
 
 	// 先读 body 一次,以便:(1) 模型感知的子分组路由,(2) 后续 applyParamOverrides 复用.
-	// 中间件可能已经读过 body 并 Restore (如 autoroute),所以 c.Request.Body 总是可读.
+	// 中间件可能已经读过 body 并 Restore (如 router_engine),所以 c.Request.Body 总是可读.
 	bodyBytes, err := io.ReadAll(c.Request.Body)
 	if err != nil {
 		logrus.Errorf("Failed to read request body: %v", err)

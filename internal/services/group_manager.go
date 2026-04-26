@@ -163,6 +163,21 @@ func (gm *GroupManager) GetGroupByName(name string) (*models.Group, error) {
 	return group, nil
 }
 
+// GetGroupNameByID looks up a group's name by its primary key. Used by the
+// router_engine middleware to translate a Selector candidate's GroupID
+// into the group_name that the proxy handler expects in c.Param.
+func (gm *GroupManager) GetGroupNameByID(id uint) (string, bool) {
+	if gm.syncer == nil {
+		return "", false
+	}
+	for _, g := range gm.syncer.Get() {
+		if g.ID == id {
+			return g.Name, true
+		}
+	}
+	return "", false
+}
+
 // GetAllGroups returns all groups from the cache.
 func (gm *GroupManager) GetAllGroups() map[string]*models.Group {
 	if gm.syncer == nil {

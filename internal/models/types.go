@@ -135,6 +135,28 @@ type Group struct {
 	ModelRedirectMap map[string]string   `gorm:"-" json:"-"`
 }
 
+// ModelAlias 对应 model_aliases 表 — Model Routing 重写后的核心承载.
+// 一行 = (alias, group, real_model) 三元组 + 权重/优先级.
+// 同一 alias 下的多行构成「候选池」, 由 SWRR 选择器轮询挑选.
+//
+// 三个 reserved alias 名 (auto-simple / auto-medium / auto-complex)
+// 由 §13.1 路由决策树用作 smart routing 池, UI 锁定不可改名/删除.
+type ModelAlias struct {
+	ID         uint      `gorm:"primaryKey;autoIncrement" json:"id"`
+	Alias      string    `gorm:"type:varchar(255);not null;index:idx_alias_enabled" json:"alias"`
+	GroupID    uint      `gorm:"not null;index" json:"group_id"`
+	RealModel  string    `gorm:"type:varchar(255);not null" json:"real_model"`
+	Weight     int       `gorm:"not null;default:1" json:"weight"`
+	Priority   int       `gorm:"not null;default:100" json:"priority"`
+	Enabled    bool      `gorm:"not null;default:true;index:idx_alias_enabled" json:"enabled"`
+	IsReserved bool      `gorm:"not null;default:false" json:"is_reserved"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
+}
+
+// TableName forces the table name even if GORM pluralization changes.
+func (ModelAlias) TableName() string { return "model_aliases" }
+
 // APIKey 对应 api_keys 表
 type APIKey struct {
 	ID           uint       `gorm:"primaryKey;autoIncrement;index:idx_api_keys_group_last_used_id,priority:3" json:"id"`

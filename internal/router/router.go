@@ -2,11 +2,11 @@ package router
 
 import (
 	"embed"
-	"autogateway/internal/autoroute"
 	"autogateway/internal/handler"
 	"autogateway/internal/i18n"
 	"autogateway/internal/middleware"
 	"autogateway/internal/proxy"
+	"autogateway/internal/router_engine"
 	"autogateway/internal/services"
 	"autogateway/internal/types"
 	"io/fs"
@@ -44,8 +44,9 @@ func NewRouter(
 	proxyServer *proxy.ProxyServer,
 	configManager types.ConfigManager,
 	groupManager *services.GroupManager,
-	autoRouteConfigManager *autoroute.ConfigManager,
-	autoRouteHandler *handler.AutoRouteHandler,
+	selector *router_engine.Selector,
+	aliasHandler *handler.AliasHandler,
+	routingSettingsHandler *handler.RoutingSettingsHandler,
 	modelCatalogHandler *handler.ModelCatalogHandler,
 	dedupHandler *handler.DedupHandler,
 	buildFS embed.FS,
@@ -70,8 +71,8 @@ func NewRouter(
 
 	// 注册路由
 	registerSystemRoutes(router, serverHandler)
-	registerAPIRoutes(router, serverHandler, configManager, autoRouteHandler, modelCatalogHandler, dedupHandler)
-	registerProxyRoutes(router, proxyServer, groupManager, serverHandler, autoRouteConfigManager)
+	registerAPIRoutes(router, serverHandler, configManager, aliasHandler, routingSettingsHandler, modelCatalogHandler, dedupHandler)
+	registerProxyRoutes(router, proxyServer, groupManager, serverHandler, selector)
 	registerFrontendRoutes(router, buildFS, indexPage)
 
 	return router
@@ -87,7 +88,8 @@ func registerAPIRoutes(
 	router *gin.Engine,
 	serverHandler *handler.Server,
 	configManager types.ConfigManager,
-	autoRouteHandler *handler.AutoRouteHandler,
+	aliasHandler *handler.AliasHandler,
+	routingSettingsHandler *handler.RoutingSettingsHandler,
 	modelCatalogHandler *handler.ModelCatalogHandler,
 	dedupHandler *handler.DedupHandler,
 ) {
@@ -102,7 +104,7 @@ func registerAPIRoutes(
 	// 认证
 	protectedAPI := api.Group("")
 	protectedAPI.Use(middleware.Auth(authConfig))
-	registerProtectedAPIRoutes(protectedAPI, serverHandler, autoRouteHandler, modelCatalogHandler, dedupHandler)
+	registerProtectedAPIRoutes(protectedAPI, serverHandler, aliasHandler, routingSettingsHandler, modelCatalogHandler, dedupHandler)
 }
 
 // registerPublicAPIRoutes 公开API路由
@@ -115,18 +117,26 @@ func registerPublicAPIRoutes(api *gin.RouterGroup, serverHandler *handler.Server
 func registerProtectedAPIRoutes(
 	api *gin.RouterGroup,
 	serverHandler *handler.Server,
-	autoRouteHandler *handler.AutoRouteHandler,
+	aliasHandler *handler.AliasHandler,
+	routingSettingsHandler *handler.RoutingSettingsHandler,
 	modelCatalogHandler *handler.ModelCatalogHandler,
 	dedupHandler *handler.DedupHandler,
 ) {
 	api.GET("/channel-types", serverHandler.CommonHandler.GetChannelTypes)
 
-	// Auto Route API
-	autoRoute := api.Group("/auto-routing")
+	// Model Routing rewrite (§13): aliases CRUD + smart-routing settings.
+	aliases := api.Group("/aliases")
 	{
-		autoRoute.GET("/config", autoRouteHandler.GetConfig)
-		autoRoute.POST("/config", autoRouteHandler.SaveConfig)
-		autoRoute.POST("/test", autoRouteHandler.TestRoute)
+		aliases.GET("", aliasHandler.List)
+		aliases.GET("/:alias", aliasHandler.GetByAlias)
+		aliases.POST("", aliasHandler.Create)
+		aliases.PUT("/:id", aliasHandler.Update)
+		aliases.DELETE("/:id", aliasHandler.Delete)
+	}
+	routing := api.Group("/routing")
+	{
+		routing.GET("/settings", routingSettingsHandler.Get)
+		routing.PUT("/settings", routingSettingsHandler.Save)
 	}
 
 	// Model Catalog API
@@ -210,19 +220,15 @@ func registerProxyRoutes(
 	proxyServer *proxy.ProxyServer,
 	groupManager *services.GroupManager,
 	serverHandler *handler.Server,
-	autoRouteConfigManager *autoroute.ConfigManager,
+	selector *router_engine.Selector,
 ) {
+	mw := router_engine.Middleware(selector, groupManager)
+
 	// 1) 标准命名路由: /proxy/{group_name}/*
 	proxyGroup := router.Group("/proxy/:group_name")
 	proxyGroup.Use(middleware.ProxyRouteDispatcher(serverHandler))
 	proxyGroup.Use(middleware.ProxyAuth(groupManager))
-	if autoRouteConfigManager != nil {
-		classifier := autoroute.NewClassifier(nil)
-		configProvider := func() *autoroute.RouteConfig {
-			return autoRouteConfigManager.GetConfig()
-		}
-		proxyGroup.Use(autoroute.Middleware(classifier, configProvider, nil))
-	}
+	proxyGroup.Use(mw)
 	proxyGroup.Any("/*path", proxyServer.HandleProxy)
 
 	// 2) 系统默认聚合分组的快捷路由(无 /proxy 前缀): /openai/*, /gemini/*, /anthropic/*
@@ -239,13 +245,7 @@ func registerProxyRoutes(
 		grp := router.Group(sc.Prefix)
 		grp.Use(injectSystemGroupName(groupManager, role))
 		grp.Use(middleware.ProxyAuth(groupManager))
-		if autoRouteConfigManager != nil {
-			classifier := autoroute.NewClassifier(nil)
-			configProvider := func() *autoroute.RouteConfig {
-				return autoRouteConfigManager.GetConfig()
-			}
-			grp.Use(autoroute.Middleware(classifier, configProvider, nil))
-		}
+		grp.Use(mw)
 		grp.Any("/*path", proxyServer.HandleProxy)
 	}
 }

@@ -41,8 +41,9 @@ type SystemSettings struct {
 	KeyValidationConcurrency     int `json:"key_validation_concurrency" default:"10" name:"config.key_validation_concurrency" category:"config.category.key" desc:"config.key_validation_concurrency_desc" validate:"required,min=1"`
 	KeyValidationTimeoutSeconds  int `json:"key_validation_timeout_seconds" default:"20" name:"config.key_validation_timeout" category:"config.category.key" desc:"config.key_validation_timeout_desc" validate:"required,min=1"`
 
-	// Auto Routing 配置
-	AutoRoutingConfig string `json:"auto_routing_config" name:"config.auto_routing_config" category:"config.category.autoroute" desc:"config.auto_routing_config_desc"`
+	// Model Routing 重写后, auto_routing 旧配置字段已删除 (§13 硬切).
+	// 路由阈值改由 router_engine.Selector.Settings 管理, 别名映射存
+	// 在 model_aliases 表.
 
 	// For cache
 	ProxyKeysMap map[string]struct{} `json:"-"`

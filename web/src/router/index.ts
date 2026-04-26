@@ -28,9 +28,15 @@ const routes: Array<RouteRecordRaw> = [
         component: () => import("@/views/Settings.vue"),
       },
       {
+        path: "aliases",
+        name: "aliases",
+        component: () => import("@/views/Aliases.vue"),
+      },
+      {
+        // Legacy route alias: redirect old /auto-routing to /aliases
+        // so any bookmarks still land on the new page.
         path: "auto-routing",
-        name: "auto-routing",
-        component: () => import("@/views/AutoRouting.vue"),
+        redirect: { name: "aliases" },
       },
       {
         path: "model-catalog",

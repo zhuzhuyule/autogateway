@@ -40,7 +40,7 @@ const railItems = computed(() => [
     tip: t("nav.keys"),
     count: customGroupCount.value,
   },
-  { name: "auto-routing", icon: GitBranchOutline, tip: t("nav.autoRouting"), count: null },
+  { name: "aliases", icon: GitBranchOutline, tip: t("nav.aliases"), count: null },
   { name: "model-catalog", icon: CubeOutline, tip: t("nav.modelCatalog"), count: null },
   { name: "model-dedup", icon: CopyOutline, tip: t("nav.modelDedup"), count: null },
   { name: "logs", icon: PulseOutline, tip: t("nav.logs"), count: null },

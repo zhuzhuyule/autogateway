@@ -32,6 +32,7 @@ type App struct {
 	settingsManager       *config.SystemSettingsManager
 	groupManager          *services.GroupManager
 	aggregateGroupService *services.AggregateGroupService
+	aliasService          *services.AliasService
 	logCleanupService     *services.LogCleanupService
 	requestLogService     *services.RequestLogService
 	cronChecker           *keypool.CronChecker
@@ -50,6 +51,7 @@ type AppParams struct {
 	SettingsManager       *config.SystemSettingsManager
 	GroupManager          *services.GroupManager
 	AggregateGroupService *services.AggregateGroupService
+	AliasService          *services.AliasService
 	LogCleanupService     *services.LogCleanupService
 	RequestLogService     *services.RequestLogService
 	CronChecker           *keypool.CronChecker
@@ -67,6 +69,7 @@ func NewApp(params AppParams) *App {
 		settingsManager:       params.SettingsManager,
 		groupManager:          params.GroupManager,
 		aggregateGroupService: params.AggregateGroupService,
+		aliasService:          params.AliasService,
 		logCleanupService:     params.LogCleanupService,
 		requestLogService:     params.RequestLogService,
 		cronChecker:           params.CronChecker,
@@ -102,8 +105,15 @@ func (a *App) Start() error {
 			&models.APIKey{},
 			&models.RequestLog{},
 			&models.GroupHourlyStat{},
+			&models.ModelAlias{},
 		); err != nil {
 			return fmt.Errorf("database auto-migration failed: %w", err)
+		}
+		// Drop the legacy auto_routing config (Model Routing rewrite §13: hard cut).
+		if a.db.Migrator().HasColumn(&models.SystemSetting{}, "auto_routing_config") {
+			if err := a.db.Migrator().DropColumn(&models.SystemSetting{}, "auto_routing_config"); err != nil {
+				logrus.WithError(err).Warn("dropping auto_routing_config column failed (non-fatal)")
+			}
 		}
 		// 数据修复
 		if err := db.MigrateDatabase(a.db); err != nil {
@@ -127,6 +137,11 @@ func (a *App) Start() error {
 		}
 		// 把启用本特性之前就存在的 standard 分组挂入对应系统默认聚合
 		a.aggregateGroupService.BackfillSystemAggregates(context.Background())
+
+		// Seed reserved aliases (auto-simple/medium/complex placeholders).
+		if err := a.aliasService.EnsureReservedSeeded(context.Background()); err != nil {
+			logrus.WithError(err).Warn("seed reserved aliases failed (non-fatal)")
+		}
 
 		a.settingsManager.Initialize(a.storage, a.groupManager, a.configManager.IsMaster())
 

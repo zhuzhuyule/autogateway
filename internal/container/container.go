@@ -3,7 +3,6 @@ package container
 
 import (
 	"autogateway/internal/app"
-	"autogateway/internal/autoroute"
 	"autogateway/internal/channel"
 	"autogateway/internal/config"
 	"autogateway/internal/db"
@@ -13,11 +12,13 @@ import (
 	"autogateway/internal/keypool"
 	"autogateway/internal/proxy"
 	"autogateway/internal/router"
+	"autogateway/internal/router_engine"
 	"autogateway/internal/services"
 	"autogateway/internal/store"
 	"autogateway/internal/types"
 
 	"go.uber.org/dig"
+	"gorm.io/gorm"
 )
 
 // BuildContainer creates a new dependency injection container and provides all the application's services.
@@ -104,16 +105,19 @@ func BuildContainer() (*dig.Container, error) {
 		return nil, err
 	}
 
-	// Auto Route
-	if err := container.Provide(func(settingsManager *config.SystemSettingsManager) *autoroute.ConfigManager {
-		store := autoroute.NewDBPersistedConfigStore(settingsManager)
-		return autoroute.NewConfigManager(store)
+	// Model Routing rewrite (§13): selector + alias service + handlers.
+	if err := container.Provide(services.NewAliasService); err != nil {
+		return nil, err
+	}
+	if err := container.Provide(func(db *gorm.DB) *router_engine.Selector {
+		return router_engine.NewSelector(db)
 	}); err != nil {
 		return nil, err
 	}
-
-	// Auto Route Handlers
-	if err := container.Provide(handler.NewAutoRouteHandler); err != nil {
+	if err := container.Provide(handler.NewAliasHandler); err != nil {
+		return nil, err
+	}
+	if err := container.Provide(handler.NewRoutingSettingsHandler); err != nil {
 		return nil, err
 	}
 	if err := container.Provide(handler.NewModelCatalogHandler); err != nil {
