@@ -2,7 +2,7 @@
 import { keysApi } from "@/api/keys";
 import ProxyKeysInput from "@/components/common/ProxyKeysInput.vue";
 import { type ChannelType, type Group } from "@/types/models";
-import { Close } from "@vicons/ionicons5";
+import { CloseOutline } from "@vicons/ionicons5";
 import {
   NButton,
   NCard,
@@ -40,7 +40,6 @@ const message = useMessage();
 const loading = ref(false);
 const formRef = ref();
 
-// 渠道类型选项
 const channelTypeOptions = [
   { label: "OpenAI", value: "openai" as ChannelType },
   { label: "OpenAI Response", value: "openai-response" as ChannelType },
@@ -48,7 +47,6 @@ const channelTypeOptions = [
   { label: "Anthropic", value: "anthropic" as ChannelType },
 ];
 
-// 默认表单数据
 const defaultFormData = {
   name: "",
   display_name: "",
@@ -58,10 +56,8 @@ const defaultFormData = {
   proxy_keys: "",
 };
 
-// 表单数据
 const formData = reactive({ ...defaultFormData });
 
-// 表单验证规则
 const rules: FormRules = {
   name: [
     {
@@ -84,12 +80,10 @@ const rules: FormRules = {
   ],
 };
 
-// 监听弹窗显示状态
 watch(
   () => props.show,
   show => {
     if (show) {
-      // 新建模式重置表单，编辑模式加载数据
       if (props.group) {
         loadGroupData();
       } else {
@@ -99,12 +93,10 @@ watch(
   }
 );
 
-// 重置表单
 function resetForm() {
   Object.assign(formData, defaultFormData);
 }
 
-// 加载分组数据（编辑模式）
 function loadGroupData() {
   if (!props.group) {
     return;
@@ -120,12 +112,10 @@ function loadGroupData() {
   });
 }
 
-// 关闭弹窗
 function handleClose() {
   emit("update:show", false);
 }
 
-// 提交表单
 async function handleSubmit() {
   if (loading.value) {
     return;
@@ -136,7 +126,6 @@ async function handleSubmit() {
 
     loading.value = true;
 
-    // 构建提交数据
     const submitData = {
       name: formData.name,
       display_name: formData.display_name,
@@ -149,14 +138,12 @@ async function handleSubmit() {
 
     let result: Group;
     if (props.group) {
-      // 编辑模式
       if (!props.group?.id) {
         message.error(t("keys.invalidGroup"));
         return;
       }
       result = await keysApi.updateGroup(props.group.id, submitData);
     } else {
-      // 新建模式
       result = await keysApi.createGroup(submitData);
     }
 
@@ -169,9 +156,9 @@ async function handleSubmit() {
 </script>
 
 <template>
-  <n-modal :show="show" @update:show="handleClose" class="aggregate-group-modal">
+  <n-modal :show="show" @update:show="handleClose" class="v3-modal">
     <n-card
-      class="aggregate-group-card"
+      class="v3-modal-card"
       :title="group ? t('keys.editAggregateGroup') : t('keys.createAggregateGroup')"
       :bordered="false"
       size="huge"
@@ -179,80 +166,88 @@ async function handleSubmit() {
       aria-modal="true"
     >
       <template #header-extra>
-        <n-button quaternary circle @click="handleClose">
+        <n-button quaternary circle size="small" @click="handleClose" class="v3-modal-close">
           <template #icon>
-            <n-icon :component="Close" />
+            <n-icon :component="CloseOutline" />
           </template>
         </n-button>
       </template>
 
-      <n-form
-        ref="formRef"
-        :model="formData"
-        :rules="rules"
-        label-placement="left"
-        label-width="120px"
-      >
-        <!-- 基础信息 -->
-        <div class="form-section">
-          <h4 class="section-title">{{ t("keys.basicInfo") }}</h4>
+      <div class="v3-modal-body">
+        <n-form
+          ref="formRef"
+          :model="formData"
+          :rules="rules"
+          label-placement="left"
+          label-width="100px"
+          require-mark-placement="right-hanging"
+        >
+          <div class="v3-form-section">
+            <h4 class="v3-form-section-title">{{ t("keys.basicInfo") }}</h4>
 
-          <n-form-item :label="t('keys.groupName')" path="name">
-            <n-input
-              v-model:value="formData.name"
-              :placeholder="t('keys.groupNamePlaceholder')"
-              clearable
-            />
-          </n-form-item>
+            <n-form-item :label="t('keys.groupName')" path="name" class="v3-form-item">
+              <n-input
+                v-model:value="formData.name"
+                :placeholder="t('keys.groupNamePlaceholder')"
+                clearable
+                class="v3-input"
+              />
+            </n-form-item>
 
-          <n-form-item :label="t('keys.displayName')">
-            <n-input
-              v-model:value="formData.display_name"
-              :placeholder="t('keys.displayNamePlaceholder')"
-              clearable
-            />
-          </n-form-item>
+            <n-form-item :label="t('keys.displayName')" class="v3-form-item">
+              <n-input
+                v-model:value="formData.display_name"
+                :placeholder="t('keys.displayNamePlaceholder')"
+                clearable
+                class="v3-input"
+              />
+            </n-form-item>
 
-          <n-form-item :label="t('keys.channelType')" path="channel_type">
-            <n-select
-              v-model:value="formData.channel_type"
-              :options="channelTypeOptions"
-              :placeholder="t('keys.selectChannelType')"
-              :disabled="!!props.group"
-            />
-          </n-form-item>
+            <n-form-item :label="t('keys.channelType')" path="channel_type" class="v3-form-item">
+              <n-select
+                v-model:value="formData.channel_type"
+                :options="channelTypeOptions"
+                :placeholder="t('keys.selectChannelType')"
+                :disabled="!!props.group"
+                class="v3-select"
+              />
+            </n-form-item>
 
-          <n-form-item :label="t('keys.sortOrder')">
-            <n-input-number
-              v-model:value="formData.sort"
-              :placeholder="t('keys.sortValue')"
-              style="width: 100%"
-            />
-          </n-form-item>
+            <n-form-item :label="t('keys.sortOrder')" class="v3-form-item">
+              <n-input-number
+                v-model:value="formData.sort"
+                :placeholder="t('keys.sortValue')"
+                class="v3-input-number"
+              />
+            </n-form-item>
 
-          <n-form-item :label="t('keys.proxyKeys')">
-            <proxy-keys-input v-model="formData.proxy_keys" />
-          </n-form-item>
+            <n-form-item :label="t('keys.proxyKeys')" class="v3-form-item">
+              <proxy-keys-input v-model="formData.proxy_keys" class="v3-input" />
+            </n-form-item>
 
-          <n-form-item :label="t('common.description')">
-            <n-input
-              v-model:value="formData.description"
-              type="textarea"
-              placeholder=""
-              :rows="1"
-              :autosize="{ minRows: 1, maxRows: 5 }"
-              style="resize: none"
-            />
-          </n-form-item>
-        </div>
-      </n-form>
+            <n-form-item :label="t('common.description')" class="v3-form-item">
+              <n-input
+                v-model:value="formData.description"
+                type="textarea"
+                placeholder=""
+                :rows="2"
+                :autosize="{ minRows: 2, maxRows: 5 }"
+                class="v3-input"
+              />
+            </n-form-item>
+          </div>
+        </n-form>
+      </div>
 
-      <template #footer>
-        <div style="display: flex; justify-content: flex-end; gap: 12px">
-          <n-button @click="handleClose">{{ t("common.cancel") }}</n-button>
-          <n-button type="primary" @click="handleSubmit" :loading="loading">
-            {{ group ? t("common.update") : t("common.create") }}
-          </n-button>
+      <template #action>
+        <div class="v3-modal-footer">
+          <div></div>
+          <div class="v3-modal-actions">
+            <n-button size="small" @click="handleClose">{{ t("common.cancel") }}</n-button>
+            <n-button type="primary" size="small" @click="handleSubmit" :loading="loading">
+              {{ group ? t("common.update") : t("common.create") }}
+            </n-button>
+          </div>
         </div>
       </template>
     </n-card>
@@ -260,24 +255,68 @@ async function handleSubmit() {
 </template>
 
 <style scoped>
-.aggregate-group-modal {
-  width: 600px;
+.v3-modal {
+  width: 560px;
+  max-width: 90vw;
 }
 
-.form-section {
-  margin-top: 20px;
+.v3-modal-card {
+  border-radius: var(--v3-radius-md);
+  border: 1px solid var(--v3-line);
+  box-shadow: var(--v3-shadow-md);
 }
 
-.form-section:first-child {
-  margin-top: 0;
+.v3-modal-close {
+  opacity: 0.6;
 }
 
-.section-title {
-  font-size: 1rem;
-  font-weight: 600;
-  color: var(--text-primary);
+.v3-modal-close:hover {
+  opacity: 1;
+}
+
+.v3-modal-body {
+  display: flex;
+  flex-direction: column;
+}
+
+.v3-form-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.v3-form-section-title {
+  font: 600 13px/1.2 var(--v3-sans);
+  color: var(--v3-ink);
+  margin: 0 0 16px 0;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--v3-line);
+}
+
+.v3-form-item {
   margin-bottom: 16px;
-  padding-bottom: 8px;
-  border-bottom: 1px solid var(--border-color);
+}
+
+.v3-input {
+  width: 100%;
+}
+
+.v3-select {
+  width: 100%;
+}
+
+.v3-input-number {
+  width: 100%;
+}
+
+.v3-modal-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.v3-modal-actions {
+  display: flex;
+  gap: 8px;
 }
 </style>

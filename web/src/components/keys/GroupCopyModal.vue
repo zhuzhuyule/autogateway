@@ -3,16 +3,15 @@ import { keysApi } from "@/api/keys";
 import type { Group } from "@/types/models";
 import { appState } from "@/utils/app-state";
 import { getGroupDisplayName } from "@/utils/display";
-import { CloseOutline, CopyOutline } from "@vicons/ionicons5";
+import { CopyOutline, DocumentTextOutline } from "@vicons/ionicons5";
 import {
   NButton,
   NCard,
-  NForm,
-  NFormItem,
   NIcon,
   NModal,
   NRadio,
   NRadioGroup,
+  NSpace,
   useMessage,
 } from "naive-ui";
 import { computed, ref, watchEffect } from "vue";
@@ -28,10 +27,6 @@ interface Emits {
   (e: "success", group: Group): void;
 }
 
-interface CopyFormData {
-  copyKeys: "all" | "valid_only" | "none";
-}
-
 const props = defineProps<Props>();
 const emit = defineEmits<Emits>();
 
@@ -39,7 +34,9 @@ const { t } = useI18n();
 const message = useMessage();
 const loading = ref(false);
 
-const formData = ref<CopyFormData>({
+const formData = ref<{
+  copyKeys: "all" | "valid_only" | "none";
+}>({
   copyKeys: "all",
 });
 
@@ -48,7 +45,6 @@ const modalVisible = computed({
   set: (value: boolean) => emit("update:show", value),
 });
 
-// Watch for show prop changes to reset form
 watchEffect(() => {
   if (props.show) {
     resetForm();
@@ -61,12 +57,10 @@ function resetForm() {
   };
 }
 
-// 生成新分组名称预览（仅用于显示）
 function generateNewGroupName(): string {
   if (!props.sourceGroup) {
     return "";
   }
-
   const baseName = props.sourceGroup.name;
   return `${baseName}_copy`;
 }
@@ -84,14 +78,12 @@ async function handleCopy() {
     };
     const result = await keysApi.copyGroup(props.sourceGroup.id, copyData);
 
-    // Show appropriate success message based on copy strategy
     if (formData.value.copyKeys !== "none") {
       message.success(
         t("keys.copyGroupWithKeysSuccess", {
           groupName: result.group.display_name || result.group.name,
         })
       );
-      // Trigger task polling to show import progress
       appState.taskPollingTrigger++;
     } else {
       message.success(
@@ -112,60 +104,65 @@ function handleCancel() {
 </script>
 
 <template>
-  <n-modal :show="modalVisible" @update:show="handleCancel" class="group-copy-modal">
+  <n-modal :show="modalVisible" @update:show="handleCancel" class="v3-modal">
     <n-card
-      class="group-copy-card"
-      :title="
-        t('keys.copyGroupTitle', { groupName: sourceGroup ? getGroupDisplayName(sourceGroup) : '' })
-      "
+      class="v3-modal-card"
+      :title="t('keys.copyGroupTitle', { groupName: sourceGroup ? getGroupDisplayName(sourceGroup) : '' })"
       :bordered="false"
       size="huge"
       role="dialog"
       aria-modal="true"
     >
       <template #header-extra>
-        <n-button quaternary circle @click="handleCancel">
+        <n-button quaternary circle size="small" @click="handleCancel" class="v3-modal-close">
           <template #icon>
-            <n-icon :component="CloseOutline" />
+            <n-icon :component="DocumentTextOutline" />
           </template>
         </n-button>
       </template>
 
-      <div class="modal-content">
-        <div class="copy-preview">
-          <div class="preview-item">
-            <span class="preview-label">{{ t("keys.newGroupNameLabel") }}</span>
-            <code class="preview-value">{{ generateNewGroupName() }}</code>
-          </div>
+      <div class="v3-modal-body">
+        <div class="v3-copy-preview">
+          <div class="v3-copy-preview-label">{{ t("keys.newGroupNameLabel") }}</div>
+          <code class="v3-copy-preview-value">{{ generateNewGroupName() }}</code>
         </div>
 
-        <n-form :model="formData" label-placement="left" label-width="80px" class="group-copy-form">
-          <!-- 密钥复制选项 -->
-          <div class="copy-options">
-            <n-form-item :label="t('keys.keyHandling')">
-              <n-radio-group v-model:value="formData.copyKeys" name="copyKeys">
-                <div class="radio-options">
-                  <n-radio value="all" class="radio-option">{{ t("keys.copyAllKeys") }}</n-radio>
-                  <n-radio value="valid_only" class="radio-option">
-                    {{ t("keys.copyValidKeysOnly") }}
-                  </n-radio>
-                  <n-radio value="none" class="radio-option">{{ t("keys.dontCopyKeys") }}</n-radio>
+        <div class="v3-radio-group">
+          <div class="v3-radio-group-label">{{ t("keys.keyHandling") }}</div>
+          <n-radio-group v-model:value="formData.copyKeys" name="copyKeys">
+            <n-space vertical>
+              <n-radio value="all" class="v3-radio-item">
+                <div class="v3-radio-content">
+                  <span class="v3-radio-title">{{ t("keys.copyAllKeys") }}</span>
                 </div>
-              </n-radio-group>
-            </n-form-item>
-          </div>
-        </n-form>
+              </n-radio>
+              <n-radio value="valid_only" class="v3-radio-item">
+                <div class="v3-radio-content">
+                  <span class="v3-radio-title">{{ t("keys.copyValidKeysOnly") }}</span>
+                </div>
+              </n-radio>
+              <n-radio value="none" class="v3-radio-item">
+                <div class="v3-radio-content">
+                  <span class="v3-radio-title">{{ t("keys.dontCopyKeys") }}</span>
+                </div>
+              </n-radio>
+            </n-space>
+          </n-radio-group>
+        </div>
       </div>
 
-      <template #footer>
-        <div class="modal-actions">
-          <n-button @click="handleCancel" :disabled="loading">{{ t("common.cancel") }}</n-button>
-          <n-button type="primary" @click="handleCopy" :loading="loading">
-            <template #icon>
-              <n-icon :component="CopyOutline" />
-            </template>
-            {{ t("keys.confirmCopy") }}
-          </n-button>
+      <template #action>
+        <div class="v3-modal-footer">
+          <div></div>
+          <div class="v3-modal-actions">
+            <n-button size="small" @click="handleCancel" :disabled="loading">{{ t("common.cancel") }}</n-button>
+            <n-button type="primary" size="small" @click="handleCopy" :loading="loading">
+              <template #icon>
+                <n-icon :component="CopyOutline" />
+              </template>
+              {{ t("keys.confirmCopy") }}
+            </n-button>
+          </div>
         </div>
       </template>
     </n-card>
@@ -173,88 +170,90 @@ function handleCancel() {
 </template>
 
 <style scoped>
-.group-copy-modal {
-  width: 450px;
+.v3-modal {
+  width: 480px;
   max-width: 90vw;
-  --n-color: var(--modal-color);
 }
 
-.modal-content {
-  padding: 0;
+.v3-modal-card {
+  border-radius: var(--v3-radius-md);
+  border: 1px solid var(--v3-line);
+  box-shadow: var(--v3-shadow-md);
 }
 
-.copy-preview {
-  background: var(--bg-secondary);
-  border: 1px solid var(--success-border);
-  border-radius: 6px;
-  padding: 12px;
-  margin-bottom: 16px;
+.v3-modal-close {
+  opacity: 0.6;
 }
 
-.preview-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+.v3-modal-close:hover {
+  opacity: 1;
 }
 
-.preview-label {
-  font-weight: 500;
-  color: var(--success-color);
-}
-
-.preview-value {
-  background: var(--success-bg);
-  color: var(--success-color);
-  padding: 2px 6px;
-  border-radius: 4px;
-  font-size: 13px;
-}
-
-.copy-options {
-  margin-bottom: 16px;
-}
-
-.radio-options {
+.v3-modal-body {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 20px;
 }
 
-.radio-option {
+.v3-copy-preview {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  background: var(--v3-ok-soft);
+  border: 1px solid oklch(0.78 0.10 145);
+  border-radius: var(--v3-radius);
+}
+
+.v3-copy-preview-label {
+  font: 500 11px/1 var(--v3-sans);
+  color: oklch(0.40 0.13 145);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.v3-copy-preview-value {
+  font: 500 12px/1 var(--v3-mono);
+  color: oklch(0.40 0.13 145);
+  background: oklch(1 0 0 / 0.5);
+  padding: 3px 8px;
+  border-radius: 4px;
+}
+
+.v3-radio-group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.v3-radio-group-label {
+  font: 500 12px/1 var(--v3-sans);
+  color: var(--v3-ink-2);
+}
+
+.v3-radio-item {
   margin: 0;
 }
 
-.modal-actions {
+.v3-radio-content {
   display: flex;
-  justify-content: flex-end;
-  gap: 12px;
+  flex-direction: column;
+  gap: 2px;
 }
 
-/* 增强表单样式 - 与GroupFormModal保持一致 */
-:deep(.n-form-item-label) {
-  font-weight: 500;
-  color: var(--text-primary);
+.v3-radio-title {
+  font: 500 13px/1.3 var(--v3-sans);
+  color: var(--v3-ink);
 }
 
-:deep(.n-button) {
-  --n-border-radius: 8px;
+.v3-modal-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
 }
 
-:deep(.n-card-header) {
-  border-bottom: 1px solid var(--border-color);
-  padding: 10px 20px;
-}
-
-:deep(.n-card__content) {
-  padding: 16px 20px;
-}
-
-:deep(.n-card__footer) {
-  border-top: 1px solid var(--border-color);
-  padding: 10px 15px;
-}
-
-:deep(.n-form-item-feedback-wrapper) {
-  min-height: 10px;
+.v3-modal-actions {
+  display: flex;
+  gap: 8px;
 }
 </style>
