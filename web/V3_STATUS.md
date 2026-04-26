@@ -354,6 +354,105 @@ auto-routing 配置 schema 重设计：从 model_mapping → tier_models（如�
 
 ---
 
+# P1-5 决策文档:Auto Routing 数据模型
+
+设计稿与后端的根本分歧。**未做选择前不要碰 Auto Routing UI**,会白做。
+
+## 现状回顾
+
+**后端 schema** (`auto-routing/config`):
+```jsonc
+{
+  "enabled": true,
+  "simple_threshold": 2000,
+  "complex_threshold": 8000,
+  "group_mapping": {
+    "gpt-4o":      { "simple_group": "groq", "medium_group": "cerebras", "complex_group": "openai-direct" },
+    "claude-3-5":  { "simple_group": "anthropic-direct", "medium_group": "anthropic-direct", "complex_group": "anthropic-direct" }
+  }
+}
+```
+**语义**:client 写哪个 model 名,在哪个 tier 走哪个 group。
+
+**设计稿 schema** (`v3-keys-routing.jsx`):
+```jsonc
+{
+  "simple_chain":  [{"provider":"groq","model":"llama-3.1-8b-instant"}, {"provider":"cerebras","model":"llama-3.1-8b"}],
+  "medium_chain":  [{"provider":"cerebras","model":"llama-3.3-70b"}, {"provider":"groq","model":"llama-3.3-70b"}],
+  "complex_chain": [{"provider":"openrouter","model":"deepseek-chat-v3"}, {"provider":"google","model":"gemini-2.5-pro"}]
+}
+```
+**语义**:每个 tier 是一条 fallback chain,client 写啥不重要,网关按 tier 选 chain 头部,失败往后试。
+
+## 两条路对比
+
+### 选项 A:改后端,跟设计稿走 chain 模型
+**改动**:
+- DB schema 加 `auto_routing_tier_chains` 表 `(tier, position, group_id, model_id)`
+- 配置 API 改为返回 chain 数组
+- 路由逻辑:从 chain 头部开始,失败转下一项;model_id 用作目标 group 的 model redirect 输入
+- 前端实现设计稿的拖拽 chain + 模型选择器抽屉
+
+**成本**:3–5 天(含后端 + 迁移现有 group_mapping)
+
+**收益**:
+- ✅ 完全实现设计稿
+- ✅ Fallback 链路语义清晰(失败往下走,不是按 model 名分流)
+- ✅ 用户不用关心 client 端写什么 model 名
+
+**代价**:
+- ❌ 失去"按 client model 名做不同路由"的能力(比如 GPT-4o 走旗舰、其他走平价)
+- ❌ 现有用户的配置要迁移(可向后兼容,但语义变化)
+
+### 选项 B:留住后端 schema,文案/UI 重新表达
+**改动**:
+- 当前 V3AutoRouting.vue 改文案 + 把 tier 卡片明确表达为 "tier-based group lookup"
+- 移除"chain"措辞,移除拖拽 grip / fallback 概念
+- 三 tier 卡片变成"该 tier 下每个映射 model 的目标 group"列表
+- 不做模型抽屉(没必要)
+
+**成本**:半天(纯前端)
+
+**收益**:
+- ✅ 不动后端,生产环境零风险
+- ✅ 保留按 model 名分流的精细控制
+
+**代价**:
+- ❌ 完全不符合设计稿的视觉与交互(没有 chain、没有 drawer)
+- ❌ 用户需要理解"为每个 model 配置三个 tier 各自的 group"——理解曲线较高
+
+### 选项 C:混合 — 加一组新配置,旧的留作兜底
+**改动**:
+- 新增 `tier_chains` 字段并存,默认空
+- 路由优先走 chain;如果某 model 命中 `group_mapping` 旧规则,走旧路径
+- 前端给两套 UI:用户在"新建路由"时走 chain,旧配置继续生效
+
+**成本**:5–7 天(含两套测试)
+
+**收益**:同时支持两种心智模型,迁移最平滑。
+
+**代价**:复杂度爆炸,长期维护成本高。
+
+## 推荐
+
+**选项 A** —— 真正按设计稿做。理由:
+1. 设计稿的 chain + drawer 是用户原话需求("Auto Routing 中三种模型的添加交互设计")
+2. 现有 `group_mapping` 用户量未知,但项目还在 v0.4 早期,迁移代价可接受
+3. 选项 B 长期会越来越像"后端做错了的妥协",技术债积累
+4. 选项 C 复杂度不合理
+
+**实施顺序**:
+1. 后端先加 `tier_chains` schema(向后兼容,空表代表旧逻辑生效)
+2. 后端路由 selector 优先读 chain;chain 为空回退老 mapping
+3. 前端 V3AutoRouting 重构为 chain UI + drawer
+4. 灰度切换:用户面板上加"启用新路由模式"开关,默认关
+5. 老用户保留 mapping;新用户上 chain
+6. 一个 milestone 后弃用 mapping(给 90 天迁移窗)
+
+**未做选择前**:`V3AutoRouting.vue` 保持现状(per-model→tier→group),不要重构。
+
+---
+
 # 当前可立即用的功能 ✓
 
 - 完整登录、主题切换、语言切换

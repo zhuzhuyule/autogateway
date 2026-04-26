@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { getDashboardStats, getGroupList } from "@/api/dashboard";
+import { getDashboardStats, getGroupList, getTopModels, type TopModelStat } from "@/api/dashboard";
 import { keysApi } from "@/api/keys";
 import EncryptionMismatchAlert from "@/components/EncryptionMismatchAlert.vue";
 import LineChart from "@/components/LineChart.vue";
@@ -28,6 +28,8 @@ interface ChannelGroup {
 
 const groupList = ref<ChannelGroup[]>([]);
 const groupStatsMap = ref<Record<string, { req24h: number; failed: number }>>({});
+const topModelsApi = ref<TopModelStat[]>([]);
+const topModelsLoaded = ref(false);
 
 onMounted(() => {
   loadAll();
@@ -36,9 +38,21 @@ onMounted(() => {
 async function loadAll() {
   loading.value = true;
   try {
-    await Promise.all([loadStats(), loadGroupsAndStats()]);
+    await Promise.all([loadStats(), loadGroupsAndStats(), loadTopModels()]);
   } finally {
     loading.value = false;
+  }
+}
+
+async function loadTopModels() {
+  topModelsLoaded.value = false;
+  try {
+    const r = await getTopModels("24h", 10);
+    topModelsApi.value = (r as unknown as { data: TopModelStat[] }).data || [];
+    topModelsLoaded.value = true;
+  } catch (e) {
+    console.error("top models failed", e);
+    topModelsApi.value = [];
   }
 }
 
@@ -178,6 +192,8 @@ interface TopModelRow {
   calls: number;
   providers: string[];
   tier: "simple" | "medium" | "complex";
+  avgMs?: number;
+  errorRate?: number;
 }
 
 function parseModels(raw: unknown): string[] {
@@ -246,15 +262,39 @@ function inferTier(modelId: string): "simple" | "medium" | "complex" {
   return "medium";
 }
 
+// Look up channel for a group name (used to infer provider from API response).
+const groupChannel = computed<Record<string, string | undefined>>(() => {
+  const m: Record<string, string | undefined> = {};
+  for (const g of groupList.value) m[g.name] = g.channel_type;
+  return m;
+});
+
 const topModels = computed<TopModelRow[]>(() => {
-  // Aggregate model id -> { calls, providers }
+  // 1) Prefer real per-model counts from /api/dashboard/top-models
+  if (topModelsLoaded.value && topModelsApi.value.length) {
+    return topModelsApi.value.slice(0, 6).map(r => {
+      const providers = new Set<string>();
+      for (const groupName of r.groups || []) {
+        providers.add(inferProvider(groupName, groupChannel.value[groupName]));
+      }
+      return {
+        id: r.model,
+        calls: r.calls,
+        providers: Array.from(providers),
+        tier: inferTier(r.model),
+        avgMs: r.avg_ms,
+        errorRate: r.error_rate,
+      };
+    });
+  }
+
+  // 2) Fallback: estimate from group_stats × available_models (legacy path)
   const acc = new Map<string, { calls: number; providers: Set<string> }>();
   for (const g of groupList.value) {
     const provider = inferProvider(g.name, g.channel_type);
     const groupCalls = groupStatsMap.value[g.name]?.req24h ?? 0;
     const models = parseModels(g.available_models);
     if (models.length === 0) continue;
-    // Distribute group calls evenly across its models (rough proxy)
     const per = Math.max(0, Math.round(groupCalls / models.length));
     for (const m of models) {
       const entry = acc.get(m) || { calls: 0, providers: new Set<string>() };
@@ -394,12 +434,36 @@ async function copyText(value: string) {
           <div class="v3-tm-row__rank">#{{ i + 1 }}</div>
           <div>
             <div class="v3-tm-row__name">{{ m.id }}</div>
-            <div style="display: flex; align-items: center; gap: 8px; margin-top: 5px">
+            <div
+              style="
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                margin-top: 5px;
+                flex-wrap: wrap;
+              "
+            >
               <span
                 class="v3-chip"
                 :style="{ borderColor: tierColor(m.tier), color: tierColor(m.tier) }"
               >
                 {{ m.tier }}
+              </span>
+              <span
+                v-if="m.avgMs != null && m.avgMs > 0"
+                class="v3-tm-row__sub"
+                style="margin-top: 0"
+              >
+                avg {{ m.avgMs }}ms
+                <span
+                  v-if="m.errorRate != null"
+                  :style="{
+                    color: m.errorRate > 5 ? 'var(--v3-danger)' : 'var(--v3-ink-3)',
+                    marginLeft: '4px',
+                  }"
+                >
+                  · err {{ m.errorRate.toFixed(1) }}%
+                </span>
               </span>
             </div>
           </div>

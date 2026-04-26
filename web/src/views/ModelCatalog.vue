@@ -19,6 +19,54 @@ interface AugmentedItem extends ModelItem {
   isFree: boolean;
   tier?: ModelTier;
   freeProviderId?: string;
+  hasVision: boolean;
+  hasTools: boolean;
+  contextHint: string | null;
+}
+
+/**
+ * Heuristic capability flags inferred from the model id.
+ * Backend `/api/models` does not expose these yet (see V3_STATUS.md P1-7);
+ * we surface them client-side so the catalog row carries useful chips.
+ */
+function inferVision(id: string): boolean {
+  const lower = id.toLowerCase();
+  return (
+    lower.includes("vision") ||
+    lower.includes("flash") ||
+    lower.includes("4o") ||
+    lower.includes("gpt-5") ||
+    lower.includes("claude-3") ||
+    lower.includes("claude-4") ||
+    lower.includes("claude-sonnet") ||
+    lower.includes("claude-opus") ||
+    lower.includes("claude-haiku") ||
+    lower.includes("gemini")
+  );
+}
+
+function inferTools(id: string): boolean {
+  const lower = id.toLowerCase();
+  if (lower.includes("embedding") || lower.includes("whisper") || lower.includes("tts")) {
+    return false;
+  }
+  // most modern instruct/chat models support tools
+  if (lower.includes("base") || lower.includes("raw")) return false;
+  return true;
+}
+
+function inferContext(id: string): string | null {
+  const lower = id.toLowerCase();
+  if (lower.includes("2m") || lower.includes("2-million")) return "2m";
+  if (lower.includes("1m") || lower.includes("gemini") || lower.includes("flash")) return "1m";
+  if (lower.includes("200k") || lower.includes("claude")) return "200k";
+  if (lower.includes("164k") || lower.includes("deepseek")) return "164k";
+  if (lower.includes("131k") || lower.includes("llama-3")) return "131k";
+  if (lower.includes("128k") || lower.includes("4o") || lower.includes("command-r")) return "128k";
+  if (lower.includes("32k") || lower.includes("mistral-small") || lower.includes("codestral")) return "32k";
+  if (lower.includes("16k")) return "16k";
+  if (lower.includes("8k")) return "8k";
+  return null;
 }
 
 const loading = ref(false);
@@ -43,6 +91,9 @@ const augmented = computed<AugmentedItem[]>(() =>
       isFree: !!free,
       tier: free?.tier,
       freeProviderId: free?.providerId,
+      hasVision: inferVision(row.id),
+      hasTools: inferTools(row.id),
+      contextHint: inferContext(row.id),
     };
   })
 );
@@ -264,6 +315,11 @@ async function fetchCatalog() {
               "
             >
               <span v-if="row.isFree" class="v3-chip v3-chip--ok"> 🆓 free </span>
+              <span v-if="row.contextHint" class="v3-chip">
+                ctx {{ row.contextHint }}
+              </span>
+              <span v-if="row.hasTools" class="v3-chip">tools</span>
+              <span v-if="row.hasVision" class="v3-chip v3-chip--info">vision</span>
               <span
                 v-if="row.freeProviderId"
                 style="font: 400 10.5px var(--v3-mono); color: var(--v3-ink-3)"

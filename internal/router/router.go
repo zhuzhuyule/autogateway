@@ -186,6 +186,7 @@ func registerProtectedAPIRoutes(
 		dashboard.GET("/stats", serverHandler.Stats)
 		dashboard.GET("/chart", serverHandler.Chart)
 		dashboard.GET("/encryption-status", serverHandler.EncryptionStatus)
+		dashboard.GET("/top-models", serverHandler.TopModels)
 	}
 
 	// 日志

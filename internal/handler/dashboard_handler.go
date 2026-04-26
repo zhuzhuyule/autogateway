@@ -236,6 +236,96 @@ func (s *Server) getRPMStats(now time.Time) (models.StatCard, error) {
 	}, nil
 }
 
+// TopModelStat is one row of /api/dashboard/top-models.
+type TopModelStat struct {
+	Model     string   `json:"model"`
+	Calls     int64    `json:"calls"`
+	AvgMs     int64    `json:"avg_ms"`
+	Errors    int64    `json:"errors"`
+	ErrorRate float64  `json:"error_rate"`
+	Groups    []string `json:"groups"`
+}
+
+// TopModels returns the highest-volume models within the requested window.
+// Used by the v3 Dashboard "Top models · 24h" card so it stops inferring
+// counts from per-group stats.
+//
+// GET /api/dashboard/top-models?window=24h&limit=10
+//   - window: 1h | 6h | 24h | 7d (default 24h)
+//   - limit:  1..50 (default 10)
+func (s *Server) TopModels(c *gin.Context) {
+	window := strings.TrimSpace(c.DefaultQuery("window", "24h"))
+	var lookback time.Duration
+	switch window {
+	case "1h":
+		lookback = time.Hour
+	case "6h":
+		lookback = 6 * time.Hour
+	case "7d":
+		lookback = 7 * 24 * time.Hour
+	default:
+		lookback = 24 * time.Hour
+	}
+	since := time.Now().Add(-lookback)
+
+	type row struct {
+		Model     string
+		Calls     int64
+		AvgMs    float64
+		Errors    int64
+	}
+	var rows []row
+	err := s.DB.Model(&models.RequestLog{}).
+		Select("model, COUNT(*) as calls, AVG(duration_ms) as avg_ms, SUM(CASE WHEN is_success THEN 0 ELSE 1 END) as errors").
+		Where("timestamp >= ? AND request_type = ? AND model IS NOT NULL AND model != ''", since, models.RequestTypeFinal).
+		Group("model").
+		Order("calls DESC").
+		Limit(50).
+		Scan(&rows).Error
+	if err != nil {
+		response.ErrorI18nFromAPIError(c, app_errors.ErrDatabase, "database.cannot_get_top_models")
+		return
+	}
+
+	// gather provider/group attribution per model from the same window
+	type ga struct {
+		Model     string
+		GroupName string
+	}
+	var attrs []ga
+	if err := s.DB.Model(&models.RequestLog{}).
+		Select("DISTINCT model, group_name").
+		Where("timestamp >= ? AND request_type = ? AND model IS NOT NULL AND model != ''", since, models.RequestTypeFinal).
+		Scan(&attrs).Error; err != nil {
+		logrus.WithError(err).Warn("top-models attribution query failed")
+	}
+	groupsByModel := make(map[string][]string, len(rows))
+	for _, a := range attrs {
+		if a.GroupName == "" {
+			continue
+		}
+		groupsByModel[a.Model] = append(groupsByModel[a.Model], a.GroupName)
+	}
+
+	out := make([]TopModelStat, 0, len(rows))
+	for _, r := range rows {
+		errRate := 0.0
+		if r.Calls > 0 {
+			errRate = float64(r.Errors) / float64(r.Calls) * 100
+		}
+		out = append(out, TopModelStat{
+			Model:     r.Model,
+			Calls:     r.Calls,
+			AvgMs:     int64(r.AvgMs),
+			Errors:    r.Errors,
+			ErrorRate: errRate,
+			Groups:    groupsByModel[r.Model],
+		})
+	}
+
+	response.Success(c, out)
+}
+
 // getSecurityWarnings 检查安全配置并返回警告信息
 func (s *Server) getSecurityWarnings(c *gin.Context) []models.SecurityWarning {
 	var warnings []models.SecurityWarning
