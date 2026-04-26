@@ -6,7 +6,7 @@ import { NIcon } from "naive-ui";
 import { computed, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import AggregateGroupModal from "@/components/keys/AggregateGroupModal.vue";
-import GroupFormModal from "@/components/keys/GroupFormModal.vue";
+import V3NewGroupFlow from "@/components/v3/V3NewGroupFlow.vue";
 
 const { t } = useI18n();
 
@@ -165,7 +165,11 @@ function handleCreated(g: Group) {
       </button>
     </div>
 
-    <group-form-modal v-model:show="showCreate" @success="handleCreated" />
+    <v3-new-group-flow
+      v-model:show="showCreate"
+      :existing-group-names="groups.map(g => g.name)"
+      @success="handleCreated"
+    />
     <aggregate-group-modal
       v-model:show="showAggregate"
       :groups="groups"
