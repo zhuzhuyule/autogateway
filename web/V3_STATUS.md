@@ -22,7 +22,7 @@
 | **P1** | Top Models API / Catalog chips / Auto-routing 决策 | ✅ 完成 | `92c0d45` |
 | **P2** | Docs / Drag-reorder / Inline notes / V3 LogTable | ✅ 完成 | `9de589b` |
 | **P3** | sparkline / latency / Settings 4 卡 / Top Models channel filter / Copy AUTH_KEY / version | ❌ 未开始 | — |
-| **P2-8** | 7 modal 模板深度 v3 改写 | ❌ 未开始 | — |
+| **P2-8** | 7 modal 模板深度 v3 改写 | ✅ 完成 | `3d69011` |
 | **后端** | latency / activity / version / models metadata API | ❌ 未开始 | — |
 
 ---
@@ -318,7 +318,7 @@
 ## 📋 待办
 
 ### P2（剩余）
-- [ ] **P2-8** 7 个 Modal 模板深度 v3 改写
+- [ ] ~~**P2-8** 7 个 Modal 模板深度 v3 改写~~ ✅ 已完成 `3d69011`
   - `KeyCreateDialog.vue` — paste textarea + step indicator
   - `KeyDeleteDialog.vue` — 二次确认布局
   - `GroupFormModal.vue` — 大量 form section，最难，约半天
@@ -326,7 +326,6 @@
   - `AggregateGroupModal.vue` — sub-group 选择器
   - `AddSubGroupModal.vue` — group + weight 列表
   - `EditSubGroupWeightModal.vue` — slider + number
-  - **估时**：1 天，主要是模板搬迁，业务逻辑不动
 
 ### P3 锦上添花
 - [ ] **P3-13** KPI sparkline + Top Models 趋势接真数据
