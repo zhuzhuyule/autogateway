@@ -388,14 +388,14 @@ function setMappingGroup(
 <template>
   <div>
     <div class="v3-viewhead">
-      <div class="v3-viewhead__crumb">CONSOLE / AUTO ROUTING</div>
+      <div class="v3-viewhead__crumb">{{ t("v3.crumb.auto") }}</div>
       <div class="v3-viewhead__actions">
         <span class="v3-routing-state">
           <span
             class="v3-state-dot"
             :style="{ background: config.enabled ? 'var(--v3-ok)' : 'var(--v3-ink-4)' }"
           />
-          {{ config.enabled ? "ROUTING ACTIVE" : "DIRECT PASS-THROUGH" }}
+          {{ config.enabled ? t("v3.routingActive") : t("v3.routingPassthrough") }}
         </span>
         <n-switch v-model:value="config.enabled" />
         <button class="v3-btn" @click="fetchConfig">
@@ -813,7 +813,7 @@ function setMappingGroup(
                   </span>
                 </div>
                 <div class="v3-result-row">
-                  <span class="v3-result-row__k">Routed tier</span>
+                  <span class="v3-result-row__k">{{ t("v3.routedTier") }}</span>
                   <span class="v3-result-row__v">
                     <span
                       class="v3-chip"

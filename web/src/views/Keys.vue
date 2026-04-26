@@ -97,11 +97,11 @@ function handleSubGroupSelect(groupId: number) {
     <encryption-mismatch-alert style="margin-bottom: 16px" />
 
     <div class="v3-viewhead">
-      <div class="v3-viewhead__crumb">CONSOLE / GROUPS &amp; KEYS</div>
+      <div class="v3-viewhead__crumb">{{ t("v3.crumb.keys") }}</div>
     </div>
     <h1 class="v3-viewtitle">
-      Groups &amp; Keys
-      <span class="v3-viewtitle__meta">{{ groups.length }} groups</span>
+      {{ t("v3.groupsHeading") }}
+      <span class="v3-viewtitle__meta">{{ t("v3.nGroups", { n: groups.length }) }}</span>
     </h1>
 
     <div class="v3-layout-keys">

@@ -93,11 +93,11 @@ async function createAggregate() {
 <template>
   <div>
     <div class="v3-viewhead">
-      <div class="v3-viewhead__crumb">CONSOLE / MODEL DEDUP</div>
+      <div class="v3-viewhead__crumb">{{ t("v3.crumb.dedup") }}</div>
       <div class="v3-viewhead__actions">
         <button class="v3-btn" @click="fetchSuggestions">
           <n-icon :component="RefreshOutline" :size="12" />
-          {{ t("common.refresh") || "Refresh" }}
+          {{ t("v3.refresh") }}
         </button>
       </div>
     </div>

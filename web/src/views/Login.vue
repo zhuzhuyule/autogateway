@@ -52,7 +52,7 @@ const handleLogin = async () => {
             AutoGateway
           </div>
           <div style="font: 500 11px/1 var(--v3-mono); color: var(--v3-ink-3); margin-top: 4px">
-            {{ t("login.title") || "Mission Console" }}
+            {{ t("v3.missionConsole") }}
           </div>
         </div>
       </div>

@@ -94,7 +94,7 @@ function generateValidationRules(item: Setting): FormItemRule[] {
 <template>
   <div>
     <div class="v3-viewhead">
-      <div class="v3-viewhead__crumb">CONSOLE / SETTINGS</div>
+      <div class="v3-viewhead__crumb">{{ t("v3.crumb.settings") }}</div>
     </div>
     <h1 class="v3-viewtitle">
       {{ t("nav.settings") || "Settings" }}

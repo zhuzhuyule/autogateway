@@ -152,7 +152,7 @@ async function fetchCatalog() {
 <template>
   <div>
     <div class="v3-viewhead">
-      <div class="v3-viewhead__crumb">CONSOLE / MODEL CATALOG</div>
+      <div class="v3-viewhead__crumb">{{ t("v3.crumb.models") }}</div>
       <div class="v3-viewhead__actions">
         <div class="v3-search">
           <n-icon :component="SearchOutline" :size="12" />

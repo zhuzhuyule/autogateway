@@ -8,7 +8,7 @@ const { t } = useI18n();
 <template>
   <div>
     <div class="v3-viewhead">
-      <div class="v3-viewhead__crumb">CONSOLE / LOGS</div>
+      <div class="v3-viewhead__crumb">{{ t("v3.crumb.logs") }}</div>
     </div>
     <h1 class="v3-viewtitle">
       {{ t("nav.logs") }}

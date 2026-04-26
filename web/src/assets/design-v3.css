@@ -603,6 +603,56 @@ body.dark,
 .v3-set-row__sub { font: 400 11px/1.4 var(--v3-sans); color: var(--v3-ink-3); margin-top: 3px; }
 .v3-set-row__val { font: 500 12px/1 var(--v3-mono); color: var(--v3-ink-2); text-align: right; }
 
+/* ============================================
+   Naive UI overrides for v3 cohesion
+   - applies to all NModal/NDialog popups so existing modal templates
+     pick up v3 chrome without rewriting their markup
+   ============================================ */
+.n-modal-mask { background: oklch(0.18 0.025 245 / 0.55); }
+.n-modal-body-wrapper .n-card,
+.n-modal .n-card {
+  border-radius: var(--v3-radius-md);
+  border: 1px solid var(--v3-line);
+  box-shadow: var(--v3-shadow-md);
+  overflow: hidden;
+}
+.n-modal-body-wrapper .n-card > .n-card-header,
+.n-modal .n-card > .n-card-header {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--v3-line);
+  background: var(--v3-surface);
+  font: 600 14px/1.2 var(--v3-sans);
+  letter-spacing: -0.005em;
+}
+.n-modal-body-wrapper .n-card > .n-card__content,
+.n-modal .n-card > .n-card__content {
+  padding: 16px;
+}
+.n-modal-body-wrapper .n-card > .n-card__action,
+.n-modal .n-card > .n-card__action {
+  padding: 12px 16px;
+  border-top: 1px solid var(--v3-line);
+  background: var(--v3-surface-2);
+}
+.n-modal-body-wrapper .n-dialog,
+.n-modal .n-dialog {
+  border-radius: var(--v3-radius-md);
+  border: 1px solid var(--v3-line);
+  box-shadow: var(--v3-shadow-md);
+}
+
+/* Drawer chrome */
+.n-drawer { border-left: 1px solid var(--v3-line); }
+.n-drawer-header { padding: 14px 18px; border-bottom: 1px solid var(--v3-line); }
+.n-drawer-body-content-wrapper { background: var(--v3-surface); }
+
+/* DataTable in v3 wrappers */
+.v3-card .n-data-table .n-data-table-th { font-weight: 500; letter-spacing: 0.04em; text-transform: uppercase; font-size: 10.5px; }
+.v3-card .n-data-table .n-data-table-td { font-size: 12.5px; }
+
+/* Form labels in v3 */
+.n-form-item-label__text { font-size: 12px; color: var(--v3-ink-2); }
+
 /* Mobile rail collapse */
 @media (max-width: 700px) {
   .v3-body { grid-template-columns: 48px 1fr; }
