@@ -23,6 +23,7 @@
 | **P2** | Docs / Drag-reorder / Inline notes / V3 LogTable | ✅ 完成 | `9de589b` |
 | **P3** | sparkline / latency / Settings 4 卡 / Top Models channel filter / Copy AUTH_KEY / version | ❌ 未开始 | — |
 | **P2-8** | 7 modal 模板深度 v3 改写 | ✅ 完成 | `3d69011` |
+| **Model Routing 重写** | 删 `auto-routing` + 新 `model_aliases` 表 + SWRR + 429 cooldown | 📋 设计就绪，等实施 | — |
 | **后端** | latency / activity / version / models metadata API | ❌ 未开始 | — |
 
 ---
@@ -139,43 +140,24 @@
 
 ---
 
-# 5. Auto Routing — **数据模型决策待 leadership**
+# 5. Auto Routing → **整体重写为 Model Routing（决策已定）**
 
-## 5.1 顶部
-| 设计 | 状态 |
+> **决策结果（2026-04-26）**：废弃旧 `auto-routing` `group_mapping` schema，改为
+> 「**别名表 + auto 关键字 + SWRR 轮询 + 429 cooldown**」三合一架构。**硬切，无弃用窗口**。
+> 详见下文 **§13 Model Routing 重写设计**。
+>
+> 本节描述的"Auto Routing 视图"将被删除，替换为：
+> - `V3AliasesView.vue` —— 别名管理主页（含 `auto-simple/auto-medium/auto-complex` 锁定行）
+> - `V3RoutingThresholds.vue` —— 极简阈值设定卡（仅 token 阈值 + enabled 开关）
+
+## 当前 5.x 实现状态（即将作废）
+
+| 视图 | 状态 |
 |---|---|
-| ROUTING ACTIVE/PASSTHROUGH 状态指示 | ✅ |
-| Disable / Enable 按钮 | ✅ |
-| Refresh | ✅ |
-
-## 5.2 Threshold 卡
-| 设计 | 状态 |
-|---|---|
-| 三档预设按钮 | ✅ |
-| 0–20k token 可视化轴 + 双 stop | ✅ |
-| 数字输入备份 | ✅ |
-
-## 5.3 Tier 卡片
-状态：🔧 **设计偏离 — 等数据模型决策**
-
-设计稿"per-tier model fallback chain"与后端"per-model→tier→group"语义不可调和。**未做 leadership 决策前不要重构 UI**。详见下文 **P1-5 决策文档**。
-
-| 设计要素 | 状态 |
-|---|---|
-| Tier band + 编号 icon + title + rule | ✅ 视觉对了 |
-| Model chain 列表 | 🔧 改成了 model 列表 + 三个 select |
-| 拖拽 grip + 优先级排序 | ❌ |
-| `+ Add model to {tier}` 抽屉 | ❌ |
-| 每 tier 底部 traffic % / avg ms / err % | ❌ |
-
-## 5.4 Route Tester
-| 设计 | 状态 |
-|---|---|
-| 请求体 code box | ✅ |
-| Run test 按钮 | ✅ |
-| Decision：Routed tier / Estimated tokens / Tool count / Has vision | ✅ |
-| **Try order**（chain 顺序） | ❌ |
-| **Reason** 文案 | ❌ |
+| 5.1 顶部 ROUTING ACTIVE / Disable | ✅ 当前实现，将随重写删除 |
+| 5.2 Threshold 卡 | ✅ 当前实现，将拆出来作 V3RoutingThresholds 独立卡 |
+| 5.3 Tier 卡片（per-model→tier→group） | 🗑️ 即将整页删除 |
+| 5.4 Route Tester | 🗑️ 重写后保留同名按钮，逻辑改为查 alias 决策树 |
 
 ---
 
@@ -348,88 +330,181 @@
   - 后端：`GET /system/version` 返回 `{ go_version, app_version, commit }`
   - 估时：后端 0.5d + 前端 10 分钟
 
-### 长线（需 leadership 决策）
-- [ ] **Auto Routing 数据模型重设计（选项 A）**
-  - 后端：`auto_routing_tier_chains` 新表 + 兼容层
-  - 前端：V3AutoRouting 重写为 chain UI + 模型选择器抽屉
-  - 估时：3–5 天
-  - 阻塞条件：选项 A/B/C 决策（见 P1-5 决策文档）
-- [ ] **后端 Bell 通知系统**
-  - 事件流（key invalid / quota exhausted / upstream down）
-  - 估时：2–3 天
+### 长线
+- [ ] **Model Routing 重写（决策已定，硬切）** —— 详细方案见 §13
+  - Phase 1：加 `model_aliases` 表 + CRUD API（~2 天）
+  - Phase 2：新建 `internal/router/`，包含 SWRR + 429 cooldown 选择器，删 `internal/autoroute/`（~2 天）
+  - Phase 3：新建 `V3AliasesView.vue`（别名管理）+ `V3RoutingThresholds.vue`（极简阈值卡），删 `AutoRouting.vue`（~2 天）
+  - Phase 4：drop `auto_routing_config.group_mapping` + 删测试 + 文档（~半天）
+  - 估时：**~6.5 天**
+- [ ] **后端 Bell 通知系统**（事件流：key invalid / quota exhausted / upstream down）—— 2–3 天
 - [ ] 跨 channel 协议翻译（OpenAI ↔ Anthropic ↔ Gemini）
 - [ ] 用量配额、预算告警、按 Key 计费
 - [ ] OAuth / SSO 登录
 
 ---
 
-# P1-5 决策文档：Auto Routing 数据模型
+# §13 Model Routing 重写设计（已定案，硬切）
 
-设计稿与后端的根本分歧。**未做选择前不要碰 Auto Routing UI**，会白做。
+> **2026-04-26 决策**：废弃 `internal/autoroute/` + `group_mapping` 整套，改为
+> **「别名表 + auto 关键字 + SWRR + 429 cooldown」三合一架构**。无弃用窗口，
+> 直接 drop 旧表 / 删旧代码 / 删旧 UI。
+>
+> 该决策替代了原 P1-5 文档列出的选项 A/B/C，相当于"选项 D"。
 
-## 现状回顾
+## 13.1 路由决策树
 
-**后端 schema** (`auto-routing/config`)：
-```jsonc
-{
-  "enabled": true,
-  "simple_threshold": 2000,
-  "complex_threshold": 8000,
-  "group_mapping": {
-    "gpt-4o":      { "simple_group": "groq", "medium_group": "cerebras", "complex_group": "openai-direct" },
-    "claude-3-5":  { "simple_group": "anthropic-direct", "medium_group": "anthropic-direct", "complex_group": "anthropic-direct" }
-  }
+```
+请求 model 字段
+    │
+    ├─ "auto"
+    │     └─ 估算 token → 选 tier (simple / medium / complex)
+    │           └─ 查保留别名 auto-{tier} → 走 §13.4 SWRR 选择器
+    │
+    ├─ 命中 model_aliases.alias
+    │     └─ 取所有匹配 (group, real_model) → 走 §13.4 SWRR 选择器
+    │
+    └─ 未命中别名
+          └─ 跨所有 group 查 available_models 里的精确名 → 走 §13.4 SWRR 选择器
+```
+
+**保留别名（reserved）**：`auto-simple` / `auto-medium` / `auto-complex`
+- UI 置顶 + 加锁，不能改名/删除，只能编辑成员
+- 路由命中 `model="auto"` 必经此别名
+- 别名为空 → 503 + 文案「请先在别名页配置 auto-{tier} 池」
+
+## 13.2 数据模型
+
+```sql
+CREATE TABLE model_aliases (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    alias       VARCHAR(255) NOT NULL,        -- "gpt-4" / "auto-simple" / etc
+    group_id    INTEGER NOT NULL,
+    real_model  VARCHAR(255) NOT NULL,        -- group 暴露的真名 "qwen-3"
+    weight      INTEGER NOT NULL DEFAULT 1,   -- SWRR 权重
+    priority    INTEGER NOT NULL DEFAULT 100, -- 同权重时排序;数字越小越先
+    enabled     BOOLEAN NOT NULL DEFAULT 1,
+    is_reserved BOOLEAN NOT NULL DEFAULT 0,   -- auto-* 锁定行
+    created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(alias, group_id, real_model),
+    FOREIGN KEY (group_id) REFERENCES groups(id) ON DELETE CASCADE
+);
+CREATE INDEX idx_aliases_alias ON model_aliases(alias, enabled);
+```
+
+**Migration（硬切）**：
+```sql
+-- drop 旧表/列
+DROP TABLE IF EXISTS auto_routing_config;        -- 整表删
+-- 或者保留 thresholds：
+-- ALTER TABLE auto_routing_config DROP COLUMN group_mapping;
+```
+保留 `simple_threshold` / `complex_threshold` / `enabled` 三字段（搬到新表 `routing_settings` 或留在原表去掉 mapping 列），其他字段砍掉。
+
+**初始化时插入 3 个 reserved 行（empty 成员）**：
+```sql
+-- 这只是占位，让 UI 知道有这三个保留别名
+INSERT INTO model_aliases (alias, group_id, real_model, is_reserved, enabled)
+VALUES
+  ('auto-simple',  0, '', 1, 1),
+  ('auto-medium',  0, '', 1, 1),
+  ('auto-complex', 0, '', 1, 1);
+```
+（实际成员通过新增 enabled=1 + group_id>0 的行表达；上面这 3 行作为"锁定占位"标记）
+
+## 13.3 SWRR + 429 Cooldown 选择器
+
+```go
+// internal/router/selector.go
+
+type Candidate struct {
+    GroupID    uint
+    RealModel  string
+    Weight     int
+    Priority   int
+}
+
+func PickCandidate(alias string) (Candidate, error) {
+    cands := loadCandidates(alias)              // weight + priority + enabled
+    alive := filterCooldown(cands)              // 跳过 cooldown 期内的 (group, model)
+    if len(alive) == 0 {
+        alive = cands                           // 全挂了就放开重试
+    }
+    return swrr(alive), nil                     // 平滑加权轮询
+}
+
+func MarkResponse(c Candidate, status int) {
+    key := fmt.Sprintf("%d:%s", c.GroupID, c.RealModel)
+    if status == 429 {
+        cooldownStore.Set(key, expBackoff(key)) // 60s, 120s, 240s, 480s, 5min cap
+    } else if status >= 200 && status < 400 {
+        cooldownStore.Reset(key)                // 成功就清零退避计数
+    }
 }
 ```
-**语义**：client 写哪个 model 名，在哪个 tier 走哪个 group。
 
-**设计稿 schema** (`v3-keys-routing.jsx`)：
-```jsonc
-{
-  "simple_chain":  [{"provider":"groq","model":"llama-3.1-8b-instant"}, {"provider":"cerebras","model":"llama-3.1-8b"}],
-  "medium_chain":  [{"provider":"cerebras","model":"llama-3.3-70b"}, {"provider":"groq","model":"llama-3.3-70b"}],
-  "complex_chain": [{"provider":"openrouter","model":"deepseek-chat-v3"}, {"provider":"google","model":"gemini-2.5-pro"}]
-}
-```
-**语义**：每个 tier 是一条 fallback chain，client 写啥不重要，网关按 tier 选 chain 头部，失败往后试。
+- **Cooldown 粒度**：`(group_id, real_model)` —— 同 model 在不同 group 独立计数
+- **指数退避**：60s 起 ×2，封顶 5 分钟，5 次连续 429 后清零并重试
+- **存储**：内存 + Redis（如配置）。重启清空（简单优先）
 
-## 三个选项
+## 13.4 API
 
-### 选项 A：改后端，跟设计稿走 chain 模型
-- **改动**：DB schema 加 `auto_routing_tier_chains` 表 + 配置 API 改为 chain 数组 + 路由逻辑按 chain 顺序尝试 + 前端实现拖拽 chain + 模型选择器抽屉
-- **成本**：3–5 天（含后端 + 迁移 group_mapping）
-- **收益**：完全实现设计稿；fallback 链路语义清晰；用户不用关心 client 端 model 名
-- **代价**：失去"按 client model 名做不同路由"的能力；现有用户配置要迁移
+| Method | Endpoint | 说明 |
+|---|---|---|
+| GET | `/api/aliases` | 全部别名（含 reserved） |
+| GET | `/api/aliases/{alias}` | 单个别名 + 候选列表 |
+| POST | `/api/aliases` | 新建别名行 `{alias, group_id, real_model, weight?, priority?}` |
+| PUT | `/api/aliases/{id}` | 更新 weight / priority / enabled |
+| DELETE | `/api/aliases/{id}` | 删除别名行（reserved 行 group_id=0 无法删，需先移除成员） |
+| GET | `/api/routing/settings` | `{enabled, simple_threshold, complex_threshold}` |
+| PUT | `/api/routing/settings` | 同上 |
+| POST | `/api/routing/test` | 仍提供测试器，决策按 §13.1 跑 |
 
-### 选项 B：留住后端 schema，文案/UI 重新表达
-- **改动**：纯前端文案 + 移除 chain/grip/drawer 概念，明确"per-model→tier→group"
-- **成本**：半天
-- **收益**：不动后端，零生产风险；保留按 model 名分流的精细控制
-- **代价**：完全不符合设计稿；用户理解曲线高
+旧端点 `/api/auto-routing/*` **全部删除**，无重定向。
 
-### 选项 C：混合 — 加新配置，旧的留作兜底
-- **改动**：`tier_chains` 字段并存 + 路由优先 chain，命中旧规则走旧路径 + 双套 UI
-- **成本**：5–7 天
-- **收益**：迁移最平滑
-- **代价**：复杂度爆炸，长期维护成本高
+## 13.5 前端结构
 
-## 推荐
+| 视图 | 说明 |
+|---|---|
+| `/aliases` → `V3AliasesView.vue` | 别名管理主页（**新增 rail 入口**） |
+| `/auto-routing` → 删 `AutoRouting.vue` | 改为指向 `/aliases?tab=auto` 的轻量 tab |
+| 旧 `AutoRouting.vue` | 🗑️ 删除 |
 
-**选项 A** —— 真正按设计稿做。理由：
-1. 设计稿的 chain + drawer 是用户原话需求（"Auto Routing 中三种模型的添加交互设计"）
-2. 现有 `group_mapping` 用户量未知，但项目还在 v0.4 早期，迁移代价可接受
-3. 选项 B 长期会越来越像"后端做错了的妥协"，技术债积累
-4. 选项 C 复杂度不合理
+`V3AliasesView.vue` 布局（参考设计稿 v3-keys-routing.jsx 的 ModelPickerDrawer）：
+- 顶部：搜索 + status filter + 「+ New alias」按钮
+- 主表：每行 = 一个 alias，展开后看候选模型 chip 列表（带权重条）
+- reserved 三行 (auto-*) 置顶 + 加锁图标
+- 编辑别名行 → 弹 drawer：选 group → 选 model → 设 weight + priority
+- 顶部小卡：阈值轴 + enabled 开关（精简版 `V3RoutingThresholds.vue`）
 
-## 实施顺序（如选 A）
-1. 后端先加 `tier_chains` schema（向后兼容，空表代表旧逻辑生效）
-2. 后端路由 selector 优先读 chain；chain 为空回退老 mapping
-3. 前端 V3AutoRouting 重构为 chain UI + drawer
-4. 灰度切换：用户面板上加"启用新路由模式"开关，默认关
-5. 老用户保留 mapping；新用户上 chain
-6. 一个 milestone 后弃用 mapping（给 90 天迁移窗）
+## 13.6 完整工时
 
-**未做选择前**：`V3AutoRouting.vue` 保持现状（per-model→tier→group），不要重构。
+| Phase | 内容 | 工时 |
+|---|---|---|
+| 1 | `model_aliases` 表 + GORM model + migration（含 drop 旧表）+ CRUD API | 2 天 |
+| 2 | `internal/router/` 选择器（SWRR + cooldown）+ middleware；删 `internal/autoroute/` | 2 天 |
+| 3 | `V3AliasesView.vue` + `V3RoutingThresholds.vue`；删 `AutoRouting.vue` | 2 天 |
+| 4 | 测试（Go test for selector + 路由集成 + 前端 e2e）+ V3_STATUS 关闭这一章 | 半天 |
+| **合计** | | **~6.5 天** |
+
+## 13.7 与设计稿（spec）的差异
+
+| 项 | spec 提议 | 我们最终方案 | 理由 |
+|---|---|---|---|
+| Tier 命名 | `fast/standard/slow` | `simple/medium/complex` | 沿用现有项目语义 |
+| `model_metadata` 表 | 新建 | ❌ 不建，复用 `Group.AvailableModels` | 避免双重模型注册表 |
+| `key_model_bindings` 表 | 新建 | ❌ 不建，复用 `Group.proxy_keys` | 已有 key 隔离机制 |
+| `model_aliases` 表 | 新建 | ✅ 新建（**spec 唯一被采纳的新表**） | 设计稿核心承载 |
+| 优先级排序 | `priority asc` | `weight + priority`（同权重看 priority） | 同时支持加权轮询和强制顺序 |
+| 错误处理 | 未定 | SWRR + 429 cooldown 指数退避 | 业界标准做法 |
+| `auto` 关键字 | spec 提议 | ✅ 采纳，但用 reserved alias 实现 | 0 特殊代码路径 |
+
+## 13.8 决策意见对外解释
+
+- **为什么不渐进**：`group_mapping` 现在没有真实用户数据，"硬切"工作量 < "硬切 + 兼容层"工作量 / 2
+- **为什么不三表**：spec 的 `model_metadata` + `key_model_bindings` 与现有 `Group` + `proxy_keys` 强重复，会造成双源 of truth
+- **为什么 reserved alias 而不是单独 tier 池字段**：保持选择器代码路径单一，所有路由都走 SWRR
 
 ---
 
