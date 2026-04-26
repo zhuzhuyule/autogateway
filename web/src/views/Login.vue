@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import AppFooter from "@/components/AppFooter.vue";
 import LanguageSelector from "@/components/LanguageSelector.vue";
+import ThemeToggle from "@/components/ThemeToggle.vue";
 import { useAuthService } from "@/services/auth";
 import { LockClosedSharp } from "@vicons/ionicons5";
-import { NButton, NCard, NInput, NSpace, NIcon, useMessage } from "naive-ui";
+import { NIcon, NInput, useMessage } from "naive-ui";
 import { ref } from "vue";
-import { useRouter } from "vue-router";
 import { useI18n } from "vue-i18n";
+import { useRouter } from "vue-router";
 
 const authKey = ref("");
 const loading = ref(false);
@@ -30,231 +30,118 @@ const handleLogin = async () => {
 </script>
 
 <template>
-  <div class="login-container">
-    <!-- 语言切换器 -->
-    <div class="language-selector-wrapper">
+  <div class="v3-root v3-login-root">
+    <div class="v3-login-tools">
       <language-selector />
-    </div>
-    <div class="login-background">
-      <div class="login-decoration" />
-      <div class="login-decoration-2" />
+      <theme-toggle />
     </div>
 
-    <div class="login-content">
-      <div class="login-header">
-        <h1 class="login-title">{{ t("login.title") }}</h1>
-        <p class="login-subtitle">{{ t("login.subtitle") }}</p>
+    <div class="v3-login-stage">
+      <div class="v3-login-brand">
+        <div class="v3-chrome__logo" style="width: 40px; height: 40px; font-size: 18px">
+          A
+        </div>
+        <div>
+          <div
+            style="
+              font: 600 18px/1.2 var(--v3-sans);
+              letter-spacing: -0.01em;
+              color: var(--v3-ink);
+            "
+          >
+            AutoGateway
+          </div>
+          <div style="font: 500 11px/1 var(--v3-mono); color: var(--v3-ink-3); margin-top: 4px">
+            {{ t("login.title") || "Mission Console" }}
+          </div>
+        </div>
       </div>
 
-      <n-card class="login-card modern-card" :bordered="false">
-        <template #header>
-          <div class="card-header">
-            <h2 class="card-title">{{ t("login.welcome") }}</h2>
-            <p class="card-subtitle">{{ t("login.welcomeDesc") }}</p>
+      <div class="v3-card v3-login-card">
+        <div class="v3-card__head">
+          <div>
+            <div class="v3-card__title">
+              {{ t("login.welcome") || "Sign in" }}
+            </div>
+            <div class="v3-card__sub">
+              {{ t("login.welcomeDesc") || "Enter the AUTH_KEY configured on the server." }}
+            </div>
           </div>
-        </template>
-
-        <n-space vertical size="large">
+        </div>
+        <div class="v3-card__body">
+          <div
+            class="v3-intake__paste-lbl"
+            style="margin-bottom: 6px; display: flex; align-items: center; gap: 6px"
+          >
+            <n-icon :component="LockClosedSharp" :size="11" />
+            AUTH_KEY
+          </div>
           <n-input
             v-model:value="authKey"
             type="password"
-            size="large"
-            :placeholder="t('login.authKeyPlaceholder')"
-            class="modern-input"
+            size="medium"
+            :placeholder="t('login.authKeyPlaceholder') || 'sk-…'"
             @keyup.enter="handleLogin"
-          >
-            <template #prefix>
-              <n-icon :component="LockClosedSharp" />
-            </template>
-          </n-input>
-
-          <n-button
-            class="login-btn modern-button"
-            type="primary"
-            size="large"
-            block
-            @click="handleLogin"
-            :loading="loading"
+          />
+          <button
+            class="v3-btn v3-btn--accent v3-btn--lg"
+            style="width: 100%; margin-top: 14px"
             :disabled="loading"
+            @click="handleLogin"
           >
-            <template v-if="!loading">
-              <span>{{ t("login.loginButton") }}</span>
-            </template>
-          </n-button>
-        </n-space>
-      </n-card>
+            {{ loading ? "Signing in…" : t("login.loginButton") || "Sign in" }}
+          </button>
+        </div>
+      </div>
+
+      <div class="v3-login-foot">
+        <span style="font: 400 11px var(--v3-mono); color: var(--v3-ink-3)">
+          {{ t("login.subtitle") || "AI Gateway · self-hosted" }}
+        </span>
+      </div>
     </div>
   </div>
-  <app-footer />
 </template>
 
 <style scoped>
-.language-selector-wrapper {
-  position: absolute;
-  top: 24px;
-  right: 24px;
-  z-index: 10;
-}
-
-.login-container {
-  min-height: calc(100vh - 52px);
-  display: flex;
-  justify-content: center;
-  align-items: center;
+.v3-login-root {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
   position: relative;
-  overflow: hidden;
   padding: 24px;
 }
 
-.login-background {
+.v3-login-tools {
   position: absolute;
-  top: 0;
-  left: 0;
+  top: 18px;
+  right: 18px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.v3-login-stage {
   width: 100%;
-  height: 100%;
-  z-index: 0;
+  max-width: 380px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
 }
 
-.login-decoration {
-  position: absolute;
-  top: -50%;
-  right: -20%;
-  width: 800px;
-  height: 800px;
-  background: var(--primary-gradient);
-  border-radius: 50%;
-  opacity: 0.1;
-  animation: float 6s ease-in-out infinite;
+.v3-login-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  justify-content: center;
 }
 
-.login-decoration-2 {
-  position: absolute;
-  bottom: -50%;
-  left: -20%;
-  width: 600px;
-  height: 600px;
-  background: var(--secondary-gradient);
-  border-radius: 50%;
-  opacity: 0.08;
-  animation: float 8s ease-in-out infinite reverse;
+.v3-login-card {
+  box-shadow: var(--v3-shadow-md);
 }
 
-@keyframes float {
-  0%,
-  100% {
-    transform: translateY(0px) rotate(0deg);
-  }
-  50% {
-    transform: translateY(-20px) rotate(5deg);
-  }
-}
-
-.login-content {
-  position: relative;
-  z-index: 1;
-  width: 100%;
-  max-width: 420px;
-  padding: 0 20px;
-}
-
-.login-header {
+.v3-login-foot {
   text-align: center;
-  margin-bottom: 40px;
-}
-
-.login-title {
-  font-size: 2.5rem;
-  font-weight: 700;
-  background: var(--primary-gradient);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-  margin-bottom: 8px;
-  letter-spacing: -0.5px;
-}
-
-.login-subtitle {
-  font-size: 1.1rem;
-  color: var(--text-secondary);
-  margin: 0;
-  font-weight: 500;
-}
-
-.login-card {
-  backdrop-filter: blur(20px);
-  border: 1px solid var(--border-color-light);
-}
-
-.card-header {
-  text-align: center;
-  padding-bottom: 8px;
-}
-
-.card-title {
-  font-size: 1.5rem;
-  font-weight: 600;
-  color: var(--text-primary);
-  margin: 0 0 8px 0;
-}
-
-.card-subtitle {
-  font-size: 0.95rem;
-  color: var(--text-secondary);
-  margin: 0;
-}
-
-.login-btn {
-  background: var(--primary-gradient);
-  border: none;
-  font-weight: 600;
-  letter-spacing: 0.5px;
-  height: 48px;
-  font-size: 1rem;
-}
-
-.login-btn:hover {
-  background: linear-gradient(135deg, #5a6fd8 0%, #6a4190 100%);
-  transform: translateY(-1px);
-  box-shadow: 0 8px 25px rgba(102, 126, 234, 0.3);
-}
-
-:deep(.n-input) {
-  --n-border-radius: 12px;
-  --n-height: 48px;
-}
-
-:deep(.n-input__input-el) {
-  font-size: 1rem;
-}
-
-:deep(.n-input__prefix) {
-  color: var(--text-secondary);
-}
-
-:deep(.n-card-header) {
-  padding-bottom: 16px;
-}
-
-:deep(.n-card__content) {
-  padding-top: 0;
-}
-
-/* 暗黑模式适配 */
-:root.dark .login-decoration {
-  opacity: 0.05;
-}
-
-:root.dark .login-decoration-2 {
-  opacity: 0.03;
-}
-
-:root.dark .login-card {
-  background: var(--card-bg-solid);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-}
-
-:root.dark .login-btn:hover {
-  background: linear-gradient(135deg, #7c8aac 0%, #8b94c0 100%);
-  box-shadow: 0 8px 25px rgba(139, 157, 245, 0.2);
+  margin-top: 4px;
 }
 </style>

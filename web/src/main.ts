@@ -1,5 +1,6 @@
 import App from "@/App.vue";
 import "@/assets/style.css";
+import "@/assets/design-v3.css";
 import router from "@/router";
 import i18n from "@/locales";
 import naive from "naive-ui";

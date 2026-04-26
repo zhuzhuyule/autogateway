@@ -22,131 +22,275 @@ import {
 import { computed, defineComponent, watch } from "vue";
 
 // 自定义主题配置 - 根据主题动态调整
-const themeOverrides = computed<GlobalThemeOverrides>(() => {
-  const baseOverrides: GlobalThemeOverrides = {
+/**
+ * v3 Mission Console palette — concrete sRGB equivalents of the oklch tokens
+ * declared in @/assets/design-v3.css. Naive UI's theme engine needs literal
+ * color values; keep these in sync if the design tokens move.
+ */
+const V3_LIGHT = {
+  bg: "#f5f7fb",
+  surface: "#ffffff",
+  surface2: "#f3f5f9",
+  surface3: "#e9ecf2",
+  line: "#e2e6ee",
+  lineStrong: "#c8cfdb",
+  ink: "#1f2937",
+  ink2: "#4b5563",
+  ink3: "#6b7280",
+  ink4: "#94a3b8",
+  accent: "#4263eb",
+  accentHover: "#3b56cf",
+  accentPressed: "#314aa8",
+  ok: "#16a34a",
+  warn: "#d97706",
+  danger: "#dc2626",
+  info: "#4263eb",
+};
+const V3_DARK = {
+  bg: "#0f141d",
+  surface: "#1c2230",
+  surface2: "#171c27",
+  surface3: "#232a3a",
+  line: "#2c3447",
+  lineStrong: "#3a445a",
+  ink: "#f1f5f9",
+  ink2: "#cbd5e1",
+  ink3: "#94a3b8",
+  ink4: "#64748b",
+  accent: "#6c8aff",
+  accentHover: "#5b7bff",
+  accentPressed: "#4566e6",
+  ok: "#22c55e",
+  warn: "#f59e0b",
+  danger: "#ef4444",
+  info: "#6c8aff",
+};
+
+const V3_FONT_SANS =
+  "'Geist', 'Geist Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+const V3_FONT_MONO =
+  "'Geist Mono', 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace";
+
+function buildOverrides(p: typeof V3_LIGHT): GlobalThemeOverrides {
+  return {
     common: {
-      primaryColor: "#667eea",
-      primaryColorHover: "#5a6fd8",
-      primaryColorPressed: "#4c63d2",
-      primaryColorSuppl: "#8b9df5",
-      borderRadius: "12px",
-      borderRadiusSmall: "8px",
-      fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+      primaryColor: p.accent,
+      primaryColorHover: p.accentHover,
+      primaryColorPressed: p.accentPressed,
+      primaryColorSuppl: p.accentHover,
+      successColor: p.ok,
+      successColorHover: p.ok,
+      successColorPressed: p.ok,
+      warningColor: p.warn,
+      warningColorHover: p.warn,
+      warningColorPressed: p.warn,
+      errorColor: p.danger,
+      errorColorHover: p.danger,
+      errorColorPressed: p.danger,
+      infoColor: p.info,
+      infoColorHover: p.info,
+      infoColorPressed: p.info,
+      bodyColor: p.bg,
+      cardColor: p.surface,
+      modalColor: p.surface,
+      popoverColor: p.surface,
+      tableColor: p.surface,
+      tableHeaderColor: p.surface2,
+      inputColor: p.surface,
+      inputColorDisabled: p.surface2,
+      actionColor: p.surface2,
+      hoverColor: p.surface2,
+      textColorBase: p.ink,
+      textColor1: p.ink,
+      textColor2: p.ink2,
+      textColor3: p.ink3,
+      placeholderColor: p.ink4,
+      iconColor: p.ink3,
+      borderColor: p.line,
+      dividerColor: p.line,
+      borderRadius: "6px",
+      borderRadiusSmall: "5px",
+      fontFamily: V3_FONT_SANS,
+      fontFamilyMono: V3_FONT_MONO,
+      fontSize: "13px",
     },
     Card: {
-      paddingMedium: "24px",
+      color: p.surface,
+      colorModal: p.surface,
+      textColor: p.ink,
+      titleTextColor: p.ink,
+      borderColor: p.line,
+      paddingMedium: "16px",
+      paddingLarge: "20px",
+      paddingSmall: "12px",
+    },
+    Modal: {
+      color: p.surface,
+      textColor: p.ink,
+    },
+    Dialog: {
+      color: p.surface,
+      textColor: p.ink,
+      titleTextColor: p.ink,
+      iconColorInfo: p.info,
+      iconColorSuccess: p.ok,
+      iconColorWarning: p.warn,
+      iconColorError: p.danger,
     },
     Button: {
-      fontWeight: "600",
-      heightMedium: "40px",
-      heightLarge: "48px",
+      fontWeight: "500",
+      heightMedium: "30px",
+      heightSmall: "26px",
+      heightLarge: "36px",
+      heightTiny: "22px",
+      borderRadiusMedium: "5px",
+      borderRadiusSmall: "5px",
+      borderRadiusLarge: "6px",
     },
     Input: {
-      heightMedium: "40px",
-      heightLarge: "48px",
+      color: p.surface,
+      colorDisabled: p.surface2,
+      colorFocus: p.surface,
+      textColor: p.ink,
+      placeholderColor: p.ink4,
+      border: `1px solid ${p.line}`,
+      borderHover: `1px solid ${p.accent}`,
+      borderFocus: `1px solid ${p.accent}`,
+      heightMedium: "30px",
+      heightSmall: "26px",
+      heightLarge: "36px",
+      borderRadius: "5px",
     },
-    Menu: {
-      itemHeight: "42px",
-    },
-    LoadingBar: {
-      colorLoading: "#667eea",
-      colorError: "#ff4757",
-      height: "3px",
-    },
-  };
-
-  // 暗黑模式下的特殊覆盖
-  if (actualTheme.value === "dark") {
-    return {
-      ...baseOverrides,
-      common: {
-        ...baseOverrides.common,
-        // 分层对比：浅色外层背景，深黑色内容
-        bodyColor: "#2b3038", // 外层背景 - 浅灰色
-        cardColor: "#0f1115", // 卡片内容 - 深黑色
-        modalColor: "#0f1115", // 模态框 - 深黑色
-        popoverColor: "#0f1115", // 弹出层 - 深黑色
-        tableColor: "#0f1115", // 表格 - 深黑色
-        inputColor: "#1a1d23", // 输入框 - 稍深一点
-        actionColor: "#1a1d23", // 操作区域
-        textColorBase: "#e8e8e8", // 文字 - 浅色高对比
-        textColor1: "#e8e8e8",
-        textColor2: "#b4b4b4",
-        textColor3: "#888888",
-        borderColor: "rgba(255, 255, 255, 0.08)",
-        dividerColor: "rgba(255, 255, 255, 0.05)",
-      },
-      Card: {
-        ...baseOverrides.Card,
-        color: "#0f1115", // 卡片背景 - 深黑色
-        textColor: "#e8e8e8",
-        borderColor: "rgba(255, 255, 255, 0.08)",
-      },
-      Input: {
-        ...baseOverrides.Input,
-        color: "#1a1d23", // 输入框背景
-        textColor: "#e8e8e8",
-        colorFocus: "#1a1d23",
-        borderHover: "rgba(102, 126, 234, 0.5)",
-        borderFocus: "rgba(102, 126, 234, 0.8)",
-        placeholderColor: "#666666",
-      },
-      Select: {
-        peers: {
-          InternalSelection: {
-            textColor: "#e8e8e8",
-            color: "#1a1d23",
-            placeholderColor: "#666666",
-          },
+    Select: {
+      peers: {
+        InternalSelection: {
+          color: p.surface,
+          colorActive: p.surface,
+          textColor: p.ink,
+          placeholderColor: p.ink4,
+          border: `1px solid ${p.line}`,
+          borderHover: `1px solid ${p.accent}`,
+          borderActive: `1px solid ${p.accent}`,
+          borderFocus: `1px solid ${p.accent}`,
+          borderRadius: "5px",
+          heightMedium: "30px",
+          heightSmall: "26px",
+        },
+        InternalSelectMenu: {
+          color: p.surface,
+          optionTextColor: p.ink,
+          optionTextColorActive: p.accent,
+          optionColorPending: p.surface2,
+          optionColorActive: "transparent",
+          borderRadius: "6px",
         },
       },
-      DataTable: {
-        tdColor: "#0f1115", // 表格单元格 - 深黑色
-        thColor: "#1a1d23", // 表头 - 稍深
-        thTextColor: "#e8e8e8",
-        tdTextColor: "#e8e8e8",
-        borderColor: "rgba(255, 255, 255, 0.08)",
-      },
-      Tag: {
-        textColor: "#e8e8e8",
-      },
-      Pagination: {
-        itemTextColor: "#b4b4b4",
-        itemTextColorActive: "#e8e8e8",
-        itemColor: "#1a1d23",
-        itemColorActive: "#282c37",
-      },
-      DatePicker: {
-        itemTextColor: "#e8e8e8",
-        itemColorActive: "#1a1d23",
-        panelColor: "#0f1115",
-      },
-      Message: {
-        color: "#323841", // 消息背景 - 浅灰色，比内容区域浅
-        textColor: "#e8e8e8",
-        iconColor: "#e8e8e8",
-        borderRadius: "8px",
-        colorInfo: "#323841",
-        colorSuccess: "#323841",
-        colorWarning: "#323841",
-        colorError: "#323841",
-        colorLoading: "#323841",
-      },
-      LoadingBar: {
-        ...baseOverrides.LoadingBar,
-      },
-      Notification: {
-        color: "#323841", // 通知背景 - 浅灰色
-        textColor: "#e8e8e8",
-        titleTextColor: "#e8e8e8",
-        descriptionTextColor: "#b4b4b4",
-        borderRadius: "8px",
-      },
-    };
-  }
+    },
+    InputNumber: {
+      iconColor: p.ink3,
+    },
+    Menu: {
+      itemHeight: "32px",
+      borderRadius: "5px",
+      itemColorActive: p.surface3,
+      itemColorActiveHover: p.surface3,
+      itemTextColorActive: p.accent,
+      itemTextColorActiveHover: p.accent,
+      itemIconColorActive: p.accent,
+      itemIconColorActiveHover: p.accent,
+    },
+    DataTable: {
+      tdColor: p.surface,
+      tdColorHover: p.surface2,
+      tdColorStriped: p.surface2,
+      thColor: p.surface2,
+      thTextColor: p.ink3,
+      tdTextColor: p.ink,
+      borderColor: p.line,
+      borderRadius: "6px",
+      thFontWeight: "500",
+      thPaddingMedium: "10px 14px",
+      tdPaddingMedium: "10px 14px",
+    },
+    Pagination: {
+      itemTextColor: p.ink2,
+      itemTextColorActive: "#ffffff",
+      itemColor: p.surface,
+      itemColorHover: p.surface2,
+      itemColorActive: p.accent,
+      itemColorActiveHover: p.accentHover,
+      itemBorder: `1px solid ${p.line}`,
+      itemBorderActive: `1px solid ${p.accent}`,
+      itemBorderHover: `1px solid ${p.lineStrong}`,
+      itemBorderRadius: "5px",
+    },
+    Tag: {
+      borderRadius: "4px",
+      color: p.surface2,
+      textColor: p.ink2,
+      border: `1px solid ${p.line}`,
+    },
+    Switch: {
+      railColorActive: p.accent,
+    },
+    Drawer: {
+      color: p.surface,
+      textColor: p.ink,
+      titleTextColor: p.ink,
+    },
+    Form: {
+      labelTextColor: p.ink2,
+      labelFontWeightTop: "500",
+    },
+    Divider: {
+      color: p.line,
+    },
+    Tabs: {
+      tabTextColorActiveBar: p.accent,
+      tabTextColorHoverBar: p.accent,
+      tabTextColorBar: p.ink2,
+      tabTextColorBar_underline: p.ink2,
+      barColor: p.accent,
+    },
+    Notification: {
+      color: p.surface,
+      textColor: p.ink,
+      titleTextColor: p.ink,
+      borderRadius: "6px",
+    },
+    Message: {
+      color: p.surface,
+      textColor: p.ink,
+      colorInfo: p.surface,
+      colorSuccess: p.surface,
+      colorWarning: p.surface,
+      colorError: p.surface,
+      borderRadius: "6px",
+    },
+    LoadingBar: {
+      colorLoading: p.accent,
+      colorError: p.danger,
+      height: "2px",
+    },
+    Tooltip: {
+      color: p.ink,
+      textColor: p.surface,
+      borderRadius: "5px",
+    },
+    Popover: {
+      color: p.surface,
+      textColor: p.ink,
+      borderRadius: "6px",
+    },
+    Alert: {
+      borderRadius: "6px",
+    },
+  };
+}
 
-  return baseOverrides;
-});
+const themeOverrides = computed<GlobalThemeOverrides>(() =>
+  buildOverrides(actualTheme.value === "dark" ? V3_DARK : V3_LIGHT)
+);
 
 // 根据当前主题动态返回主题对象
 const theme = computed<GlobalTheme | undefined>(() => {

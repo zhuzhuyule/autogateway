@@ -1,27 +1,12 @@
 <script setup lang="ts">
-import { ref, onMounted, h, computed } from "vue";
-import {
-  NCard,
-  NDataTable,
-  NButton,
-  NSpace,
-  NTag,
-  NEmpty,
-  NSpin,
-  NAlert,
-  NIcon,
-  NInput,
-  NSelect,
-  NSwitch,
-  useMessage,
-  type DataTableColumns,
-  type SelectOption,
-} from "naive-ui";
-import { Refresh } from "@vicons/ionicons5";
-import { useI18n } from "vue-i18n";
 import { findFreeModel, FREE_PROVIDERS, type ModelTier } from "@/data/freeProviders";
+import { RefreshOutline, SearchOutline } from "@vicons/ionicons5";
+import { NIcon, NSpin, useMessage } from "naive-ui";
+import { computed, onMounted, ref } from "vue";
+import { useI18n } from "vue-i18n";
 
 const { t } = useI18n();
+const message = useMessage();
 
 interface ModelItem {
   id: string;
@@ -30,43 +15,28 @@ interface ModelItem {
   groups: string[];
 }
 
-const message = useMessage();
-const loading = ref(false);
-const fetchError = ref(false);
-const catalogData = ref<ModelItem[]>([]);
-
-// 筛选条件
-const searchText = ref("");
-const tierFilter = ref<ModelTier | "all">("all");
-const providerFilter = ref<string | "all">("all");
-const freeOnly = ref(false);
-
-const tierOptions: SelectOption[] = [
-  { label: t("modelcatalog.allTiers"), value: "all" },
-  { label: t("modelcatalog.tierFast"), value: "fast" },
-  { label: t("modelcatalog.tierBalanced"), value: "balanced" },
-  { label: t("modelcatalog.tierMax"), value: "max" },
-];
-
-const providerOptions = computed<SelectOption[]>(() => [
-  { label: t("modelcatalog.allProviders"), value: "all" },
-  ...FREE_PROVIDERS.map((p) => ({ label: p.name, value: p.id })),
-]);
-
-const authHeader = computed(() => {
-  const authKey = localStorage.getItem("authKey");
-  return authKey ? `Bearer ${authKey}` : "";
-});
-
-// 给每条 catalog 行附加 free/tier/providerId 元数据
 interface AugmentedItem extends ModelItem {
   isFree: boolean;
   tier?: ModelTier;
   freeProviderId?: string;
 }
 
+const loading = ref(false);
+const fetchError = ref(false);
+const catalogData = ref<ModelItem[]>([]);
+
+const searchText = ref("");
+const tierFilter = ref<ModelTier | "all">("all");
+const providerFilter = ref<string | "all">("all");
+const freeOnly = ref(false);
+
+const authHeader = computed(() => {
+  const k = localStorage.getItem("authKey");
+  return k ? `Bearer ${k}` : "";
+});
+
 const augmented = computed<AugmentedItem[]>(() =>
-  catalogData.value.map((row) => {
+  catalogData.value.map(row => {
     const free = findFreeModel(row.id);
     return {
       ...row,
@@ -74,109 +44,103 @@ const augmented = computed<AugmentedItem[]>(() =>
       tier: free?.tier,
       freeProviderId: free?.providerId,
     };
-  }),
+  })
 );
 
 const filtered = computed<AugmentedItem[]>(() => {
   const q = searchText.value.trim().toLowerCase();
   return augmented.value
-    .filter((row) => {
-      if (q && !row.id.toLowerCase().includes(q) && !row.display_name.toLowerCase().includes(q)) {
+    .filter(row => {
+      if (
+        q &&
+        !row.id.toLowerCase().includes(q) &&
+        !(row.display_name || "").toLowerCase().includes(q)
+      ) {
         return false;
       }
       if (freeOnly.value && !row.isFree) return false;
       if (tierFilter.value !== "all" && row.tier !== tierFilter.value) return false;
-      if (providerFilter.value !== "all" && row.freeProviderId !== providerFilter.value) return false;
+      if (
+        providerFilter.value !== "all" &&
+        row.freeProviderId !== providerFilter.value
+      ) {
+        return false;
+      }
       return true;
     })
-    // 免费模型排在前
     .sort((a, b) => {
       if (a.isFree !== b.isFree) return a.isFree ? -1 : 1;
       return a.id.localeCompare(b.id);
     });
 });
 
-function tierTagType(tier?: ModelTier): "success" | "warning" | "error" | "default" {
-  switch (tier) {
-    case "fast": return "success";
-    case "balanced": return "warning";
-    case "max": return "error";
-    default: return "default";
-  }
-}
+const freeCount = computed(() => augmented.value.filter(r => r.isFree).length);
 
-const columns: DataTableColumns<AugmentedItem> = [
-  {
-    title: t("modelcatalog.modelId"),
-    key: "id",
-    ellipsis: { tooltip: true },
-    render: (row) => {
-      return h("div", { style: "display:flex;align-items:center;gap:6px;" }, [
-        h("span", { style: "font-family:monospace;" }, row.id),
-        row.isFree
-          ? h(NTag, { size: "tiny", type: "success", round: true, bordered: false }, () => "🆓 " + t("modelcatalog.freeTag"))
-          : null,
-      ]);
-    },
-  },
-  {
-    title: t("modelcatalog.tier"),
-    key: "tier",
-    width: 110,
-    render: (row) => {
-      if (!row.tier) return h("span", { style: "color:#999;" }, "—");
-      return h(
-        NTag,
-        { size: "small", type: tierTagType(row.tier), bordered: false },
-        () => t(`modelcatalog.tier${row.tier!.charAt(0).toUpperCase() + row.tier!.slice(1)}`),
-      );
-    },
-  },
-  {
-    title: t("modelcatalog.ownedBy"),
-    key: "owned_by",
-    width: 120,
-  },
-  {
-    title: t("modelcatalog.groups"),
-    key: "groups",
-    width: 220,
-    render: (row) => {
-      if (!row.groups || row.groups.length === 0) {
-        return h(NTag, { size: "small", type: "warning" }, () => t("modelcatalog.noGroups"));
-      }
-      return row.groups.slice(0, 4).map((g) =>
-        h(NTag, { size: "small", type: "info", style: "margin-right: 4px; margin-bottom: 2px;" }, () => g)
-      );
-    },
-  },
+const tierPills: Array<{ k: ModelTier | "all"; label: string }> = [
+  { k: "all", label: t("modelcatalog.allTiers") || "All tiers" },
+  { k: "fast", label: t("modelcatalog.tierFast") || "Fast" },
+  { k: "balanced", label: t("modelcatalog.tierBalanced") || "Balanced" },
+  { k: "max", label: t("modelcatalog.tierMax") || "Max" },
 ];
 
-const hasData = computed(() => catalogData.value.length > 0);
-const filteredCount = computed(() => filtered.value.length);
-const freeCount = computed(() => augmented.value.filter((r) => r.isFree).length);
+function tierChipClass(tier?: ModelTier): string {
+  if (tier === "fast") return "v3-chip v3-chip--ok";
+  if (tier === "balanced") return "v3-chip v3-chip--warn";
+  if (tier === "max") return "v3-chip v3-chip--danger";
+  return "v3-chip";
+}
 
-onMounted(async () => {
-  await fetchCatalog();
-});
+function providerShort(id?: string): string {
+  if (!id) return "—";
+  const p = FREE_PROVIDERS.find(x => x.id === id);
+  if (p) {
+    return p.name
+      .replace(/[^A-Za-z0-9]/g, "")
+      .slice(0, 2)
+      .toUpperCase();
+  }
+  return id.slice(0, 2).toUpperCase();
+}
+
+function providerName(id?: string): string {
+  if (!id) return "—";
+  return FREE_PROVIDERS.find(x => x.id === id)?.name || id;
+}
+
+function pavClassFor(providerId?: string): string {
+  if (!providerId) return "v3-pav v3-pav-default";
+  const known = [
+    "groq",
+    "cerebras",
+    "openrouter",
+    "together",
+    "cloudflare",
+    "mistral",
+    "google",
+    "cohere",
+    "github",
+    "anthropic",
+  ];
+  if (known.includes(providerId)) return `v3-pav v3-pav-${providerId}`;
+  if (providerId.includes("google")) return "v3-pav v3-pav-google";
+  if (providerId.includes("github")) return "v3-pav v3-pav-github";
+  if (providerId.includes("hugging")) return "v3-pav v3-pav-cohere";
+  return "v3-pav v3-pav-default";
+}
+
+onMounted(() => fetchCatalog());
 
 async function fetchCatalog() {
   loading.value = true;
   fetchError.value = false;
   try {
     const response = await fetch("/api/models", {
-      headers: {
-        "Authorization": authHeader.value,
-      },
+      headers: { Authorization: authHeader.value },
     });
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
-    }
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const result = await response.json();
-    if (result.data) {
-      catalogData.value = result.data;
-    }
-  } catch (error) {
+    catalogData.value = result.data || [];
+  } catch (e) {
     fetchError.value = true;
     message.error(t("common.requestFailed"));
   } finally {
@@ -186,85 +150,171 @@ async function fetchCatalog() {
 </script>
 
 <template>
-  <n-space vertical>
-    <n-alert v-if="fetchError" type="error" :title="t('common.error')" closable @close="fetchError = false">
-      {{ t("modelcatalog.loadFailed") }}
-    </n-alert>
-
-    <n-card :title="t('modelcatalog.title')" hoverable>
-      <template #header-extra>
-        <n-space :size="8" align="center">
-          <span class="catalog-stats">
-            {{ t("modelcatalog.statsLine", { total: catalogData.length, filtered: filteredCount, free: freeCount }) }}
-          </span>
-          <n-button size="small" @click="fetchCatalog" :loading="loading">
-            <template #icon>
-              <n-icon :component="Refresh" />
-            </template>
-            {{ t("common.refresh") }}
-          </n-button>
-        </n-space>
-      </template>
-
-      <!-- 筛选栏 -->
-      <div class="filter-bar">
-        <n-input
-          v-model:value="searchText"
-          :placeholder="t('modelcatalog.searchPlaceholder')"
-          clearable
-          style="width: 240px"
-        />
-        <n-select
-          v-model:value="tierFilter"
-          :options="tierOptions"
-          style="width: 140px"
-        />
-        <n-select
-          v-model:value="providerFilter"
-          :options="providerOptions"
-          filterable
-          style="width: 200px"
-        />
-        <span class="filter-switch">
-          <n-switch v-model:value="freeOnly" size="small" />
-          <span style="margin-left: 6px">🆓 {{ t("modelcatalog.freeOnly") }}</span>
-        </span>
+  <div>
+    <div class="v3-viewhead">
+      <div class="v3-viewhead__crumb">CONSOLE / MODEL CATALOG</div>
+      <div class="v3-viewhead__actions">
+        <div class="v3-search">
+          <n-icon :component="SearchOutline" :size="12" />
+          <input
+            v-model="searchText"
+            :placeholder="t('modelcatalog.searchPlaceholder') || 'Filter models…'"
+          />
+        </div>
+        <button class="v3-btn" @click="fetchCatalog">
+          <n-icon :component="RefreshOutline" :size="12" />
+          {{ t("common.refresh") || "Refresh" }}
+        </button>
       </div>
+    </div>
+    <h1 class="v3-viewtitle">
+      {{ t("modelcatalog.title") || "Model catalog" }}
+      <span class="v3-viewtitle__meta">
+        {{ filtered.length }} / {{ catalogData.length }} entries · {{ freeCount }} free
+      </span>
+    </h1>
 
-      <n-spin :show="loading">
-        <n-data-table
-          v-if="hasData"
-          :columns="columns"
-          :data="filtered"
-          :bordered="false"
-          striped
-          :pagination="{ pageSize: 20 }"
-          :row-key="(row: AugmentedItem) => row.id"
-        />
-        <n-empty v-else-if="!fetchError" :description="t('modelcatalog.noData')" />
-      </n-spin>
-    </n-card>
-  </n-space>
+    <!-- Filter pills -->
+    <div
+      style="
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin: -4px 0 12px;
+        align-items: center;
+      "
+    >
+      <span
+        v-for="p in tierPills"
+        :key="p.k"
+        class="v3-pill"
+        :class="{ 'v3-pill--active': tierFilter === p.k }"
+        @click="tierFilter = p.k"
+      >
+        {{ p.label }}
+      </span>
+      <span style="color: var(--v3-line); margin: 0 4px">|</span>
+      <span
+        class="v3-pill"
+        :class="{ 'v3-pill--active': freeOnly }"
+        @click="freeOnly = !freeOnly"
+      >
+        🆓 {{ t("modelcatalog.freeOnly") || "Free only" }}
+      </span>
+      <span style="color: var(--v3-line); margin: 0 4px">|</span>
+      <span
+        class="v3-pill"
+        :class="{ 'v3-pill--active': providerFilter === 'all' }"
+        @click="providerFilter = 'all'"
+      >
+        {{ t("modelcatalog.allProviders") || "All providers" }}
+      </span>
+      <span
+        v-for="prov in FREE_PROVIDERS"
+        :key="prov.id"
+        class="v3-pill"
+        :class="{ 'v3-pill--active': providerFilter === prov.id }"
+        @click="providerFilter = prov.id"
+      >
+        {{ prov.name }}
+      </span>
+    </div>
+
+    <div
+      v-if="fetchError"
+      class="v3-empty-hint"
+      style="
+        background: var(--v3-danger-soft);
+        color: var(--v3-danger);
+        margin-bottom: 12px;
+      "
+    >
+      {{ t("modelcatalog.loadFailed") || "Failed to load model catalog" }}
+    </div>
+
+    <n-spin :show="loading">
+      <div class="v3-card">
+        <div class="v3-model-row v3-model-row--head">
+          <div></div>
+          <div>{{ t("modelcatalog.modelId") || "Model" }}</div>
+          <div>{{ t("modelcatalog.ownedBy") || "Owned by" }}</div>
+          <div>{{ t("modelcatalog.groups") || "Groups" }}</div>
+          <div style="text-align: right">
+            {{ t("modelcatalog.tier") || "Tier" }}
+          </div>
+        </div>
+        <div v-for="row in filtered" :key="`${row.id}-${row.freeProviderId || ''}`" class="v3-model-row">
+          <div>
+            <span
+              :class="pavClassFor(row.freeProviderId)"
+              style="width: 24px; height: 24px; border-radius: 5px; font-size: 9px"
+            >
+              {{ providerShort(row.freeProviderId) || providerShort(row.owned_by) || "?" }}
+            </span>
+          </div>
+          <div>
+            <div class="v3-model-row__name">{{ row.id }}</div>
+            <div
+              style="
+                display: flex;
+                gap: 6px;
+                margin-top: 5px;
+                align-items: center;
+                flex-wrap: wrap;
+              "
+            >
+              <span v-if="row.isFree" class="v3-chip v3-chip--ok"> 🆓 free </span>
+              <span
+                v-if="row.freeProviderId"
+                style="font: 400 10.5px var(--v3-mono); color: var(--v3-ink-3)"
+              >
+                via {{ providerName(row.freeProviderId) }}
+              </span>
+            </div>
+          </div>
+          <div
+            style="
+              font: 500 12px var(--v3-sans);
+              color: var(--v3-ink-2);
+              word-break: break-all;
+            "
+          >
+            {{ row.owned_by || "—" }}
+          </div>
+          <div style="display: flex; gap: 4px; flex-wrap: wrap">
+            <span
+              v-if="!row.groups || row.groups.length === 0"
+              class="v3-chip v3-chip--warn"
+            >
+              {{ t("modelcatalog.noGroups") || "no groups" }}
+            </span>
+            <span v-for="g in (row.groups || []).slice(0, 4)" :key="g" class="v3-chip v3-chip--info">
+              {{ g }}
+            </span>
+            <span
+              v-if="row.groups && row.groups.length > 4"
+              style="font: 400 10.5px var(--v3-mono); color: var(--v3-ink-3)"
+            >
+              +{{ row.groups.length - 4 }}
+            </span>
+          </div>
+          <div style="text-align: right">
+            <span v-if="row.tier" :class="tierChipClass(row.tier)">{{ row.tier }}</span>
+            <span v-else style="color: var(--v3-ink-4); font-family: var(--v3-mono)">—</span>
+          </div>
+        </div>
+        <div
+          v-if="!filtered.length && !loading"
+          style="
+            padding: 32px 16px;
+            text-align: center;
+            color: var(--v3-ink-3);
+            font-size: 12.5px;
+          "
+        >
+          {{ t("modelcatalog.noData") || "No models match your filter." }}
+        </div>
+      </div>
+    </n-spin>
+  </div>
 </template>
-
-<style scoped>
-.filter-bar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 12px;
-  flex-wrap: wrap;
-}
-
-.filter-switch {
-  display: inline-flex;
-  align-items: center;
-  font-size: 13px;
-  color: var(--text-color-2, #666);
-}
-
-.catalog-stats {
-  font-size: 12px;
-  color: var(--text-color-3, #999);
-}
-</style>
