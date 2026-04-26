@@ -135,7 +135,7 @@ function handleCreated(g: Group) {
             {{ g.name }}
           </div>
         </div>
-        <span class="v3-gl__row-count tnum">{{ g.api_keys?.length ?? "" }}</span>
+        <span class="v3-gl__row-count tnum">{{ g.key_count ?? "" }}</span>
       </div>
       <div
         v-if="!userGroups.length && !loading"

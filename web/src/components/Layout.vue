@@ -4,7 +4,7 @@ import GlobalTaskProgressBar from "@/components/GlobalTaskProgressBar.vue";
 import LanguageSelector from "@/components/LanguageSelector.vue";
 import Logout from "@/components/Logout.vue";
 import ThemeToggle from "@/components/ThemeToggle.vue";
-import { getDashboardStats } from "@/api/dashboard";
+import { getDashboardStats, getGroupList } from "@/api/dashboard";
 import { themeMode } from "@/utils/theme";
 import { copy as copyToClipboard } from "@/utils/clipboard";
 import {
@@ -29,14 +29,20 @@ const router = useRouter();
 const message = useMessage();
 
 const isMenuOpen = ref(false);
+const customGroupCount = ref<number | null>(null);
 
 const railItems = computed(() => [
-  { name: "dashboard", icon: GridOutline, tip: t("nav.dashboard") },
-  { name: "keys", icon: KeyOutline, tip: t("nav.keys") },
-  { name: "auto-routing", icon: GitBranchOutline, tip: t("nav.autoRouting") },
-  { name: "model-catalog", icon: CubeOutline, tip: t("nav.modelCatalog") },
-  { name: "model-dedup", icon: CopyOutline, tip: t("nav.modelDedup") },
-  { name: "logs", icon: PulseOutline, tip: t("nav.logs") },
+  { name: "dashboard", icon: GridOutline, tip: t("nav.dashboard"), count: null as number | null },
+  {
+    name: "keys",
+    icon: KeyOutline,
+    tip: t("nav.keys"),
+    count: customGroupCount.value,
+  },
+  { name: "auto-routing", icon: GitBranchOutline, tip: t("nav.autoRouting"), count: null },
+  { name: "model-catalog", icon: CubeOutline, tip: t("nav.modelCatalog"), count: null },
+  { name: "model-dedup", icon: CopyOutline, tip: t("nav.modelDedup"), count: null },
+  { name: "logs", icon: PulseOutline, tip: t("nav.logs"), count: null },
 ]);
 
 const activeName = computed(() => route.name);
@@ -58,6 +64,14 @@ onMounted(async () => {
     };
   } catch {
     // chrome telemetry is decorative; tolerate failure
+  }
+  try {
+    const g = await getGroupList();
+    const list =
+      (g as unknown as { data: Array<{ is_system?: boolean }> }).data || [];
+    customGroupCount.value = list.filter(it => !it.is_system).length;
+  } catch {
+    /* badge is decorative */
   }
 });
 
@@ -148,6 +162,9 @@ const versionLabel = "v0.4";
             @click="go(item.name)"
           >
             <n-icon :component="item.icon" :size="17" />
+            <span v-if="item.count != null && item.count > 0" class="v3-rail__count">
+              {{ item.count > 99 ? "99+" : item.count }}
+            </span>
           </button>
           <div class="v3-rail__spacer" />
           <div class="v3-rail__sep" />

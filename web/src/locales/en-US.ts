@@ -753,6 +753,8 @@ export default {
     viewCatalog: "View catalog →",
     providerActivity: "Provider activity · 24h",
     providerActivitySub: "30-min buckets · red = incident",
+    providerLineup: "Provider line-up",
+    providerLineupSub: "groups + 24h request volume per provider",
     less: "less",
     more: "more",
     incident: "incident",

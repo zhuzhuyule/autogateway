@@ -276,10 +276,53 @@ func (s *GroupService) CreateGroup(ctx context.Context, params GroupCreateParams
 }
 
 // ListGroups returns all groups without sub-group relations.
+// Each Group is decorated with KeyCount: standard groups carry their own
+// api_keys count; aggregate groups sum the counts of every sub-group they
+// reference (so the V3 sidebar can show a single trailing number per row).
 func (s *GroupService) ListGroups(ctx context.Context) ([]models.Group, error) {
 	var groups []models.Group
 	if err := s.db.WithContext(ctx).Order("sort asc, id desc").Find(&groups).Error; err != nil {
 		return nil, app_errors.ParseDBError(err)
+	}
+
+	if len(groups) == 0 {
+		return groups, nil
+	}
+
+	// per-group api_key counts in a single GROUP BY query
+	type kc struct {
+		GroupID uint
+		Cnt     int64
+	}
+	var rows []kc
+	if err := s.db.WithContext(ctx).
+		Model(&models.APIKey{}).
+		Select("group_id, COUNT(*) as cnt").
+		Group("group_id").
+		Find(&rows).Error; err != nil {
+		return nil, app_errors.ParseDBError(err)
+	}
+	standardCounts := make(map[uint]int64, len(rows))
+	for _, r := range rows {
+		standardCounts[r.GroupID] = r.Cnt
+	}
+
+	// for aggregate groups, fan out via group_sub_groups
+	var links []models.GroupSubGroup
+	if err := s.db.WithContext(ctx).Find(&links).Error; err != nil {
+		return nil, app_errors.ParseDBError(err)
+	}
+	aggregateCounts := make(map[uint]int64)
+	for _, l := range links {
+		aggregateCounts[l.GroupID] += standardCounts[l.SubGroupID]
+	}
+
+	for i := range groups {
+		if groups[i].GroupType == "aggregate" {
+			groups[i].KeyCount = aggregateCounts[groups[i].ID]
+		} else {
+			groups[i].KeyCount = standardCounts[groups[i].ID]
+		}
 	}
 
 	return groups, nil

@@ -458,9 +458,16 @@ func (s *Server) CopyGroup(c *gin.Context) {
 }
 
 // List godoc
+// Returns the lightweight group catalog used by dropdowns and the rail
+// badge: id / name / display_name / channel_type / group_type / is_system
+// + available_models so the frontend can drive filters without paying for
+// preloading api_keys.
 func (s *Server) List(c *gin.Context) {
 	var groups []models.Group
-	if err := s.DB.Select("id, name,display_name").Find(&groups).Error; err != nil {
+	if err := s.DB.
+		Select("id, name, display_name, channel_type, group_type, is_system, available_models").
+		Order("sort asc, id desc").
+		Find(&groups).Error; err != nil {
 		response.ErrorI18nFromAPIError(c, app_errors.ErrDatabase, "database.cannot_get_groups")
 		return
 	}

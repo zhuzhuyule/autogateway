@@ -736,6 +736,8 @@ export default {
     viewCatalog: "查看目录 →",
     providerActivity: "Provider 活跃度 · 24h",
     providerActivitySub: "30 分钟分桶 · 红色 = 故障",
+    providerLineup: "Provider 列表",
+    providerLineupSub: "每个 Provider 的分组数 + 24h 请求量",
     less: "少",
     more: "多",
     incident: "故障",

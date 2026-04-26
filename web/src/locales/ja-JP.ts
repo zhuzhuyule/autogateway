@@ -754,6 +754,8 @@ export default {
     viewCatalog: "カタログを表示 →",
     providerActivity: "Provider 活動 · 24h",
     providerActivitySub: "30 分単位 · 赤 = インシデント",
+    providerLineup: "Provider 一覧",
+    providerLineupSub: "Provider 毎のグループ数 + 24h リクエスト量",
     less: "少",
     more: "多",
     incident: "インシデント",

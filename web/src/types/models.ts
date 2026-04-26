@@ -74,6 +74,7 @@ export interface Group {
   validation_endpoint: string;
   config: Record<string, unknown>;
   api_keys?: APIKey[];
+  key_count?: number;
   endpoint?: string;
   param_overrides: Record<string, unknown>;
   model_redirect_rules: Record<string, string>;

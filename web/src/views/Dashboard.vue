@@ -287,42 +287,31 @@ function tierColor(tier: string): string {
       : "var(--v3-danger)";
 }
 
-// deterministic provider activity heat (stable across reloads)
-function seededHeat(seed: number, errAt = -1, len = 48): (number | "e")[] {
-  const out: (number | "e")[] = [];
-  let s = seed;
-  for (let i = 0; i < len; i++) {
-    if (i === errAt) {
-      out.push("e");
-      continue;
-    }
-    // Mulberry32-ish
-    s = (s + 0x6d2b79f5) | 0;
-    let t = s;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    const f = ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-    out.push(Math.floor(f * 5));
-  }
-  return out;
+interface ProviderLineupRow {
+  name: string;
+  groupCount: number;
+  req24h: number;
+  failed: number;
 }
 
-const heatRows = computed(() => {
-  const seenProviders = new Set<string>();
+const providerLineup = computed<ProviderLineupRow[]>(() => {
+  const acc = new Map<string, ProviderLineupRow>();
   for (const g of groupList.value) {
-    const p = inferProvider(g.name, g.channel_type);
-    if (p !== "default") seenProviders.add(p);
+    const provider = inferProvider(g.name, g.channel_type);
+    if (provider === "default") continue;
+    const stats = groupStatsMap.value[g.name];
+    const row = acc.get(provider) || {
+      name: provider,
+      groupCount: 0,
+      req24h: 0,
+      failed: 0,
+    };
+    row.groupCount += 1;
+    row.req24h += stats?.req24h ?? 0;
+    row.failed += stats?.failed ?? 0;
+    acc.set(provider, row);
   }
-  if (seenProviders.size === 0) {
-    seenProviders.add("groq");
-    seenProviders.add("openrouter");
-    seenProviders.add("google");
-  }
-  const list = Array.from(seenProviders).slice(0, 6);
-  return list.map((name, i) => ({
-    name,
-    cells: seededHeat(i * 1009 + 7, name === "groq" ? 31 : -1),
-  }));
+  return Array.from(acc.values()).sort((a, b) => b.req24h - a.req24h);
 });
 
 const endpoints = computed(() => {
@@ -472,37 +461,73 @@ async function copyText(value: string) {
 
       <!-- Right column -->
       <div style="display: flex; flex-direction: column; gap: 16px">
-        <!-- Heat strip -->
+        <!-- Provider line-up (replaces mock heat strip until backend ships /api/dashboard/activity) -->
         <div class="v3-heat-card">
           <div style="display: flex; align-items: baseline; gap: 10px; margin-bottom: 12px">
-            <div class="v3-card__title">{{ t("v3.providerActivity") }}</div>
-            <div class="v3-card__sub">{{ t("v3.providerActivitySub") }}</div>
+            <div class="v3-card__title">{{ t("v3.providerLineup") }}</div>
+            <div class="v3-card__sub">{{ t("v3.providerLineupSub") }}</div>
           </div>
-          <div v-for="r in heatRows" :key="r.name" class="v3-heat-row">
-            <div class="v3-heat-row__name">
+          <div
+            v-for="p in providerLineup"
+            :key="p.name"
+            style="
+              display: grid;
+              grid-template-columns: 28px 1fr auto auto;
+              gap: 12px;
+              align-items: center;
+              padding: 8px 0;
+              border-bottom: 1px solid var(--v3-line);
+            "
+          >
+            <span
+              class="v3-pav"
+              :class="pavClass(p.name)"
+              style="width: 24px; height: 24px; border-radius: 5px; font-size: 9px"
+            >
+              {{ V3_PROVIDER_DIR[p.name]?.short || p.name.slice(0, 2).toUpperCase() }}
+            </span>
+            <div>
+              <div style="font: 500 12px var(--v3-sans); color: var(--v3-ink)">
+                {{ V3_PROVIDER_DIR[p.name]?.name || p.name }}
+              </div>
+              <div style="font: 400 10.5px var(--v3-mono); color: var(--v3-ink-3); margin-top: 3px">
+                {{ p.groupCount }} {{ p.groupCount > 1 ? "groups" : "group" }}
+              </div>
+            </div>
+            <div class="tnum mono" style="font-size: 12px; text-align: right">
+              {{ fmtNumber(p.req24h) }}
+              <div style="font: 400 10px var(--v3-mono); color: var(--v3-ink-4); margin-top: 3px">
+                {{ t("v3.req24h") }}
+              </div>
+            </div>
+            <span
+              class="v3-chip"
+              :class="
+                p.failed === 0
+                  ? 'v3-chip--ok'
+                  : p.req24h && p.failed / p.req24h > 0.05
+                    ? 'v3-chip--danger'
+                    : 'v3-chip--warn'
+              "
+            >
               <span
-                class="v3-pav"
-                :class="`v3-pav-${r.name}`"
-                style="width: 16px; height: 16px; font-size: 8px"
-              >
-                {{ V3_PROVIDER_DIR[r.name]?.short || "?" }}
-              </span>
-              {{ r.name }}
-            </div>
-            <div class="v3-heat-grid">
-              <div v-for="(v, i) in r.cells" :key="i" class="v3-heat-cell" :data-h="v" />
-            </div>
+                class="v3-dot"
+                :class="
+                  p.failed === 0
+                    ? 'v3-dot--ok'
+                    : p.req24h && p.failed / p.req24h > 0.05
+                      ? 'v3-dot--danger'
+                      : 'v3-dot--warn'
+                "
+              />
+              {{ p.failed === 0 ? "ok" : `${p.failed} fail` }}
+            </span>
           </div>
-          <div class="v3-heat-legend">
-            {{ t("v3.less") }}
-            <span class="v3-heat-cell" style="width: 10px; height: 10px" />
-            <span class="v3-heat-cell" data-h="1" style="width: 10px; height: 10px" />
-            <span class="v3-heat-cell" data-h="2" style="width: 10px; height: 10px" />
-            <span class="v3-heat-cell" data-h="3" style="width: 10px; height: 10px" />
-            <span class="v3-heat-cell" data-h="4" style="width: 10px; height: 10px" />
-            {{ t("v3.more") }}
-            <span style="margin-left: 16px">{{ t("v3.incident") }}</span>
-            <span class="v3-heat-cell" data-h="e" style="width: 10px; height: 10px" />
+          <div
+            v-if="!providerLineup.length"
+            style="padding: 16px 0; text-align: center; color: var(--v3-ink-3); font-size: 12px"
+          >
+            —
           </div>
         </div>
 

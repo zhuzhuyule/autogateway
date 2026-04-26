@@ -121,6 +121,7 @@ type Group struct {
 	ModelRedirectRules  datatypes.JSONMap    `gorm:"type:json" json:"model_redirect_rules"`
 	ModelRedirectStrict bool                 `gorm:"default:false" json:"model_redirect_strict"`
 	APIKeys             []APIKey             `gorm:"foreignKey:GroupID" json:"api_keys"`
+	KeyCount            int64                `gorm:"-" json:"key_count"`
 	SubGroups           []GroupSubGroup      `gorm:"-" json:"sub_groups,omitempty"`
 	LastValidatedAt     *time.Time           `json:"last_validated_at"`
 	AvailableModels     datatypes.JSON       `gorm:"type:json" json:"available_models"` // 由上游 /v1/models 缓存的真实模型列表
