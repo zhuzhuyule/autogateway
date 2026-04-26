@@ -2,7 +2,7 @@
 import { keysApi } from "@/api/keys";
 import { appState } from "@/utils/app-state";
 import { CloudUploadOutline, DocumentTextOutline } from "@vicons/ionicons5";
-import { NButton, NCard, NIcon, NInput, NModal, NUpload, type UploadFileInfo } from "naive-ui";
+import { NButton, NCard, NIcon, NModal, NUpload, type UploadFileInfo } from "naive-ui";
 import { ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 

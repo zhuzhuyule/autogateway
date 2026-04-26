@@ -6,14 +6,12 @@ import { AddOutline, CloseOutline } from "@vicons/ionicons5";
 import {
   NButton,
   NCard,
-  NForm,
   NFormItem,
   NIcon,
   NInputNumber,
   NModal,
   NSelect,
   useMessage,
-  type FormRules,
 } from "naive-ui";
 import { computed, reactive, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
@@ -100,34 +98,6 @@ const getOptionsForItems = computed(() => {
 function getOptionsForItem(index: number) {
   return getOptionsForItems.value[index] || [];
 }
-
-const rules: FormRules = {
-  sub_groups: {
-    type: "array",
-    required: true,
-    validator: (_rule, value: SubGroupItem[]) => {
-      const validItems = value.filter(item => item.group_id !== null);
-      if (validItems.length === 0) {
-        return new Error(t("keys.atLeastOneSubGroup"));
-      }
-
-      for (const item of validItems) {
-        if (item.weight < 0) {
-          return new Error(t("keys.weightCannotBeNegative"));
-        }
-      }
-
-      const groupIds = validItems.map(item => item.group_id);
-      const uniqueIds = new Set(groupIds);
-      if (uniqueIds.size !== groupIds.length) {
-        return new Error(t("keys.duplicateSubGroup"));
-      }
-
-      return true;
-    },
-    trigger: ["blur", "change"],
-  },
-};
 
 watch(
   () => props.show,

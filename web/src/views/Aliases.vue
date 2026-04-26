@@ -14,9 +14,7 @@ import {
   AddOutline,
   CloseOutline,
   LockClosedOutline,
-  PencilOutline,
   RefreshOutline,
-  SearchOutline,
   Trash,
 } from "@vicons/ionicons5";
 import {
@@ -452,23 +450,6 @@ function pct(row: ModelAliasRow, members: ModelAliasRow[]): number {
       </div>
     </n-spin>
 
-    <!-- Weight bar styles (mirrors V3SubGroupTable) -->
-    <style scoped>
-      .v3-weight-bar {
-        height: 6px;
-        background: var(--v3-surface-3);
-        border-radius: 3px;
-        overflow: hidden;
-        display: inline-block;
-      }
-      .v3-weight-bar > i {
-        display: block;
-        height: 100%;
-        border-radius: 3px;
-        transition: width 0.3s ease;
-      }
-    </style>
-
     <!-- Add modal -->
     <n-modal v-model:show="showAdd" :mask-closable="false">
       <div
@@ -576,3 +557,19 @@ function pct(row: ModelAliasRow, members: ModelAliasRow[]): number {
     </n-modal>
   </div>
 </template>
+
+<style scoped>
+.v3-weight-bar {
+  height: 6px;
+  background: var(--v3-surface-3);
+  border-radius: 3px;
+  overflow: hidden;
+  display: inline-block;
+}
+.v3-weight-bar > i {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+</style>

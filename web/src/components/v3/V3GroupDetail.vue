@@ -30,7 +30,7 @@ import {
   Trash,
 } from "@vicons/ionicons5";
 import { NIcon, NPagination, NSpin, useDialog, useMessage } from "naive-ui";
-import { computed, h, onMounted, ref, watch } from "vue";
+import { computed, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 
 const { t } = useI18n();
@@ -237,11 +237,6 @@ async function saveNotes(k: KeyRow) {
   }
 }
 
-function focusEditingInput(el: unknown, id?: number) {
-  if (!el || !id || id !== editingNoteId.value) return;
-  if (el instanceof HTMLInputElement) el.focus();
-}
-
 async function copyText(value: string, msg = "Copied") {
   const ok = await copyToClipboard(value);
   if (ok) message.success(msg);
@@ -397,12 +392,6 @@ function exportKeys(scope: "all" | "active" | "invalid") {
 function fmtFailRate(failed?: number, total?: number): string {
   if (!total) return "0%";
   return `${(((failed || 0) / total) * 100).toFixed(1)}%`;
-}
-
-function fmtMs(ms: number): string {
-  if (!ms) return "—";
-  if (ms > 1000) return `${(ms / 1000).toFixed(2)}s`;
-  return `${ms}ms`;
 }
 
 function formatRelative(date?: string): string {
@@ -632,7 +621,6 @@ function onGroupCopied() {
                   style="margin-top: 6px; display: flex; gap: 6px; align-items: center"
                 >
                   <input
-                    ref="el => focusEditingInput(el, k.id)"
                     v-model="editingNoteText"
                     class="v3-search"
                     :placeholder="t('v3.notesPlaceholder')"

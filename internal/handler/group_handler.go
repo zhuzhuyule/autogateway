@@ -285,6 +285,7 @@ type GroupResponse struct {
 	SystemRole          string              `json:"system_role"`
 	AvailableModels     datatypes.JSON      `json:"available_models,omitempty"`
 	ModelsRefreshedAt   *time.Time          `json:"models_refreshed_at,omitempty"`
+	KeyCount            int64               `json:"key_count"`
 	CreatedAt           time.Time           `json:"created_at"`
 	UpdatedAt           time.Time           `json:"updated_at"`
 }
@@ -347,6 +348,7 @@ func (s *Server) newGroupResponse(group *models.Group) *GroupResponse {
 		SystemRole:          group.SystemRole,
 		AvailableModels:     group.AvailableModels,
 		ModelsRefreshedAt:   group.ModelsRefreshedAt,
+		KeyCount:            group.KeyCount,
 		CreatedAt:           group.CreatedAt,
 		UpdatedAt:           group.UpdatedAt,
 	}
