@@ -111,6 +111,7 @@ function handleSubGroupSelect(groupId: number) {
         :loading="loading"
         @select="selectGroup"
         @refresh-and-select="refreshAndSelect"
+        @refresh="loadGroups"
       />
 
       <div v-if="selected">

@@ -875,5 +875,8 @@ export default {
     useThis: "Use this",
     getKey: "Get key",
     newGroupFootHint: "Creating the group on \"Test only\" / \"Test & save\" — keys are added asynchronously.",
+    docs: "Docs",
+    editNotes: "Edit notes",
+    notesPlaceholder: "Optional note for this key…",
   },
 };

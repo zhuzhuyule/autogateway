@@ -858,5 +858,8 @@ export default {
     useThis: "使用此 Provider",
     getKey: "获取 Key",
     newGroupFootHint: "「仅测试」或「测试并保存」时会自动创建分组 — Key 异步导入。",
+    docs: "文档",
+    editNotes: "编辑备注",
+    notesPlaceholder: "为这个 key 加点备注…",
   },
 };

@@ -17,6 +17,7 @@ import { getGroupDisplayName, maskKey } from "@/utils/display";
 import {
   AddOutline,
   CheckmarkCircle,
+  CloseOutline,
   CopyOutline,
   EyeOffOutline,
   EyeOutline,
@@ -196,6 +197,49 @@ function onSearchInput() {
 function refreshAll() {
   loadStats();
   loadKeys();
+}
+
+// inline notes editing
+const editingNoteId = ref<number | null>(null);
+const editingNoteText = ref("");
+const savingNotesId = ref<number | null>(null);
+
+function startEditNotes(k: KeyRow) {
+  editingNoteId.value = k.id;
+  editingNoteText.value = k.notes || "";
+}
+
+function cancelNotes() {
+  editingNoteId.value = null;
+  editingNoteText.value = "";
+}
+
+async function saveNotes(k: KeyRow) {
+  const trimmed = editingNoteText.value.trim();
+  if (trimmed === (k.notes || "")) {
+    cancelNotes();
+    return;
+  }
+  savingNotesId.value = k.id;
+  const previous = k.notes;
+  // optimistic update
+  k.notes = trimmed;
+  try {
+    await keysApi.updateKeyNotes(k.id, trimmed);
+    message.success(t("keys.notesUpdated") || "Notes updated");
+    cancelNotes();
+  } catch (e) {
+    k.notes = previous;
+    console.error("update notes failed", e);
+    message.error(t("common.requestFailed"));
+  } finally {
+    savingNotesId.value = null;
+  }
+}
+
+function focusEditingInput(el: unknown, id?: number) {
+  if (!el || !id || id !== editingNoteId.value) return;
+  if (el instanceof HTMLInputElement) el.focus();
 }
 
 async function copyText(value: string, msg = "Copied") {
@@ -584,14 +628,70 @@ function onGroupCopied() {
                   </button>
                 </span>
                 <div
-                  v-if="k.notes"
+                  v-if="editingNoteId === k.id"
+                  style="margin-top: 6px; display: flex; gap: 6px; align-items: center"
+                >
+                  <input
+                    ref="el => focusEditingInput(el, k.id)"
+                    v-model="editingNoteText"
+                    class="v3-search"
+                    :placeholder="t('v3.notesPlaceholder')"
+                    style="
+                      flex: 1;
+                      padding: 4px 8px;
+                      font: 500 12px var(--v3-sans);
+                      color: var(--v3-ink);
+                      border: 1px solid var(--v3-line);
+                      background: var(--v3-surface);
+                      border-radius: 5px;
+                      min-width: 160px;
+                    "
+                    @keyup.enter="saveNotes(k)"
+                    @keyup.esc="cancelNotes"
+                    @click.stop
+                  />
+                  <button
+                    class="v3-btn v3-btn--accent v3-btn--sm"
+                    :disabled="savingNotesId === k.id"
+                    @click.stop="saveNotes(k)"
+                  >
+                    <n-icon :component="CheckmarkCircle" :size="11" />
+                  </button>
+                  <button
+                    class="v3-btn v3-btn--ghost v3-btn--sm"
+                    @click.stop="cancelNotes"
+                  >
+                    <n-icon :component="CloseOutline" :size="11" />
+                  </button>
+                </div>
+                <div
+                  v-else
                   style="
-                    font: 400 11px/1.3 var(--v3-sans);
-                    color: var(--v3-ink-3);
                     margin-top: 4px;
+                    display: flex;
+                    align-items: center;
+                    gap: 6px;
                   "
                 >
-                  {{ k.notes }}
+                  <span
+                    v-if="k.notes"
+                    style="font: 400 11px/1.3 var(--v3-sans); color: var(--v3-ink-3)"
+                  >
+                    {{ k.notes }}
+                  </span>
+                  <span
+                    v-else
+                    style="font: 400 11px/1.3 var(--v3-sans); color: var(--v3-ink-4)"
+                  >
+                    —
+                  </span>
+                  <button
+                    class="v3-btn v3-btn--ghost v3-btn--icon"
+                    :title="t('v3.editNotes')"
+                    @click.stop="startEditNotes(k)"
+                  >
+                    <n-icon :component="PencilOutline" :size="11" />
+                  </button>
                 </div>
               </td>
               <td>

@@ -876,5 +876,8 @@ export default {
     useThis: "これを使う",
     getKey: "Key 取得",
     newGroupFootHint: "「テストのみ」「テストして保存」時に自動でグループ作成 — Key は非同期インポート。",
+    docs: "ドキュメント",
+    editNotes: "メモを編集",
+    notesPlaceholder: "この Key へのメモ(任意)…",
   },
 };

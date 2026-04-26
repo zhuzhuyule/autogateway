@@ -17,6 +17,7 @@ import {
   CopyOutline,
   MenuOutline,
   CloseOutline,
+  BookOutline,
 } from "@vicons/ionicons5";
 import { NDrawer, NDrawerContent, NIcon, useMessage } from "naive-ui";
 import { computed, onMounted, ref } from "vue";
@@ -139,6 +140,16 @@ const versionLabel = "v0.4";
             <span class="v3-dot" />
             {{ endpoint }}
           </button>
+          <a
+            href="https://github.com/zhuzhuyule/autogateway#readme"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="v3-chrome__btn"
+            :title="t('v3.docs')"
+          >
+            <n-icon :component="BookOutline" :size="13" />
+            <span class="v3-chrome__btn-label">{{ t("v3.docs") }}</span>
+          </a>
           <div class="v3-chrome__tools">
             <language-selector />
             <theme-toggle />
@@ -296,6 +307,16 @@ const versionLabel = "v0.4";
 
 .v3-chrome__menu {
   display: none;
+}
+
+.v3-chrome__btn {
+  text-decoration: none;
+}
+
+@media (max-width: 1100px) {
+  .v3-chrome__btn-label {
+    display: none;
+  }
 }
 
 @media (max-width: 768px) {

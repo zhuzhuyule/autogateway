@@ -1,9 +1,10 @@
 <script setup lang="ts">
+import { keysApi } from "@/api/keys";
 import type { Group } from "@/types/models";
 import { getGroupDisplayName } from "@/utils/display";
 import { AddOutline, LinkOutline, SearchOutline } from "@vicons/ionicons5";
 import { NIcon } from "naive-ui";
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import AggregateGroupModal from "@/components/keys/AggregateGroupModal.vue";
 import V3NewGroupFlow from "@/components/v3/V3NewGroupFlow.vue";
@@ -19,6 +20,7 @@ interface Props {
 interface Emits {
   (e: "select", group: Group): void;
   (e: "refresh-and-select", id: number): void;
+  (e: "refresh"): void;
 }
 
 const props = withDefaults(defineProps<Props>(), { loading: false });
@@ -28,9 +30,25 @@ const search = ref("");
 const showCreate = ref(false);
 const showAggregate = ref(false);
 
+// Local copy so drag reordering can update optimistically without
+// waiting for parent to refresh.
+const localOrder = ref<Group[]>([]);
+watch(
+  () => props.groups,
+  groups => {
+    localOrder.value = groups.map(g => ({ ...g }));
+  },
+  { immediate: true, deep: true }
+);
+
+const draggingId = ref<number | null>(null);
+const dropTarget = ref<{ id: number; pos: "before" | "after" } | null>(null);
+const savingOrder = ref(false);
+const itemRefs = new Map<number, HTMLElement>();
+
 const filtered = computed(() => {
   const q = search.value.trim().toLowerCase();
-  return props.groups.filter(
+  return localOrder.value.filter(
     g =>
       !q ||
       g.name.toLowerCase().includes(q) ||
@@ -39,6 +57,8 @@ const filtered = computed(() => {
 });
 const sysGroups = computed(() => filtered.value.filter(g => g.is_system));
 const userGroups = computed(() => filtered.value.filter(g => !g.is_system));
+const hasSearch = computed(() => search.value.trim().length > 0);
+const canDrag = computed(() => !hasSearch.value && !savingOrder.value);
 
 function shortFor(g: Group): string {
   const src = g.display_name || g.name || "?";
@@ -71,6 +91,103 @@ function handleCreated(g: Group) {
   showCreate.value = false;
   showAggregate.value = false;
   if (g?.id) emit("refresh-and-select", g.id);
+}
+
+function setItemRef(el: Element | null, id?: number) {
+  if (id == null) return;
+  if (el instanceof HTMLElement) {
+    itemRefs.set(id, el);
+  } else {
+    itemRefs.delete(id);
+  }
+}
+
+function onDragStart(ev: DragEvent, g: Group) {
+  if (!canDrag.value || g.is_system || g.id == null) {
+    ev.preventDefault();
+    return;
+  }
+  draggingId.value = g.id;
+  dropTarget.value = null;
+  if (ev.dataTransfer) {
+    ev.dataTransfer.effectAllowed = "move";
+    ev.dataTransfer.setData("text/plain", String(g.id));
+  }
+}
+
+function resolvePos(ev: DragEvent, id: number): "before" | "after" {
+  const el = itemRefs.get(id);
+  if (!el) return "after";
+  const rect = el.getBoundingClientRect();
+  return ev.clientY < rect.top + rect.height / 2 ? "before" : "after";
+}
+
+function onDragOver(ev: DragEvent, g: Group) {
+  if (!canDrag.value || draggingId.value == null || g.is_system || g.id == null) return;
+  ev.preventDefault();
+  if (ev.dataTransfer) ev.dataTransfer.dropEffect = "move";
+  const pos = resolvePos(ev, g.id);
+  if (
+    !dropTarget.value ||
+    dropTarget.value.id !== g.id ||
+    dropTarget.value.pos !== pos
+  ) {
+    dropTarget.value = { id: g.id, pos };
+  }
+}
+
+async function onDrop(ev: DragEvent, target: Group) {
+  ev.preventDefault();
+  const sourceId = draggingId.value;
+  const dt = dropTarget.value;
+  draggingId.value = null;
+  dropTarget.value = null;
+  if (
+    !canDrag.value ||
+    sourceId == null ||
+    target.id == null ||
+    target.is_system ||
+    !dt ||
+    sourceId === target.id
+  ) {
+    return;
+  }
+
+  const previous = localOrder.value.map(g => ({ ...g }));
+  const srcIdx = localOrder.value.findIndex(g => g.id === sourceId);
+  const tgtIdx = localOrder.value.findIndex(g => g.id === target.id);
+  if (srcIdx < 0 || tgtIdx < 0) return;
+  const arr = [...localOrder.value];
+  const [moved] = arr.splice(srcIdx, 1);
+  let insert = tgtIdx;
+  if (srcIdx < tgtIdx) insert -= 1;
+  if (dt.pos === "after") insert += 1;
+  if (insert < 0) insert = 0;
+  if (insert > arr.length) insert = arr.length;
+  if (insert === srcIdx) return;
+  arr.splice(insert, 0, moved);
+  localOrder.value = arr;
+
+  // persist
+  const items = arr
+    .filter(g => g.id != null)
+    .map((g, i) => ({ id: g.id as number, sort: (i + 1) * 10 }));
+  savingOrder.value = true;
+  try {
+    await keysApi.reorderGroups(items);
+    window.$message?.success(t("keys.dragSortSaved") || "Order saved");
+    emit("refresh");
+  } catch {
+    localOrder.value = previous;
+    window.$message?.error(t("keys.dragSortSaveFailed") || "Save order failed");
+  } finally {
+    savingOrder.value = false;
+  }
+}
+
+function onDragEnd() {
+  draggingId.value = null;
+  dropTarget.value = null;
 }
 </script>
 
@@ -117,9 +234,22 @@ function handleCreated(g: Group) {
       <div
         v-for="g in userGroups"
         :key="g.id"
+        :ref="el => setItemRef(el as Element | null, g.id)"
         class="v3-gl__row"
-        :class="{ 'v3-gl__row--active': selectedGroup?.id === g.id }"
+        :class="{
+          'v3-gl__row--active': selectedGroup?.id === g.id,
+          'v3-gl__row--dragging': draggingId === g.id,
+          'v3-gl__row--drop-before':
+            dropTarget?.id === g.id && dropTarget?.pos === 'before' && draggingId !== g.id,
+          'v3-gl__row--drop-after':
+            dropTarget?.id === g.id && dropTarget?.pos === 'after' && draggingId !== g.id,
+        }"
+        :draggable="canDrag"
         @click="emit('select', g)"
+        @dragstart="onDragStart($event, g)"
+        @dragover="onDragOver($event, g)"
+        @drop="onDrop($event, g)"
+        @dragend="onDragEnd"
       >
         <span
           class="v3-pav"
@@ -177,3 +307,30 @@ function handleCreated(g: Group) {
     />
   </aside>
 </template>
+
+<style scoped>
+.v3-gl__row {
+  position: relative;
+  cursor: pointer;
+}
+.v3-gl__row--dragging {
+  opacity: 0.45;
+}
+.v3-gl__row--drop-before::before,
+.v3-gl__row--drop-after::after {
+  content: "";
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--v3-accent);
+  pointer-events: none;
+}
+.v3-gl__row--drop-before::before {
+  top: -1px;
+}
+.v3-gl__row--drop-after::after {
+  bottom: -1px;
+}
+</style>

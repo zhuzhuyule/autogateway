@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import LogTable from "@/components/logs/LogTable.vue";
+import V3LogTable from "@/components/v3/V3LogTable.vue";
 import { useI18n } from "vue-i18n";
 
 const { t } = useI18n();
@@ -14,10 +14,6 @@ const { t } = useI18n();
       {{ t("nav.logs") }}
       <span class="v3-viewtitle__meta">live tail</span>
     </h1>
-    <div class="v3-card">
-      <div class="v3-card__body">
-        <log-table />
-      </div>
-    </div>
+    <v3-log-table />
   </div>
 </template>
