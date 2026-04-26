@@ -76,6 +76,18 @@ AutoGateway 是自托管的 AI API 网关。它在 [GPT-Load](https://github.com
 ### 🔐 多档隔离
 每个分组可以单独设 `proxy_keys`,团队/场景间互不干扰;系统默认聚合的 key 与管理 key 共享,简化常见场景。
 
+### 🛰️ Mission Console 管理面板 (v3 UI)
+全新设计的运维控制台。深色顶栏显示实时遥测(Live keys / RPM / Error rate / Endpoint),56px icon rail 极窄导航,网格底纹 + 信号色(ok/warn/danger)突出关键状态。Geist Sans + Geist Mono 字族,完整暗色主题。
+
+页面覆盖:
+- **Dashboard** — 4 KPI 卡(请求/RPM/Active keys/错误率) · 24h Top Models 排行(按真实分组统计推算) · Provider activity 热力图 · Endpoint 速贴 · Refresh / Export 24h JSON
+- **Groups & Keys** — 两栏布局(系统聚合 + 自定义分组),详情含 4-cell 统计 · 端点复制 · Get more keys 外链 · Add/Test/Clear/Export 工具栏 · 聚合分组用 V3SubGroupTable(权重条 + status chip)
+- **Auto Routing** — 阈值可视化轴 + 三档预设 · 三 tier 卡片(simple/medium/complex)· per-model→tier→group 映射 · 路由测试器
+- **Model Catalog** — 跨分组聚合 + tier filter pills + free-only 切换
+- **Logs / Settings / Login** — 全 v3 chrome
+
+实现状态、Mock 数据清单、后端 API 缺口与 P0~P3 路线图见 [`web/V3_STATUS.md`](web/V3_STATUS.md)。
+
 ---
 
 ## 快速开始
@@ -227,7 +239,7 @@ POST /proxy/{group_name}/v1/chat/completions
                 上游: Groq, OpenRouter, OpenAI, Anthropic, ...
 ```
 
-技术栈:Go 1.24 (Gin / GORM) + Vue 3 (Naive UI / Pinia) + SQLite/MySQL/PostgreSQL/Redis 任选。
+技术栈:Go 1.24 (Gin / GORM) + Vue 3 (Naive UI v3 主题覆盖 / Geist 字族 / 自定义 Mission Console 设计层) + SQLite/MySQL/PostgreSQL/Redis 任选。
 
 ---
 
@@ -238,6 +250,10 @@ POST /proxy/{group_name}/v1/chat/completions
 - [x] 智能复杂度路由 + 三档预设 + 路由测试器
 - [x] 上游 `/v1/models` 实时拉取 + 多处模型浏览
 - [x] 免费 / 能力档位(Fast/Balanced/Max)模型徽标
+- [x] Mission Console v3 UI(深色顶栏 + 信号色 + 全视图重构)
+- [ ] **New Group 三步流程**(pick provider → get key → paste & test,设计稿核心交互,见 `web/V3_STATUS.md` P0)
+- [ ] **Dashboard top-models / activity / latency 后端 API**(替换前端 Mock,见 `web/V3_STATUS.md` 后端清单)
+- [ ] **Auto Routing per-tier model chain**(数据模型重设计,见 `web/V3_STATUS.md` P1)
 - [ ] 跨 channel 协议翻译(OpenAI ↔ Anthropic ↔ Gemini)
 - [ ] 用量配额、预算告警、按 Key 计费
 - [ ] OAuth / SSO 登录
@@ -253,6 +269,7 @@ POST /proxy/{group_name}/v1/chat/completions
 - [GPT-Load](https://github.com/tbphp/gpt-load) — 提供本项目的密钥池与代理底座
 - [awesome-free-llm-apis](https://github.com/mnfst/awesome-free-llm-apis) — 免费 Provider 清单参考
 - [Naive UI](https://www.naiveui.com/) — Vue 组件库
+- [Geist](https://vercel.com/font) — Vercel 出品的 Sans + Mono 字族,Mission Console 视觉基底
 
 ## License
 
