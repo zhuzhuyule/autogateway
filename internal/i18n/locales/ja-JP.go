@@ -113,6 +113,7 @@ var MessagesJaJP = map[string]string{
 	"database.previous_stats_failed": "前の期間統計の取得に失敗しました",
 	"database.chart_data_failed":     "チャートデータの取得に失敗しました",
 	"database.group_stats_failed":    "部分統計の取得に失敗しました",
+	"database.cannot_get_top_models": "人気モデル統計の取得に失敗しました",
 
 	// Success messages
 	"success.group_deleted":        "グループと関連キーが正常に削除されました",

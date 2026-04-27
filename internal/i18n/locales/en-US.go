@@ -113,6 +113,7 @@ var MessagesEnUS = map[string]string{
 	"database.previous_stats_failed": "Failed to get previous period statistics",
 	"database.chart_data_failed":     "Failed to get chart data",
 	"database.group_stats_failed":    "Failed to get partial statistics",
+	"database.cannot_get_top_models": "Failed to get top models statistics",
 
 	// Success messages
 	"success.group_deleted":        "Group and related keys deleted successfully",

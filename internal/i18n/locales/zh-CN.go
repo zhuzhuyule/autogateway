@@ -113,6 +113,7 @@ var MessagesZhCN = map[string]string{
 	"database.previous_stats_failed": "获取上一期间统计失败",
 	"database.chart_data_failed":     "获取图表数据失败",
 	"database.group_stats_failed":    "获取部分统计信息失败",
+	"database.cannot_get_top_models": "无法获取热门模型统计",
 
 	// Success messages
 	"success.group_deleted":        "分组及相关密钥删除成功",
