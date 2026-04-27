@@ -6,6 +6,9 @@
 # 运行时数据(SQLite DB / 缓存等),仅根目录
 /data/
 
+# 构建产物(哈希资产每次构建都变,仅保留 index.html)
+web/dist/assets/
+
 # Node 依赖
 web/node_modules/
 node_modules/
