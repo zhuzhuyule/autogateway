@@ -14,9 +14,9 @@ export type ModelTier = "fast" | "balanced" | "max";
 
 export interface FreeModel {
   providerId: string; // FreeProvider.id
-  modelId: string;    // 上游真实模型 ID
+  modelId: string; // 上游真实模型 ID
   tier: ModelTier;
-  notes?: string;     // 限速/特性等
+  notes?: string; // 限速/特性等
 }
 
 export interface FreeProvider {
@@ -30,6 +30,7 @@ export interface FreeProvider {
   baseUrl: string;
   testModel: string;
   models: string[];
+  paidModels?: string[];
   recommendedGroupName: string;
   recommendedDisplayName: string;
   upstreamHosts: string[];
@@ -160,7 +161,14 @@ export const FREE_PROVIDERS: FreeProvider[] = [
     channelType: "openai",
     baseUrl: "https://api.mistral.ai",
     testModel: "mistral-small-latest",
-    models: ["mistral-small-latest", "mistral-medium-latest", "mistral-large-latest", "open-mistral-nemo", "codestral-latest", "pixtral-large-latest"],
+    models: [
+      "mistral-small-latest",
+      "mistral-medium-latest",
+      "mistral-large-latest",
+      "open-mistral-nemo",
+      "codestral-latest",
+      "pixtral-large-latest",
+    ],
     recommendedGroupName: "mistral",
     recommendedDisplayName: "Mistral AI",
     upstreamHosts: ["api.mistral.ai"],
@@ -236,7 +244,12 @@ export const FREE_PROVIDERS: FreeProvider[] = [
     channelType: "openai",
     baseUrl: "https://router.huggingface.co/v1",
     testModel: "meta-llama/Llama-3.1-8B-Instruct",
-    models: ["meta-llama/Llama-3.1-8B-Instruct", "Qwen/Qwen2.5-72B-Instruct", "mistralai/Mistral-7B-Instruct-v0.3", "microsoft/Phi-3.5-mini-instruct"],
+    models: [
+      "meta-llama/Llama-3.1-8B-Instruct",
+      "Qwen/Qwen2.5-72B-Instruct",
+      "mistralai/Mistral-7B-Instruct-v0.3",
+      "microsoft/Phi-3.5-mini-instruct",
+    ],
     recommendedGroupName: "huggingface",
     recommendedDisplayName: "Hugging Face Router",
     upstreamHosts: ["router.huggingface.co"],
@@ -317,7 +330,13 @@ export const FREE_PROVIDERS: FreeProvider[] = [
     channelType: "openai",
     baseUrl: "https://api.llm7.io/v1",
     testModel: "deepseek-v3-0324",
-    models: ["deepseek-r1-0528", "deepseek-v3-0324", "gemini-2.5-flash-lite", "gpt-4o-mini", "qwen2.5-coder-32b"],
+    models: [
+      "deepseek-r1-0528",
+      "deepseek-v3-0324",
+      "gemini-2.5-flash-lite",
+      "gpt-4o-mini",
+      "qwen2.5-coder-32b",
+    ],
     recommendedGroupName: "llm7",
     recommendedDisplayName: "LLM7.io",
     upstreamHosts: ["api.llm7.io"],
@@ -349,7 +368,12 @@ export const FREE_PROVIDERS: FreeProvider[] = [
     channelType: "openai",
     baseUrl: "https://api.longcat.chat/openai",
     testModel: "longcat-flash-lite",
-    models: ["longcat-flash-lite", "longcat-flash-chat", "longcat-flash-thinking", "longcat-2.0-preview"],
+    models: [
+      "longcat-flash-lite",
+      "longcat-flash-chat",
+      "longcat-flash-thinking",
+      "longcat-2.0-preview",
+    ],
     recommendedGroupName: "longcat",
     recommendedDisplayName: "美团 LongCat",
     upstreamHosts: ["api.longcat.chat"],
@@ -366,7 +390,20 @@ export const FREE_PROVIDERS: FreeProvider[] = [
     channelType: "openai",
     baseUrl: "https://maas-api.cn-huabei-1.xf-yun.com/v2",
     testModel: "xop35qwen2b",
-    models: ["xop35qwen2b", "test_ent", "xop3qwen8b", "xdeepseekv3", "xdeepseekr1"],
+    models: ["xop35qwen2b", "test_ent"],
+    paidModels: [
+      "xop3qwen32b",
+      "xop3qwen30b",
+      "xop3qwen8b",
+      "xdeepseekv3",
+      "xdeepseekr1",
+      "xdeepseekr1qwen32b",
+      "xdeepseekr1qwen7b",
+      "xopglm47blth2",
+      "xopkimik25",
+      "xopglm5",
+      "xopdeepseekv32",
+    ],
     recommendedGroupName: "xfyun",
     recommendedDisplayName: "讯飞星辰",
     upstreamHosts: ["maas-api.cn-huabei-1.xf-yun.com"],
@@ -431,7 +468,11 @@ export const FREE_PROVIDERS: FreeProvider[] = [
     channelType: "openai",
     baseUrl: "https://api.kilo.ai/api/gateway",
     testModel: "kilo-auto/free",
-    models: ["kilo-auto/free", "nvidia/nemotron-3-super-120b-a12b:free", "x-ai/grok-code-fast-1:optimized:free"],
+    models: [
+      "kilo-auto/free",
+      "nvidia/nemotron-3-super-120b-a12b:free",
+      "x-ai/grok-code-fast-1:optimized:free",
+    ],
     recommendedGroupName: "kilo",
     recommendedDisplayName: "Kilo Code",
     upstreamHosts: ["api.kilo.ai"],
@@ -440,11 +481,13 @@ export const FREE_PROVIDERS: FreeProvider[] = [
 ];
 
 export function getProviderById(id: string): FreeProvider | undefined {
-  return FREE_PROVIDERS.find((p) => p.id === id);
+  return FREE_PROVIDERS.find(p => p.id === id);
 }
 
 function extractHost(url: string): string {
-  if (!url) return "";
+  if (!url) {
+    return "";
+  }
   try {
     return new URL(url).host.toLowerCase();
   } catch {
@@ -454,19 +497,23 @@ function extractHost(url: string): string {
 
 export function findProviderByUpstreamUrl(url: string): FreeProvider | undefined {
   const host = extractHost(url);
-  if (!host) return undefined;
-  return FREE_PROVIDERS.find((p) =>
-    p.upstreamHosts.some((h) => h.toLowerCase() === host),
-  );
+  if (!host) {
+    return undefined;
+  }
+  return FREE_PROVIDERS.find(p => p.upstreamHosts.some(h => h.toLowerCase() === host));
 }
 
 export function findProviderByUpstreams(
-  upstreams: Array<{ url?: string }> | undefined | null,
+  upstreams: Array<{ url?: string }> | undefined | null
 ): FreeProvider | undefined {
-  if (!upstreams || upstreams.length === 0) return undefined;
+  if (!upstreams || upstreams.length === 0) {
+    return undefined;
+  }
   for (const u of upstreams) {
     const matched = findProviderByUpstreamUrl(u.url || "");
-    if (matched) return matched;
+    if (matched) {
+      return matched;
+    }
   }
   return undefined;
 }
@@ -480,8 +527,18 @@ export const FREE_MODELS: FreeModel[] = [
   // Groq
   { providerId: "groq", modelId: "llama-3.1-8b-instant", tier: "fast", notes: "极速小模型" },
   { providerId: "groq", modelId: "llama-3.3-70b-versatile", tier: "balanced", notes: "日常主力" },
-  { providerId: "groq", modelId: "llama-4-scout-17b-16e-instruct", tier: "balanced", notes: "多模态" },
-  { providerId: "groq", modelId: "llama-4-maverick-17b-128e-instruct", tier: "max", notes: "多模态旗舰" },
+  {
+    providerId: "groq",
+    modelId: "llama-4-scout-17b-16e-instruct",
+    tier: "balanced",
+    notes: "多模态",
+  },
+  {
+    providerId: "groq",
+    modelId: "llama-4-maverick-17b-128e-instruct",
+    tier: "max",
+    notes: "多模态旗舰",
+  },
   { providerId: "groq", modelId: "qwen3-32b", tier: "balanced" },
   { providerId: "groq", modelId: "gpt-oss-120b", tier: "max", notes: "OpenAI 开源 120B" },
   { providerId: "groq", modelId: "kimi-k2-instruct", tier: "max", notes: "262K 上下文" },
@@ -491,41 +548,113 @@ export const FREE_MODELS: FreeModel[] = [
   { providerId: "cerebras", modelId: "llama3.1-8b", tier: "fast" },
   { providerId: "cerebras", modelId: "llama-3.3-70b", tier: "balanced" },
   { providerId: "cerebras", modelId: "gpt-oss-120b", tier: "max", notes: "OpenAI 开源 120B" },
-  { providerId: "cerebras", modelId: "qwen-3-235b-a22b-instruct-2507", tier: "max", notes: "MoE 235B" },
+  {
+    providerId: "cerebras",
+    modelId: "qwen-3-235b-a22b-instruct-2507",
+    tier: "max",
+    notes: "MoE 235B",
+  },
 
   // OpenRouter (含 :free 后缀)
-  { providerId: "openrouter", modelId: "deepseek/deepseek-r1-0528:free", tier: "max", notes: "推理增强" },
+  {
+    providerId: "openrouter",
+    modelId: "deepseek/deepseek-r1-0528:free",
+    tier: "max",
+    notes: "推理增强",
+  },
   { providerId: "openrouter", modelId: "deepseek/deepseek-chat-v3-0324:free", tier: "balanced" },
   { providerId: "openrouter", modelId: "qwen/qwen3.6-plus:free", tier: "max", notes: "1M 上下文" },
-  { providerId: "openrouter", modelId: "meta-llama/llama-4-scout:free", tier: "balanced", notes: "多模态" },
-  { providerId: "openrouter", modelId: "meta-llama/llama-4-maverick:free", tier: "max", notes: "多模态旗舰" },
+  {
+    providerId: "openrouter",
+    modelId: "meta-llama/llama-4-scout:free",
+    tier: "balanced",
+    notes: "多模态",
+  },
+  {
+    providerId: "openrouter",
+    modelId: "meta-llama/llama-4-maverick:free",
+    tier: "max",
+    notes: "多模态旗舰",
+  },
   { providerId: "openrouter", modelId: "meta-llama/llama-3.3-70b-instruct:free", tier: "balanced" },
   { providerId: "openrouter", modelId: "nvidia/nemotron-3-super-120b-a12b:free", tier: "max" },
-  { providerId: "openrouter", modelId: "mistralai/devstral-2512:free", tier: "balanced", notes: "代码专用" },
+  {
+    providerId: "openrouter",
+    modelId: "mistralai/devstral-2512:free",
+    tier: "balanced",
+    notes: "代码专用",
+  },
 
   // Together AI(免费档模型)
-  { providerId: "together", modelId: "meta-llama/Llama-3.3-70B-Instruct-Turbo-Free", tier: "balanced" },
-  { providerId: "together", modelId: "deepseek-ai/DeepSeek-R1-Distill-Llama-70B-free", tier: "max", notes: "推理增强" },
+  {
+    providerId: "together",
+    modelId: "meta-llama/Llama-3.3-70B-Instruct-Turbo-Free",
+    tier: "balanced",
+  },
+  {
+    providerId: "together",
+    modelId: "deepseek-ai/DeepSeek-R1-Distill-Llama-70B-free",
+    tier: "max",
+    notes: "推理增强",
+  },
 
   // Cloudflare Workers AI
-  { providerId: "cloudflare", modelId: "@cf/meta/llama-3.3-70b-instruct-fp8-fast", tier: "balanced" },
+  {
+    providerId: "cloudflare",
+    modelId: "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+    tier: "balanced",
+  },
   { providerId: "cloudflare", modelId: "@cf/meta/llama-3.1-8b-instruct-fp8-fast", tier: "fast" },
-  { providerId: "cloudflare", modelId: "@cf/meta/llama-4-scout-17b-16e-instruct", tier: "balanced", notes: "多模态" },
-  { providerId: "cloudflare", modelId: "@cf/mistralai/mistral-small-3.1-24b-instruct", tier: "balanced" },
+  {
+    providerId: "cloudflare",
+    modelId: "@cf/meta/llama-4-scout-17b-16e-instruct",
+    tier: "balanced",
+    notes: "多模态",
+  },
+  {
+    providerId: "cloudflare",
+    modelId: "@cf/mistralai/mistral-small-3.1-24b-instruct",
+    tier: "balanced",
+  },
   { providerId: "cloudflare", modelId: "@cf/qwen/qwq-32b", tier: "max", notes: "推理模型" },
-  { providerId: "cloudflare", modelId: "@cf/deepseek-ai/deepseek-r1-distill-qwen-32b", tier: "max", notes: "推理增强" },
+  {
+    providerId: "cloudflare",
+    modelId: "@cf/deepseek-ai/deepseek-r1-distill-qwen-32b",
+    tier: "max",
+    notes: "推理增强",
+  },
 
   // Mistral Experimental
-  { providerId: "mistral", modelId: "mistral-small-latest", tier: "fast", notes: "Mistral Small 4" },
-  { providerId: "mistral", modelId: "mistral-medium-latest", tier: "balanced", notes: "Mistral Medium 3" },
+  {
+    providerId: "mistral",
+    modelId: "mistral-small-latest",
+    tier: "fast",
+    notes: "Mistral Small 4",
+  },
+  {
+    providerId: "mistral",
+    modelId: "mistral-medium-latest",
+    tier: "balanced",
+    notes: "Mistral Medium 3",
+  },
   { providerId: "mistral", modelId: "mistral-large-latest", tier: "max", notes: "Mistral Large 3" },
   { providerId: "mistral", modelId: "open-mistral-nemo", tier: "fast" },
   { providerId: "mistral", modelId: "codestral-latest", tier: "balanced", notes: "代码专用" },
   { providerId: "mistral", modelId: "pixtral-large-latest", tier: "max", notes: "视觉多模态" },
 
   // Google AI Studio
-  { providerId: "google-aistudio", modelId: "gemini-2.5-flash", tier: "balanced", notes: "原生多模态,1M 上下文" },
-  { providerId: "google-aistudio", modelId: "gemini-2.5-flash-lite", tier: "fast", notes: "1M 上下文" },
+  {
+    providerId: "google-aistudio",
+    modelId: "gemini-2.5-flash",
+    tier: "balanced",
+    notes: "原生多模态,1M 上下文",
+  },
+  {
+    providerId: "google-aistudio",
+    modelId: "gemini-2.5-flash-lite",
+    tier: "fast",
+    notes: "1M 上下文",
+  },
   { providerId: "google-aistudio", modelId: "gemini-2.0-flash", tier: "fast", notes: "原生多模态" },
 
   // Cohere
@@ -539,8 +668,18 @@ export const FREE_MODELS: FreeModel[] = [
   { providerId: "github-models", modelId: "gpt-4o", tier: "balanced", notes: "多模态" },
   { providerId: "github-models", modelId: "o4-mini", tier: "max", notes: "推理模型" },
   { providerId: "github-models", modelId: "DeepSeek-R1", tier: "max", notes: "推理增强" },
-  { providerId: "github-models", modelId: "Llama-4-Scout-17B-16E", tier: "balanced", notes: "多模态" },
-  { providerId: "github-models", modelId: "Llama-4-Maverick-17B-128E", tier: "max", notes: "多模态" },
+  {
+    providerId: "github-models",
+    modelId: "Llama-4-Scout-17B-16E",
+    tier: "balanced",
+    notes: "多模态",
+  },
+  {
+    providerId: "github-models",
+    modelId: "Llama-4-Maverick-17B-128E",
+    tier: "max",
+    notes: "多模态",
+  },
   { providerId: "github-models", modelId: "Meta-Llama-3.3-70B", tier: "balanced" },
   { providerId: "github-models", modelId: "Mistral-Small-3.1", tier: "fast" },
 
@@ -566,10 +705,25 @@ export const FREE_MODELS: FreeModel[] = [
 
   // SiliconFlow
   { providerId: "siliconflow", modelId: "Qwen/Qwen3-8B", tier: "fast" },
-  { providerId: "siliconflow", modelId: "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B", tier: "balanced", notes: "推理增强" },
-  { providerId: "siliconflow", modelId: "deepseek-ai/DeepSeek-R1-0528-Qwen3-8B", tier: "max", notes: "推理增强" },
+  {
+    providerId: "siliconflow",
+    modelId: "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B",
+    tier: "balanced",
+    notes: "推理增强",
+  },
+  {
+    providerId: "siliconflow",
+    modelId: "deepseek-ai/DeepSeek-R1-0528-Qwen3-8B",
+    tier: "max",
+    notes: "推理增强",
+  },
   { providerId: "siliconflow", modelId: "THUDM/glm-4-9b-chat", tier: "fast" },
-  { providerId: "siliconflow", modelId: "THUDM/GLM-4.1V-9B-Thinking", tier: "balanced", notes: "视觉+推理" },
+  {
+    providerId: "siliconflow",
+    modelId: "THUDM/GLM-4.1V-9B-Thinking",
+    tier: "balanced",
+    notes: "视觉+推理",
+  },
 
   // LLM7.io
   { providerId: "llm7", modelId: "deepseek-r1-0528", tier: "max", notes: "推理增强" },
@@ -585,12 +739,32 @@ export const FREE_MODELS: FreeModel[] = [
   // Kilo Code
   { providerId: "kilo", modelId: "kilo-auto/free", tier: "balanced", notes: "自动路由" },
   { providerId: "kilo", modelId: "nvidia/nemotron-3-super-120b-a12b:free", tier: "max" },
-  { providerId: "kilo", modelId: "x-ai/grok-code-fast-1:optimized:free", tier: "balanced", notes: "代码专用" },
+  {
+    providerId: "kilo",
+    modelId: "x-ai/grok-code-fast-1:optimized:free",
+    tier: "balanced",
+    notes: "代码专用",
+  },
 
   // 美团 LongCat
-  { providerId: "longcat", modelId: "longcat-flash-lite", tier: "fast", notes: "5000万 tokens/day 免费" },
-  { providerId: "longcat", modelId: "longcat-flash-chat", tier: "balanced", notes: "500K tokens/day" },
-  { providerId: "longcat", modelId: "longcat-flash-thinking", tier: "max", notes: "推理模型,500K tokens/day" },
+  {
+    providerId: "longcat",
+    modelId: "longcat-flash-lite",
+    tier: "fast",
+    notes: "5000万 tokens/day 免费",
+  },
+  {
+    providerId: "longcat",
+    modelId: "longcat-flash-chat",
+    tier: "balanced",
+    notes: "500K tokens/day",
+  },
+  {
+    providerId: "longcat",
+    modelId: "longcat-flash-thinking",
+    tier: "max",
+    notes: "推理模型,500K tokens/day",
+  },
 
   // 讯飞星辰（免费模型 price=0）
   { providerId: "xfyun", modelId: "xop35qwen2b", tier: "fast", notes: "Qwen3.5-2B 免费" },
@@ -599,7 +773,12 @@ export const FREE_MODELS: FreeModel[] = [
   { providerId: "xfyun", modelId: "xdeepseekr1", tier: "max", notes: "推理增强" },
 
   // Gitee AI
-  { providerId: "gitee-ai", modelId: "DeepSeek-V4-Flash", tier: "fast", notes: "284B MoE,1M 上下文" },
+  {
+    providerId: "gitee-ai",
+    modelId: "DeepSeek-V4-Flash",
+    tier: "fast",
+    notes: "284B MoE,1M 上下文",
+  },
   { providerId: "gitee-ai", modelId: "DeepSeek-R1", tier: "max", notes: "推理增强" },
   { providerId: "gitee-ai", modelId: "DeepSeek-V3", tier: "balanced", notes: "仅限体验" },
   { providerId: "gitee-ai", modelId: "GLM-4.7-Flash", tier: "fast" },
@@ -622,6 +801,8 @@ for (const m of FREE_MODELS) {
 
 /** 按 modelId 反查是否为已知免费模型(返回 tier/provider 等). */
 export function findFreeModel(modelId: string): FreeModel | undefined {
-  if (!modelId) return undefined;
+  if (!modelId) {
+    return undefined;
+  }
   return freeModelMap.get(modelId) || freeModelMap.get(modelId.toLowerCase());
 }

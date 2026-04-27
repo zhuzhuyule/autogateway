@@ -24,6 +24,7 @@ export interface AliasCreatePayload {
 }
 
 export interface AliasUpdatePayload {
+  real_model?: string;
   weight?: number;
   priority?: number;
   enabled?: boolean;

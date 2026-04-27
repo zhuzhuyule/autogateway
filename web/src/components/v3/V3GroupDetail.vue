@@ -6,14 +6,9 @@ import KeyDeleteDialog from "@/components/keys/KeyDeleteDialog.vue";
 import GroupCopyModal from "@/components/keys/GroupCopyModal.vue";
 import GroupFormModal from "@/components/keys/GroupFormModal.vue";
 import ModelAliasModal from "@/components/keys/ModelAliasModal.vue";
+import V3SubGroupTable from "@/components/v3/V3SubGroupTable.vue";
 import { findProviderByUpstreams, findFreeModel } from "@/data/freeProviders";
-import type {
-  APIKey,
-  Group,
-  GroupStatsResponse,
-  KeyStatus,
-  SubGroupInfo,
-} from "@/types/models";
+import type { APIKey, Group, GroupStatsResponse, KeyStatus, SubGroupInfo } from "@/types/models";
 import { appState, triggerSyncOperationRefresh } from "@/utils/app-state";
 import { copy as copyToClipboard } from "@/utils/clipboard";
 import { getGroupDisplayName, maskKey } from "@/utils/display";
@@ -106,7 +101,9 @@ async function loadAliases() {
 }
 
 function aliasesFor(modelId: string): ModelAliasRow[] {
-  if (!props.group?.id) return [];
+  if (!props.group?.id) {
+    return [];
+  }
   return aliases.value
     .filter(a => a.group_id === props.group.id && a.real_model === modelId && a.enabled)
     .sort((a, b) => b.weight - a.weight);
@@ -142,9 +139,7 @@ async function loadSubGroups() {
   }
 }
 
-const matchedProvider = computed(() =>
-  findProviderByUpstreams(props.group?.upstreams || [])
-);
+const matchedProvider = computed(() => findProviderByUpstreams(props.group?.upstreams || []));
 
 const proxyUrl = computed(() => {
   if (!props.group) {
@@ -166,7 +161,9 @@ const proxyUrl = computed(() => {
 // Short SDK base_url shown in the hero — drops channel-specific suffix
 // (e.g. /chat/completions). Matches v5 banner pattern.
 const sdkBaseUrl = computed(() => {
-  if (!props.group) return "";
+  if (!props.group) {
+    return "";
+  }
   const ch = props.group.channel_type;
   const apiRoot = ch === "gemini" ? "v1beta" : "v1";
   const host = `${window.location.protocol}//${window.location.host}`;
@@ -200,17 +197,32 @@ const friendlyHint = computed(() => {
 });
 
 const groupAvatarShort = computed(() => {
-  if (!props.group) return "??";
+  if (!props.group) {
+    return "??";
+  }
   const src = props.group.display_name || props.group.name;
-  return src.replace(/[^A-Za-z0-9]/g, "").slice(0, 2).toUpperCase() || "??";
+  return (
+    src
+      .replace(/[^A-Za-z0-9]/g, "")
+      .slice(0, 2)
+      .toUpperCase() || "??"
+  );
 });
 
 const groupAvatarClass = computed(() => {
   const g = props.group;
-  if (!g) return "v3-pav-default";
-  if (g.channel_type === "anthropic") return "v3-pav-anthropic";
-  if (g.channel_type === "gemini") return "v3-pav-google";
-  if (g.is_system) return "v3-pav-default";
+  if (!g) {
+    return "v3-pav-default";
+  }
+  if (g.channel_type === "anthropic") {
+    return "v3-pav-anthropic";
+  }
+  if (g.channel_type === "gemini") {
+    return "v3-pav-google";
+  }
+  if (g.is_system) {
+    return "v3-pav-default";
+  }
   const lower = g.name.toLowerCase();
   for (const key of [
     "groq",
@@ -224,7 +236,9 @@ const groupAvatarClass = computed(() => {
     "github",
     "anthropic",
   ]) {
-    if (lower.includes(key)) return `v3-pav-${key}`;
+    if (lower.includes(key)) {
+      return `v3-pav-${key}`;
+    }
   }
   return "v3-pav-default";
 });
@@ -246,7 +260,9 @@ const FAVICON_DOMAIN_MAP: Record<string, string> = {
 };
 
 function extractHost(url?: string): string | null {
-  if (!url) return null;
+  if (!url) {
+    return null;
+  }
   try {
     return new URL(url).hostname;
   } catch {
@@ -256,7 +272,9 @@ function extractHost(url?: string): string | null {
 
 const faviconUrl = computed(() => {
   const g = props.group;
-  if (!g) return "";
+  if (!g) {
+    return "";
+  }
   const role = (g.system_role || "").trim();
   if (role && FAVICON_DOMAIN_MAP[role]) {
     return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(FAVICON_DOMAIN_MAP[role])}&sz=64`;
@@ -346,10 +364,7 @@ watch([page, statusFilter], () => loadKeys());
 watch(
   () => appState.groupDataRefreshTrigger,
   () => {
-    if (
-      appState.lastCompletedTask &&
-      props.group?.name === appState.lastCompletedTask.groupName
-    ) {
+    if (appState.lastCompletedTask && props.group?.name === appState.lastCompletedTask.groupName) {
       loadStats();
       loadKeys();
     }
@@ -379,9 +394,7 @@ function parseAvailableModels(raw: unknown): string[] {
   if (typeof raw === "string" && raw.trim().length > 0) {
     try {
       const arr = JSON.parse(raw);
-      return Array.isArray(arr)
-        ? arr.filter((m): m is string => typeof m === "string")
-        : [];
+      return Array.isArray(arr) ? arr.filter((m): m is string => typeof m === "string") : [];
     } catch {
       return [];
     }
@@ -395,7 +408,9 @@ const groupModels = computed<string[]>(() => {
     const set = new Set<string>();
     for (const sg of subGroups.value) {
       const raw = (sg.group as unknown as { available_models?: unknown })?.available_models;
-      for (const m of parseAvailableModels(raw)) set.add(m);
+      for (const m of parseAvailableModels(raw)) {
+        set.add(m);
+      }
     }
     return Array.from(set).sort();
   }
@@ -422,8 +437,11 @@ function onSubGroupSelect(id: number) {
 }
 
 const modelsRefreshedAtDisplay = computed(() => {
-  const at = (props.group as unknown as { models_refreshed_at?: string | null })?.models_refreshed_at;
-  if (!at) return "";
+  const at = (props.group as unknown as { models_refreshed_at?: string | null })
+    ?.models_refreshed_at;
+  if (!at) {
+    return "";
+  }
   try {
     return new Date(at).toLocaleString();
   } catch {
@@ -459,14 +477,22 @@ function tierForModel(modelId: string): "fast" | "balanced" | "max" {
 }
 
 function tierChipClass(tier: "fast" | "balanced" | "max"): string {
-  if (tier === "fast") return "v3-chip v3-chip--ok";
-  if (tier === "max") return "v3-chip v3-chip--info";
+  if (tier === "fast") {
+    return "v3-chip v3-chip--ok";
+  }
+  if (tier === "max") {
+    return "v3-chip v3-chip--info";
+  }
   return "v3-chip v3-chip--warn";
 }
 
 function tierLabel(tier: "fast" | "balanced" | "max"): string {
-  if (tier === "fast") return t("v3.fast") || "fast";
-  if (tier === "max") return t("v3.max") || "max";
+  if (tier === "fast") {
+    return t("v3.fast") || "fast";
+  }
+  if (tier === "max") {
+    return t("v3.max") || "max";
+  }
   return t("v3.balanced") || "balanced";
 }
 
@@ -515,8 +541,11 @@ async function saveNotes(k: KeyRow) {
 
 async function copyText(value: string, msg = "Copied") {
   const ok = await copyToClipboard(value);
-  if (ok) message.success(msg);
-  else message.error("Copy failed");
+  if (ok) {
+    message.success(msg);
+  } else {
+    message.error("Copy failed");
+  }
 }
 
 async function copyKey(k: KeyRow) {
@@ -524,7 +553,9 @@ async function copyKey(k: KeyRow) {
 }
 
 async function testKey(k: KeyRow) {
-  if (!props.group?.id || !k.key_value || testingKeyId.value === k.id) return;
+  if (!props.group?.id || !k.key_value || testingKeyId.value === k.id) {
+    return;
+  }
   testingKeyId.value = k.id;
   try {
     const r = await keysApi.testKeys(props.group.id, k.key_value);
@@ -543,10 +574,14 @@ async function testKey(k: KeyRow) {
 
 // Inline 2-step delete: first click arms; second click within 3s deletes.
 function deleteKey(k: KeyRow) {
-  if (!props.group?.id) return;
+  if (!props.group?.id) {
+    return;
+  }
   if (confirmingDeleteId.value !== k.id) {
     confirmingDeleteId.value = k.id;
-    if (confirmDeleteTimer) clearTimeout(confirmDeleteTimer);
+    if (confirmDeleteTimer) {
+      clearTimeout(confirmDeleteTimer);
+    }
     confirmDeleteTimer = window.setTimeout(() => {
       if (confirmingDeleteId.value === k.id) {
         confirmingDeleteId.value = null;
@@ -554,13 +589,17 @@ function deleteKey(k: KeyRow) {
     }, 3000);
     return;
   }
-  if (confirmDeleteTimer) clearTimeout(confirmDeleteTimer);
+  if (confirmDeleteTimer) {
+    clearTimeout(confirmDeleteTimer);
+  }
   confirmingDeleteId.value = null;
   doDeleteKey(k);
 }
 
 async function doDeleteKey(k: KeyRow) {
-  if (!props.group?.id) return;
+  if (!props.group?.id) {
+    return;
+  }
   const groupId = props.group.id;
   const groupName = props.group.name;
   try {
@@ -573,7 +612,9 @@ async function doDeleteKey(k: KeyRow) {
 }
 
 function restoreKey(k: KeyRow) {
-  if (!props.group?.id) return;
+  if (!props.group?.id) {
+    return;
+  }
   const groupId = props.group.id;
   const groupName = props.group.name;
   const d = dialog.warning({
@@ -595,7 +636,9 @@ function restoreKey(k: KeyRow) {
 }
 
 function validateAll(scope: "all" | "active" | "invalid" = "all") {
-  if (!props.group?.id) return;
+  if (!props.group?.id) {
+    return;
+  }
   const groupId = props.group.id;
   keysApi.validateGroupKeys(groupId, scope === "all" ? undefined : scope).then(() => {
     localStorage.removeItem("last_closed_task");
@@ -604,7 +647,9 @@ function validateAll(scope: "all" | "active" | "invalid" = "all") {
 }
 
 function clearInvalid() {
-  if (!props.group?.id) return;
+  if (!props.group?.id) {
+    return;
+  }
   const groupId = props.group.id;
   const groupName = props.group.name;
   const d = dialog.warning({
@@ -627,7 +672,9 @@ function clearInvalid() {
 }
 
 function deleteGroup() {
-  if (!props.group?.id) return;
+  if (!props.group?.id) {
+    return;
+  }
   const id = props.group.id;
   const name = props.group.name;
   const d = dialog.warning({
@@ -648,21 +695,33 @@ function deleteGroup() {
 }
 
 function exportKeys(scope: "all" | "active" | "invalid") {
-  if (!props.group?.id) return;
+  if (!props.group?.id) {
+    return;
+  }
   keysApi.exportKeys(props.group.id, scope);
 }
 
 function fmtFailRate(failed?: number, total?: number): string {
-  if (!total) return "0%";
+  if (!total) {
+    return "0%";
+  }
   return `${(((failed || 0) / total) * 100).toFixed(1)}%`;
 }
 
 function formatRelative(date?: string): string {
-  if (!date) return t("keys.never") || "—";
+  if (!date) {
+    return t("keys.never") || "—";
+  }
   const diffSec = Math.floor((Date.now() - new Date(date).getTime()) / 1000);
-  if (diffSec < 60) return `${diffSec}s ago`;
-  if (diffSec < 3600) return `${Math.floor(diffSec / 60)}m ago`;
-  if (diffSec < 86400) return `${Math.floor(diffSec / 3600)}h ago`;
+  if (diffSec < 60) {
+    return `${diffSec}s ago`;
+  }
+  if (diffSec < 3600) {
+    return `${Math.floor(diffSec / 60)}m ago`;
+  }
+  if (diffSec < 86400) {
+    return `${Math.floor(diffSec / 3600)}h ago`;
+  }
   return `${Math.floor(diffSec / 86400)}d ago`;
 }
 
@@ -713,10 +772,11 @@ const filterCounts = computed(() => ({
             draggable="false"
             @error="faviconFailed = true"
           />
-          <span v-else :class="['v3-pav', groupAvatarClass]" style="
-            width: 100%; height: 100%; border-radius: 0;
-            font-size: 14px;
-          ">
+          <span
+            v-else
+            :class="['v3-pav', groupAvatarClass]"
+            style="width: 100%; height: 100%; border-radius: 0; font-size: 14px"
+          >
             {{ groupAvatarShort }}
           </span>
         </div>
@@ -773,10 +833,7 @@ const filterCounts = computed(() => ({
           </a>
           <n-tooltip v-if="!group.is_system">
             <template #trigger>
-              <button
-                class="v5-hero__btn v5-hero__btn--icon"
-                @click="showEditGroup = true"
-              >
+              <button class="v5-hero__btn v5-hero__btn--icon" @click="showEditGroup = true">
                 <n-icon :component="PencilOutline" :size="13" />
               </button>
             </template>
@@ -784,10 +841,7 @@ const filterCounts = computed(() => ({
           </n-tooltip>
           <n-tooltip v-if="!isAggregate">
             <template #trigger>
-              <button
-                class="v5-hero__btn v5-hero__btn--icon"
-                @click="showCopyGroup = true"
-              >
+              <button class="v5-hero__btn v5-hero__btn--icon" @click="showCopyGroup = true">
                 <n-icon :component="CopyOutline" :size="13" />
               </button>
             </template>
@@ -930,13 +984,22 @@ const filterCounts = computed(() => ({
       <div v-else-if="tab === 'keys'">
         <div class="v5-toolbar">
           <div class="v5-segctrl">
-            <button :class="statusFilter === 'all' ? 'is-active' : ''" @click="statusFilter = 'all'">
+            <button
+              :class="statusFilter === 'all' ? 'is-active' : ''"
+              @click="statusFilter = 'all'"
+            >
               {{ t("common.all") || "All" }} ({{ filterCounts.all }})
             </button>
-            <button :class="statusFilter === 'active' ? 'is-active' : ''" @click="statusFilter = 'active'">
+            <button
+              :class="statusFilter === 'active' ? 'is-active' : ''"
+              @click="statusFilter = 'active'"
+            >
               {{ t("keys.valid") || "Valid" }} ({{ filterCounts.valid }})
             </button>
-            <button :class="statusFilter === 'invalid' ? 'is-active' : ''" @click="statusFilter = 'invalid'">
+            <button
+              :class="statusFilter === 'invalid' ? 'is-active' : ''"
+              @click="statusFilter = 'invalid'"
+            >
               {{ t("keys.invalid") || "Invalid" }} ({{ filterCounts.invalid }})
             </button>
           </div>
@@ -1099,10 +1162,12 @@ const filterCounts = computed(() => ({
               <div class="v5-keycard__row">
                 <div class="v5-keycard__inline">
                   <span>
-                    {{ t("v5.kcReq") }}<b>{{ (k.request_count ?? 0).toLocaleString() }}</b>
+                    {{ t("v5.kcReq") }}
+                    <b>{{ (k.request_count ?? 0).toLocaleString() }}</b>
                   </span>
                   <span :class="(k.failure_count || 0) > 0 ? 'v5-keycard__inline-fail--err' : ''">
-                    {{ t("v5.kcFail") }}<b>{{ k.failure_count ?? 0 }}</b>
+                    {{ t("v5.kcFail") }}
+                    <b>{{ k.failure_count ?? 0 }}</b>
                   </span>
                   <span>{{ formatRelative(k.last_used_at) }}</span>
                 </div>
@@ -1153,7 +1218,11 @@ const filterCounts = computed(() => ({
             <div class="v5-empty__sub">
               {{ matchedProvider?.signupUrl ? t("v5.noKeysSubWithProvider") : t("v5.noKeysSub") }}
             </div>
-            <button class="v3-btn v3-btn--accent" style="margin-top: 8px" @click="showAddKey = true">
+            <button
+              class="v3-btn v3-btn--accent"
+              style="margin-top: 8px"
+              @click="showAddKey = true"
+            >
               <n-icon :component="AddOutline" :size="12" />
               {{ t("v3.addKey") }}
             </button>
@@ -1188,7 +1257,11 @@ const filterCounts = computed(() => ({
               <span :class="tierChipClass(tierForModel(modelId))" style="flex-shrink: 0">
                 {{ tierLabel(tierForModel(modelId)) }}
               </span>
-              <span v-if="isFreeModel(modelId)" class="v3-chip v3-chip--info" style="flex-shrink: 0">
+              <span
+                v-if="isFreeModel(modelId)"
+                class="v3-chip v3-chip--info"
+                style="flex-shrink: 0"
+              >
                 {{ t("v3.free") || "free" }}
               </span>
             </div>
@@ -1196,16 +1269,9 @@ const filterCounts = computed(() => ({
             <!-- Aliases inline (clickable chip → jump to Aliases page) -->
             <div class="v5-modelcard__aliases">
               <template v-if="aliasesFor(modelId).length">
-                <n-tooltip
-                  v-for="a in aliasesFor(modelId)"
-                  :key="a.id"
-                  placement="top"
-                >
+                <n-tooltip v-for="a in aliasesFor(modelId)" :key="a.id" placement="top">
                   <template #trigger>
-                    <button
-                      class="v5-modelcard__alias"
-                      @click.stop="goToAliases(a.alias)"
-                    >
+                    <button class="v5-modelcard__alias" @click.stop="goToAliases(a.alias)">
                       <span>{{ a.alias }}</span>
                       <small>w{{ a.weight }}</small>
                     </button>
@@ -1240,7 +1306,12 @@ const filterCounts = computed(() => ({
           </div>
           <div class="v5-empty__title">{{ t("v5.noModelsTitle") }}</div>
           <div class="v5-empty__sub">{{ t("v5.noModelsSub") }}</div>
-          <button v-if="!group.is_system" class="v3-btn" style="margin-top: 8px" @click="showEditGroup = true">
+          <button
+            v-if="!group.is_system"
+            class="v3-btn"
+            style="margin-top: 8px"
+            @click="showEditGroup = true"
+          >
             <n-icon :component="PencilOutline" :size="12" />
             {{ t("v5.openGroupSettings") }}
           </button>
@@ -1265,7 +1336,9 @@ const filterCounts = computed(() => ({
               {{ t("v5.setChannel") }}
               <n-tooltip>
                 <template #trigger>
-                  <span class="v5-helpicon"><n-icon :component="HelpCircleOutline" :size="11" /></span>
+                  <span class="v5-helpicon">
+                    <n-icon :component="HelpCircleOutline" :size="11" />
+                  </span>
                 </template>
                 {{ t("v5.setChannelSub") }}
               </n-tooltip>
@@ -1277,7 +1350,9 @@ const filterCounts = computed(() => ({
               {{ t("v5.setUpstream") }}
               <n-tooltip>
                 <template #trigger>
-                  <span class="v5-helpicon"><n-icon :component="HelpCircleOutline" :size="11" /></span>
+                  <span class="v5-helpicon">
+                    <n-icon :component="HelpCircleOutline" :size="11" />
+                  </span>
                 </template>
                 {{ t("v5.setUpstreamSub") }}
               </n-tooltip>
@@ -1297,7 +1372,9 @@ const filterCounts = computed(() => ({
               {{ t("v5.setProxyPath") }}
               <n-tooltip>
                 <template #trigger>
-                  <span class="v5-helpicon"><n-icon :component="HelpCircleOutline" :size="11" /></span>
+                  <span class="v5-helpicon">
+                    <n-icon :component="HelpCircleOutline" :size="11" />
+                  </span>
                 </template>
                 {{ t("v5.setProxyPathSub") }}
               </n-tooltip>
@@ -1309,21 +1386,23 @@ const filterCounts = computed(() => ({
               {{ t("v5.setMembers") }}
               <n-tooltip>
                 <template #trigger>
-                  <span class="v5-helpicon"><n-icon :component="HelpCircleOutline" :size="11" /></span>
+                  <span class="v5-helpicon">
+                    <n-icon :component="HelpCircleOutline" :size="11" />
+                  </span>
                 </template>
                 {{ t("v5.setMembersSub") }}
               </n-tooltip>
             </div>
-            <div class="v5-settings__val">
-              {{ subGroups.length }} {{ t("v5.setMembersUnit") }}
-            </div>
+            <div class="v5-settings__val">{{ subGroups.length }} {{ t("v5.setMembersUnit") }}</div>
           </div>
           <div v-if="!isAggregate" class="v5-settings__row">
             <div class="v5-settings__lbl">
               {{ t("v5.setTestModel") }}
               <n-tooltip>
                 <template #trigger>
-                  <span class="v5-helpicon"><n-icon :component="HelpCircleOutline" :size="11" /></span>
+                  <span class="v5-helpicon">
+                    <n-icon :component="HelpCircleOutline" :size="11" />
+                  </span>
                 </template>
                 {{ t("v5.setTestModelSub") }}
               </n-tooltip>
@@ -1335,7 +1414,9 @@ const filterCounts = computed(() => ({
               {{ t("v5.setValidation") }}
               <n-tooltip>
                 <template #trigger>
-                  <span class="v5-helpicon"><n-icon :component="HelpCircleOutline" :size="11" /></span>
+                  <span class="v5-helpicon">
+                    <n-icon :component="HelpCircleOutline" :size="11" />
+                  </span>
                 </template>
                 {{ t("v5.setValidationSub") }}
               </n-tooltip>
@@ -1363,14 +1444,18 @@ const filterCounts = computed(() => ({
               <div class="v5-settings__lbl">{{ t("v5.setValidation") }}</div>
               <div class="v5-settings__sub">{{ t("v5.setValidationSub") }}</div>
             </div>
-            <div class="v5-settings__val">{{ group.validation_endpoint || t("v5.setValidationDefault") }}</div>
+            <div class="v5-settings__val">
+              {{ group.validation_endpoint || t("v5.setValidationDefault") }}
+            </div>
           </div>
           <div class="v5-settings__row">
             <div class="v5-settings__lbl">
               {{ t("v5.setSystem") }}
               <n-tooltip>
                 <template #trigger>
-                  <span class="v5-helpicon"><n-icon :component="HelpCircleOutline" :size="11" /></span>
+                  <span class="v5-helpicon">
+                    <n-icon :component="HelpCircleOutline" :size="11" />
+                  </span>
                 </template>
                 {{ t("v5.setSystemSub") }}
               </n-tooltip>
@@ -1396,16 +1481,8 @@ const filterCounts = computed(() => ({
       :group-name="group.name"
       @success="refreshFromDelete"
     />
-    <group-form-modal
-      v-model:show="showEditGroup"
-      :group="group"
-      @success="onGroupUpdated"
-    />
-    <group-copy-modal
-      v-model:show="showCopyGroup"
-      :source-group="group"
-      @success="onGroupCopied"
-    />
+    <group-form-modal v-model:show="showEditGroup" :group="group" @success="onGroupUpdated" />
+    <group-copy-modal v-model:show="showCopyGroup" :source-group="group" @success="onGroupCopied" />
     <model-alias-modal
       v-if="aliasModalModel"
       v-model:show="showAliasModal"

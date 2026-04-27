@@ -16,7 +16,7 @@ import {
   RefreshOutline,
 } from "@vicons/ionicons5";
 import { NIcon, useMessage } from "naive-ui";
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, reactive, ref } from "vue";
 import { useI18n } from "vue-i18n";
 
 const { t } = useI18n();
@@ -141,14 +141,22 @@ function exportSnapshot() {
 }
 
 function fmtNumber(v?: number): string {
-  if (v == null) return "—";
-  if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(1)}M`;
-  if (v >= 1_000) return `${(v / 1_000).toFixed(1)}K`;
+  if (v == null) {
+    return "—";
+  }
+  if (v >= 1_000_000) {
+    return `${(v / 1_000_000).toFixed(1)}M`;
+  }
+  if (v >= 1_000) {
+    return `${(v / 1_000).toFixed(1)}K`;
+  }
   return v.toLocaleString();
 }
 
 function fmtTrend(card?: StatCard): string {
-  if (!card || card.trend == null) return "";
+  if (!card || card.trend == null) {
+    return "";
+  }
   const sign = card.trend >= 0 ? "+" : "";
   return `${sign}${card.trend.toFixed(1)}%`;
 }
@@ -210,28 +218,65 @@ const kpis = computed<KpiSpec[]>(() => {
 const baseUrl = computed(() => `${window.location.protocol}//${window.location.host}`);
 
 function aggRequestPath(group: Group): string {
-  if (group.channel_type === "anthropic") return "/proxy/anthropic/v1/messages";
-  if (group.channel_type === "gemini") return "/proxy/gemini/v1beta/models/*:generateContent";
+  if (group.channel_type === "anthropic") {
+    return "/proxy/anthropic/v1/messages";
+  }
+  if (group.channel_type === "gemini") {
+    return "/proxy/gemini/v1beta/models/*:generateContent";
+  }
   return "/proxy/openai/v1/chat/completions";
 }
 
+// Favicon support for aggregate cards
+const FAVICON_DOMAIN_MAP: Record<string, string> = {
+  openai: "openai.com",
+  gemini: "gemini.google.com",
+  anthropic: "anthropic.com",
+  google: "google.com",
+  groq: "groq.com",
+  cerebras: "cerebras.ai",
+  openrouter: "openrouter.ai",
+  together: "together.ai",
+  cloudflare: "cloudflare.com",
+  mistral: "mistral.ai",
+  cohere: "cohere.com",
+  github: "github.com",
+  "default-openai": "openai.com",
+  "default-anthropic": "anthropic.com",
+  "default-gemini": "gemini.google.com",
+};
+
+function faviconFor(aggName: string): string {
+  const lower = aggName.toLowerCase();
+  for (const [k, domain] of Object.entries(FAVICON_DOMAIN_MAP)) {
+    if (lower.includes(k)) {
+      return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=64`;
+    }
+  }
+  return "";
+}
+
+const faviconErr = reactive<Record<string, boolean>>({});
+function onFaviconErr(name: string) {
+  faviconErr[name] = true;
+}
+
 function aggregateLabel(group: Group): string {
-  const provider =
-    group.channel_type === "gemini"
-      ? "Gemini"
-      : group.channel_type === "anthropic"
-        ? "Anthropic"
-        : "OpenAI";
-  return `${getGroupDisplayName(group)} · ${provider} 聚合`;
+  return getGroupDisplayName(group);
 }
 
 function aggregateChildren(group: Group): string[] {
   return (group.sub_groups || []).map(sg => getGroupDisplayName(sg)).filter(Boolean);
 }
 
-const systemAggregates = computed(() =>
-  allGroups.value.filter(g => g.group_type === "aggregate" && g.is_system)
-);
+const systemAggregates = computed(() => {
+  const arr = allGroups.value.filter(g => g.group_type === "aggregate" && g.is_system);
+  return arr.sort((a, b) => {
+    const aOpen = a.name.toLowerCase().includes("openai") ? 0 : 1;
+    const bOpen = b.name.toLowerCase().includes("openai") ? 0 : 1;
+    return aOpen - bOpen;
+  });
+});
 
 async function copyAggregateUrl(group: Group) {
   await copyText(`${baseUrl.value}${aggRequestPath(group)}`);
@@ -276,10 +321,16 @@ function inferProvider(groupName: string, channel?: string): string {
     "github",
     "anthropic",
   ]) {
-    if (lower.includes(p)) return p === "gemini" ? "google" : p;
+    if (lower.includes(p)) {
+      return p === "gemini" ? "google" : p;
+    }
   }
-  if (channel === "anthropic") return "anthropic";
-  if (channel === "gemini") return "google";
+  if (channel === "anthropic") {
+    return "anthropic";
+  }
+  if (channel === "gemini") {
+    return "google";
+  }
   return "default";
 }
 
@@ -313,7 +364,9 @@ function inferTier(modelId: string): "simple" | "medium" | "complex" {
 // Look up channel for a group name (used to infer provider from API response).
 const groupChannel = computed<Record<string, string | undefined>>(() => {
   const m: Record<string, string | undefined> = {};
-  for (const g of groupList.value) m[g.name] = g.channel_type;
+  for (const g of groupList.value) {
+    m[g.name] = g.channel_type;
+  }
   return m;
 });
 
@@ -342,7 +395,9 @@ const topModels = computed<TopModelRow[]>(() => {
     const provider = inferProvider(g.name, g.channel_type);
     const groupCalls = groupStatsMap.value[g.name]?.req24h ?? 0;
     const models = parseModels(g.available_models);
-    if (models.length === 0) continue;
+    if (models.length === 0) {
+      continue;
+    }
     const per = Math.max(0, Math.round(groupCalls / models.length));
     for (const m of models) {
       const entry = acc.get(m) || { calls: 0, providers: new Set<string>() };
@@ -386,7 +441,9 @@ const providerLineup = computed<ProviderLineupRow[]>(() => {
   const acc = new Map<string, ProviderLineupRow>();
   for (const g of groupList.value) {
     const provider = inferProvider(g.name, g.channel_type);
-    if (provider === "default") continue;
+    if (provider === "default") {
+      continue;
+    }
     const stats = groupStatsMap.value[g.name];
     const row = acc.get(provider) || {
       name: provider,
@@ -413,8 +470,11 @@ const endpoints = computed(() => {
 
 async function copyText(value: string) {
   const ok = await copyToClipboard(value);
-  if (ok) message.success(t("common.copySuccess") || "Copied");
-  else message.error("Copy failed");
+  if (ok) {
+    message.success(t("common.copySuccess") || "Copied");
+  } else {
+    message.error("Copy failed");
+  }
 }
 </script>
 
@@ -486,7 +546,14 @@ async function copyText(value: string) {
         >
           <div class="v5-agg__head">
             <div class="v5-agg__icon">
-              <span>
+              <img
+                v-if="faviconFor(agg.name) && !faviconErr[agg.name]"
+                :src="faviconFor(agg.name)"
+                alt=""
+                @error="onFaviconErr(agg.name)"
+                style="width: 20px; height: 20px"
+              />
+              <span v-else>
                 {{
                   V3_PROVIDER_DIR[inferProvider(agg.name, agg.channel_type)]?.short ||
                   agg.channel_type?.slice(0, 2).toUpperCase() ||
@@ -495,12 +562,15 @@ async function copyText(value: string) {
               </span>
             </div>
             <div class="v5-agg__main">
-              <div class="v5-agg__title-row">
-                <div class="v5-agg__name">{{ aggregateLabel(agg) }}</div>
+              <div class="v5-agg__title-row" style="align-items: center">
+                <div class="v5-agg__name" style="font-size: 15px; font-weight: 700">
+                  {{ aggregateLabel(agg) }}
+                </div>
                 <button
                   class="v5-agg__copy"
                   :title="t('common.copy')"
                   @click.stop="copyAggregateUrl(agg)"
+                  style="margin-left: 8px"
                 >
                   <n-icon :component="CopyOutline" :size="13" />
                 </button>

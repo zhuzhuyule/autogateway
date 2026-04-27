@@ -4,13 +4,7 @@ import AddSubGroupModal from "@/components/keys/AddSubGroupModal.vue";
 import EditSubGroupWeightModal from "@/components/keys/EditSubGroupWeightModal.vue";
 import type { Group, SubGroupInfo } from "@/types/models";
 import { getGroupDisplayName } from "@/utils/display";
-import {
-  AddOutline,
-  CreateOutline,
-  EyeOutline,
-  SearchOutline,
-  Trash,
-} from "@vicons/ionicons5";
+import { AddOutline, CreateOutline, EyeOutline, SearchOutline, Trash } from "@vicons/ionicons5";
 import { NIcon, NSpin, useDialog } from "naive-ui";
 import { computed, ref } from "vue";
 import { useI18n } from "vue-i18n";
@@ -77,21 +71,34 @@ const filtered = computed(() => {
     if (q) {
       const name = (r.group.name || "").toLowerCase();
       const display = (r.group.display_name || "").toLowerCase();
-      if (!name.includes(q) && !display.includes(q)) return false;
+      if (!name.includes(q) && !display.includes(q)) {
+        return false;
+      }
     }
-    if (statusFilter.value !== "all" && r.status !== statusFilter.value) return false;
+    if (statusFilter.value !== "all" && r.status !== statusFilter.value) {
+      return false;
+    }
     return true;
   });
 });
 
 function shortFor(g: Group): string {
   const src = g.display_name || g.name || "?";
-  return src.replace(/[^A-Za-z0-9]/g, "").slice(0, 2).toUpperCase() || "??";
+  return (
+    src
+      .replace(/[^A-Za-z0-9]/g, "")
+      .slice(0, 2)
+      .toUpperCase() || "??"
+  );
 }
 
 function avatarClass(g: Group): string {
-  if (g.channel_type === "anthropic") return "v3-pav-anthropic";
-  if (g.channel_type === "gemini") return "v3-pav-google";
+  if (g.channel_type === "anthropic") {
+    return "v3-pav-anthropic";
+  }
+  if (g.channel_type === "gemini") {
+    return "v3-pav-google";
+  }
   const lower = (g.name || "").toLowerCase();
   for (const key of [
     "groq",
@@ -105,22 +112,26 @@ function avatarClass(g: Group): string {
     "github",
     "anthropic",
   ]) {
-    if (lower.includes(key)) return `v3-pav-${key}`;
+    if (lower.includes(key)) {
+      return `v3-pav-${key}`;
+    }
   }
   return "v3-pav-default";
 }
 
 function statusChip(s: SubGroupRow["status"]): { cls: string; label: string } {
-  if (s === "active")
+  if (s === "active") {
     return {
       cls: "v3-chip v3-chip--ok",
       label: t("subGroups.statusActive") || "Active",
     };
-  if (s === "disabled")
+  }
+  if (s === "disabled") {
     return {
       cls: "v3-chip v3-chip--warn",
       label: t("subGroups.statusDisabled") || "Disabled",
     };
+  }
   return {
     cls: "v3-chip v3-chip--danger",
     label: t("subGroups.statusUnavailable") || "Unavailable",
@@ -128,7 +139,9 @@ function statusChip(s: SubGroupRow["status"]): { cls: string; label: string } {
 }
 
 function fmtN(n: number): string {
-  if (n >= 1000) return `${(n / 1000).toFixed(1)}K`;
+  if (n >= 1000) {
+    return `${(n / 1000).toFixed(1)}K`;
+  }
   return n.toString();
 }
 
@@ -138,7 +151,9 @@ function openEdit(sg: SubGroupInfo) {
 }
 
 function removeSub(sg: SubGroupInfo) {
-  if (!props.selectedGroup?.id || !sg.group.id) return;
+  if (!props.selectedGroup?.id || !sg.group.id) {
+    return;
+  }
   const aggId = props.selectedGroup.id;
   const subId = sg.group.id;
   const d = dialog.warning({
@@ -168,7 +183,9 @@ function onSuccess() {
 }
 
 function viewSubGroup(id?: number) {
-  if (id) emit("group-select", id);
+  if (id) {
+    emit("group-select", id);
+  }
 }
 </script>
 
@@ -181,11 +198,7 @@ function viewSubGroup(id?: number) {
         {{ t("subGroups.addSubGroup") || "Add sub-group" }}
       </button>
       <div class="v3-spacer">
-        <select
-          v-model="statusFilter"
-          class="v3-btn v3-btn--sm"
-          style="padding-right: 24px"
-        >
+        <select v-model="statusFilter" class="v3-btn v3-btn--sm" style="padding-right: 24px">
           <option value="all">{{ t("common.all") || "All" }}</option>
           <option value="active">
             {{ t("subGroups.statusActive") || "Active" }}
@@ -199,10 +212,7 @@ function viewSubGroup(id?: number) {
         </select>
         <div class="v3-search">
           <n-icon :component="SearchOutline" :size="12" />
-          <input
-            v-model="search"
-            :placeholder="t('keys.searchByName') || 'Filter sub-groups…'"
-          />
+          <input v-model="search" :placeholder="t('keys.searchByName') || 'Filter sub-groups…'" />
         </div>
       </div>
     </div>
@@ -218,7 +228,7 @@ function viewSubGroup(id?: number) {
               <th>Keys</th>
               <th>Active / Invalid</th>
               <th>Status</th>
-              <th></th>
+              <th />
             </tr>
           </thead>
           <tbody>
@@ -242,12 +252,7 @@ function viewSubGroup(id?: number) {
                     >
                       {{ getGroupDisplayName(row) }}
                     </div>
-                    <div
-                      style="
-                        font: 400 10.5px/1 var(--v3-mono);
-                        color: var(--v3-ink-3);
-                      "
-                    >
+                    <div style="font: 400 10.5px/1 var(--v3-mono); color: var(--v3-ink-3)">
                       #{{ row.group.name }} · {{ row.group.channel_type }}
                     </div>
                   </div>
@@ -281,10 +286,7 @@ function viewSubGroup(id?: number) {
               </td>
               <td class="tnum mono">{{ fmtN(row.total_keys) }}</td>
               <td>
-                <span
-                  class="mono tnum"
-                  style="color: var(--v3-ok); font-weight: 600"
-                >
+                <span class="mono tnum" style="color: var(--v3-ok); font-weight: 600">
                   {{ fmtN(row.active_keys) }}
                 </span>
                 <span style="color: var(--v3-ink-4); margin: 0 6px">/</span>
@@ -348,8 +350,7 @@ function viewSubGroup(id?: number) {
                 {{
                   rows.length
                     ? t("keys.noMatchingKeys") || "No sub-groups match the filter."
-                    : t("subGroups.noSubGroups") ||
-                      "No sub-groups in this aggregate yet."
+                    : t("subGroups.noSubGroups") || "No sub-groups in this aggregate yet."
                 }}
               </td>
             </tr>
@@ -364,9 +365,7 @@ function viewSubGroup(id?: number) {
           t("subGroups.totalSubGroups", { total: filtered.length }) ||
           `${filtered.length} sub-groups`
         }}
-        <template v-if="filtered.length !== rows.length">
-          / {{ rows.length }}
-        </template>
+        <template v-if="filtered.length !== rows.length">/ {{ rows.length }}</template>
       </span>
       <span>
         {{ t("subGroups.sortedByWeight") || "Sorted by weight ↓" }}

@@ -889,6 +889,9 @@ export default {
     getKey: "Get key",
     newGroupFootHint:
       'Creating the group on "Test only" / "Test & save" — keys are added asynchronously.',
+    modelConfig: "Model config",
+    freeOnly: "Free only",
+    allModels: "All models",
     smartDetect: "Smart detect",
     smartDetectPlaceholder: "Paste an API key — provider auto-matched…",
     smartDetectMatch: "Detected {provider} ({hint})",
@@ -938,8 +941,8 @@ export default {
     weightLabel: "Weight",
     priorityLabel: "Priority",
     enabledLabel: "Enabled",
-    },
-    v5: {
+  },
+  v5: {
     hintOpenAI: "Drop this URL into any OpenAI SDK as the base_url.",
     hintAnthropic: "Drop this URL into any Anthropic SDK as the base_url.",
     hintGemini: "Drop this URL into any Gemini SDK as the base_url.",
@@ -1004,7 +1007,8 @@ export default {
     aggChildren: "Children",
     aggKeys: "Keys",
     aggregateChip: "aggregate",
-    hintAggregate: "This is an aggregate — requests are routed across the sub-groups below by weight.",
+    hintAggregate:
+      "This is an aggregate — requests are routed across the sub-groups below by weight.",
     tabSubGroups: "Sub-groups",
     aggSubGroups: "Sub-groups",
     aggSubGroupsSub: "weighted round-robin",
