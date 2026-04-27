@@ -165,11 +165,13 @@ const versionLabel = "v0.4";
         </nav>
 
         <main class="v3-main scroll">
-          <router-view v-slot="{ Component }">
-            <transition name="fade" mode="out-in">
-              <component :is="Component" />
-            </transition>
-          </router-view>
+          <div class="v3-main-content">
+            <router-view v-slot="{ Component }">
+              <transition name="fade" mode="out-in">
+                <component :is="Component" />
+              </transition>
+            </router-view>
+          </div>
           <app-footer />
         </main>
       </div>

@@ -70,7 +70,7 @@ function handleSubGroupSelect(groupId: number) {
 </script>
 
 <template>
-  <div>
+  <div class="v3-page-keys">
     <encryption-mismatch-alert style="margin-bottom: 16px" />
 
     <div class="v3-viewhead">
