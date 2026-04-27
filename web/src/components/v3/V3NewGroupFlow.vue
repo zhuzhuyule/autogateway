@@ -196,14 +196,46 @@ function rateTag(p: FreeProvider): string {
     .trim();
 }
 
+interface ExtraTag {
+  label: string;
+  cls: string;
+}
+
+function extraTags(p: FreeProvider): ExtraTag[] {
+  const tags: ExtraTag[] = [];
+  const cnt = FREE_MODELS.filter(m => m.providerId === p.id).length;
+  if (cnt > 0) {
+    tags.push({ label: `${cnt} 免费模型`, cls: "v3-pc__tag--count" });
+  }
+  if (p.rpm) {
+    tags.push({ label: p.rpm, cls: "v3-pc__tag--limit" });
+  }
+  if (p.rpd) {
+    tags.push({ label: p.rpd, cls: "v3-pc__tag--limit" });
+  }
+  if (p.concurrent) {
+    tags.push({ label: p.concurrent, cls: "v3-pc__tag--limit" });
+  }
+  if (p.context) {
+    tags.push({ label: p.context, cls: "v3-pc__tag--spec" });
+  }
+  if (p.highlights) {
+    for (const h of p.highlights) {
+      tags.push({ label: h, cls: "v3-pc__tag--feat" });
+    }
+  }
+  return tags;
+}
+
 function featTags(p: FreeProvider): string[] {
   if (!p.description) {
     return [];
   }
+  const seen = new Set(extraTags(p).map(t => t.label));
   return p.description
     .split(/[,，/|·、]/)
     .map(s => s.trim())
-    .filter(Boolean);
+    .filter(s => s && !seen.has(s));
 }
 
 function badgeLabel(badge?: FreeProvider["badge"]) {
@@ -606,6 +638,12 @@ async function testAndSave() {
             </div>
             <div class="v3-pc__tags">
               <span class="v3-pc__tag v3-pc__tag--rate">★ {{ rateTag(prov) }}</span>
+              <span
+                v-for="x in extraTags(prov)"
+                :key="`x-${x.label}`"
+                class="v3-pc__tag"
+                :class="x.cls"
+              >{{ x.label }}</span>
               <span v-for="t in featTags(prov)" :key="t" class="v3-pc__tag">{{ t }}</span>
             </div>
             <div class="v3-pc__foot">
@@ -745,6 +783,27 @@ async function testAndSave() {
   color: var(--v3-ok);
   border-color: transparent;
   font-weight: 700;
+}
+.v3-pc__tag--count {
+  background: var(--v3-accent-soft);
+  color: var(--v3-accent);
+  border-color: transparent;
+  font-weight: 600;
+}
+.v3-pc__tag--limit {
+  background: var(--v3-info-soft);
+  color: var(--v3-info);
+  border-color: transparent;
+}
+.v3-pc__tag--spec {
+  background: transparent;
+  color: var(--v3-ink);
+  border-color: var(--v3-line-strong, var(--v3-line));
+  font-weight: 600;
+}
+.v3-pc__tag--feat {
+  background: transparent;
+  color: var(--v3-ink-2);
 }
 .v3-pc__foot {
   display: flex;

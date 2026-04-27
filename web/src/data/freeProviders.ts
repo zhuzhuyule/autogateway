@@ -35,6 +35,16 @@ export interface FreeProvider {
   recommendedDisplayName: string;
   upstreamHosts: string[];
   badge?: "fast" | "high-quota" | "multi-model";
+  /** 每分钟请求数,e.g. "30 RPM" */
+  rpm?: string;
+  /** 每天请求数,e.g. "1500/day" — 与 freeTier 冗余时省略 */
+  rpd?: string;
+  /** 并发数,e.g. "5 并发" */
+  concurrent?: string;
+  /** 上下文窗口,e.g. "1M", "256K" */
+  context?: string;
+  /** 其他亮点,短标签数组,e.g. ["多模态","推理增强"] */
+  highlights?: string[];
   verifiedAt: string;
 }
 
@@ -63,6 +73,8 @@ export const FREE_PROVIDERS: FreeProvider[] = [
     recommendedDisplayName: "Groq Cloud",
     upstreamHosts: ["api.groq.com"],
     badge: "fast",
+    rpm: "30 RPM",
+    context: "128K",
     verifiedAt: "2026-04",
   },
   {
@@ -80,6 +92,8 @@ export const FREE_PROVIDERS: FreeProvider[] = [
     recommendedDisplayName: "Cerebras Cloud",
     upstreamHosts: ["api.cerebras.ai"],
     badge: "fast",
+    rpm: "30 RPM",
+    context: "128K",
     verifiedAt: "2026-04",
   },
   {
@@ -107,6 +121,8 @@ export const FREE_PROVIDERS: FreeProvider[] = [
     recommendedDisplayName: "OpenRouter",
     upstreamHosts: ["openrouter.ai"],
     badge: "multi-model",
+    rpm: "20 RPM",
+    rpd: "50/day",
     verifiedAt: "2026-04",
   },
   {
@@ -173,6 +189,8 @@ export const FREE_PROVIDERS: FreeProvider[] = [
     recommendedGroupName: "mistral",
     recommendedDisplayName: "Mistral AI",
     upstreamHosts: ["api.mistral.ai"],
+    rpm: "1 RPS",
+    rpd: "500K tk/min",
     verifiedAt: "2026-04",
   },
   {
@@ -190,6 +208,9 @@ export const FREE_PROVIDERS: FreeProvider[] = [
     recommendedDisplayName: "Google Gemini",
     upstreamHosts: ["generativelanguage.googleapis.com"],
     badge: "high-quota",
+    rpm: "15 RPM",
+    rpd: "1500/day",
+    context: "1M",
     verifiedAt: "2026-04",
   },
   {
@@ -206,6 +227,8 @@ export const FREE_PROVIDERS: FreeProvider[] = [
     recommendedGroupName: "cohere",
     recommendedDisplayName: "Cohere",
     upstreamHosts: ["api.cohere.ai"],
+    rpm: "20 RPM",
+    rpd: "1K/month",
     verifiedAt: "2026-04",
   },
   {
@@ -233,6 +256,8 @@ export const FREE_PROVIDERS: FreeProvider[] = [
     recommendedDisplayName: "GitHub Models",
     upstreamHosts: ["models.inference.ai.azure.com"],
     badge: "multi-model",
+    rpm: "10 RPM",
+    rpd: "150/day",
     verifiedAt: "2026-04",
   },
   {
