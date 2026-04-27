@@ -2,9 +2,14 @@
 import { keysApi } from "@/api/keys";
 import type { Group } from "@/types/models";
 import { getGroupDisplayName } from "@/utils/display";
-import { AddOutline, LinkOutline, SearchOutline } from "@vicons/ionicons5";
+import {
+  AddOutline,
+  LinkOutline,
+  LockClosedOutline,
+  SearchOutline,
+} from "@vicons/ionicons5";
 import { NIcon } from "naive-ui";
-import { computed, ref, watch } from "vue";
+import { computed, reactive, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import AggregateGroupModal from "@/components/keys/AggregateGroupModal.vue";
 import V3NewGroupFlow from "@/components/v3/V3NewGroupFlow.vue";
@@ -85,6 +90,63 @@ function avatarClass(g: Group): string {
     if (lower.includes(key)) return `v3-pav-${key}`;
   }
   return "v3-pav-default";
+}
+
+// Favicon support for sidebar avatars (consistent with Dashboard + Group detail)
+const FAVICON_DOMAIN_MAP: Record<string, string> = {
+  groq: "groq.com",
+  cerebras: "cerebras.ai",
+  openrouter: "openrouter.ai",
+  together: "together.ai",
+  cloudflare: "cloudflare.com",
+  mistral: "mistral.ai",
+  google: "ai.google.dev",
+  cohere: "cohere.com",
+  github: "github.com",
+  anthropic: "anthropic.com",
+  "default-openai": "openai.com",
+  "default-anthropic": "anthropic.com",
+  "default-gemini": "gemini.google.com",
+};
+
+function extractHost(url?: string): string | null {
+  if (!url) return null;
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return null;
+  }
+}
+
+function faviconFor(g: Group): string {
+  const role = (g.system_role || "").trim();
+  if (role && FAVICON_DOMAIN_MAP[role]) {
+    return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(FAVICON_DOMAIN_MAP[role])}&sz=64`;
+  }
+  const lower = g.name.toLowerCase();
+  for (const k of Object.keys(FAVICON_DOMAIN_MAP)) {
+    if (lower.includes(k)) {
+      return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(FAVICON_DOMAIN_MAP[k])}&sz=64`;
+    }
+  }
+  const host = extractHost(g.upstreams?.[0]?.url);
+  if (host) {
+    return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(host)}&sz=64`;
+  }
+  return "";
+}
+
+const faviconErr = reactive<Record<string, boolean>>({});
+function onFaviconErr(g: Group) {
+  if (g.id != null) faviconErr[String(g.id)] = true;
+}
+function isFaviconBroken(g: Group): boolean {
+  return g.id != null && faviconErr[String(g.id)] === true;
+}
+
+function subTextFor(g: Group): string {
+  if (g.group_type === "aggregate") return t("v3.aggregate") || "aggregate";
+  return g.channel_type;
 }
 
 function handleCreated(g: Group) {
@@ -205,7 +267,7 @@ function onDragEnd() {
 
     <div class="v3-gl__body scroll">
       <template v-if="sysGroups.length">
-        <div class="v3-gl__sect">System aggregates</div>
+        <div class="v3-gl__sect">{{ t("v5.sidebarSysSect") }}</div>
         <div
           v-for="g in sysGroups"
           :key="g.id"
@@ -213,24 +275,35 @@ function onDragEnd() {
           :class="{ 'v3-gl__row--active': selectedGroup?.id === g.id }"
           @click="emit('select', g)"
         >
-          <span
-            class="v3-pav"
-            :class="avatarClass(g)"
-            style="width: 28px; height: 28px; border-radius: 6px; font-size: 10px"
-          >
-            {{ shortFor(g) }}
+          <span class="v5-picon" style="width: 28px; height: 28px">
+            <img
+              v-if="faviconFor(g) && !isFaviconBroken(g)"
+              :src="faviconFor(g)"
+              alt=""
+              draggable="false"
+              @error="onFaviconErr(g)"
+            />
+            <span
+              v-else
+              :class="['v3-pav', avatarClass(g)]"
+              style="width: 100%; height: 100%; border-radius: 0; font-size: 10px"
+            >
+              {{ shortFor(g) }}
+            </span>
           </span>
           <div style="min-width: 0">
             <div class="v3-gl__row-name">{{ getGroupDisplayName(g) }}</div>
-            <div class="v3-gl__row-sub">{{ g.channel_type }} · {{ g.name }}</div>
+            <div class="v3-gl__row-sub">{{ subTextFor(g) }}</div>
           </div>
-          <span class="v3-chip v3-chip--ok" style="font-size: 9px; padding: 1px 5px">
-            sys
-          </span>
+          <n-icon
+            :component="LockClosedOutline"
+            :size="12"
+            style="color: var(--v3-ink-3)"
+          />
         </div>
       </template>
 
-      <div class="v3-gl__sect">Custom groups</div>
+      <div class="v3-gl__sect">{{ t("v5.sidebarCustomSect") }}</div>
       <div
         v-for="g in userGroups"
         :key="g.id"
@@ -251,21 +324,29 @@ function onDragEnd() {
         @drop="onDrop($event, g)"
         @dragend="onDragEnd"
       >
-        <span
-          class="v3-pav"
-          :class="avatarClass(g)"
-          style="width: 28px; height: 28px; border-radius: 6px; font-size: 10px"
-        >
-          {{ shortFor(g) }}
+        <span class="v5-picon" style="width: 28px; height: 28px">
+          <img
+            v-if="faviconFor(g) && !isFaviconBroken(g)"
+            :src="faviconFor(g)"
+            alt=""
+            draggable="false"
+            @error="onFaviconErr(g)"
+          />
+          <span
+            v-else
+            :class="['v3-pav', avatarClass(g)]"
+            style="width: 100%; height: 100%; border-radius: 0; font-size: 10px"
+          >
+            {{ shortFor(g) }}
+          </span>
         </span>
         <div style="min-width: 0">
           <div class="v3-gl__row-name">{{ getGroupDisplayName(g) }}</div>
-          <div class="v3-gl__row-sub">
-            {{ g.group_type === "aggregate" ? "aggregate" : g.channel_type }} ·
-            {{ g.name }}
-          </div>
+          <div class="v3-gl__row-sub">{{ subTextFor(g) }}</div>
         </div>
-        <span class="v3-gl__row-count tnum">{{ g.key_count ?? "" }}</span>
+        <span v-if="g.key_count != null" class="v3-gl__row-count tnum">
+          {{ g.key_count }}
+        </span>
       </div>
       <div
         v-if="!userGroups.length && !loading"

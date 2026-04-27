@@ -51,21 +51,41 @@ function inferTools(id: string): boolean {
     return false;
   }
   // most modern instruct/chat models support tools
-  if (lower.includes("base") || lower.includes("raw")) return false;
+  if (lower.includes("base") || lower.includes("raw")) {
+    return false;
+  }
   return true;
 }
 
 function inferContext(id: string): string | null {
   const lower = id.toLowerCase();
-  if (lower.includes("2m") || lower.includes("2-million")) return "2m";
-  if (lower.includes("1m") || lower.includes("gemini") || lower.includes("flash")) return "1m";
-  if (lower.includes("200k") || lower.includes("claude")) return "200k";
-  if (lower.includes("164k") || lower.includes("deepseek")) return "164k";
-  if (lower.includes("131k") || lower.includes("llama-3")) return "131k";
-  if (lower.includes("128k") || lower.includes("4o") || lower.includes("command-r")) return "128k";
-  if (lower.includes("32k") || lower.includes("mistral-small") || lower.includes("codestral")) return "32k";
-  if (lower.includes("16k")) return "16k";
-  if (lower.includes("8k")) return "8k";
+  if (lower.includes("2m") || lower.includes("2-million")) {
+    return "2m";
+  }
+  if (lower.includes("1m") || lower.includes("gemini") || lower.includes("flash")) {
+    return "1m";
+  }
+  if (lower.includes("200k") || lower.includes("claude")) {
+    return "200k";
+  }
+  if (lower.includes("164k") || lower.includes("deepseek")) {
+    return "164k";
+  }
+  if (lower.includes("131k") || lower.includes("llama-3")) {
+    return "131k";
+  }
+  if (lower.includes("128k") || lower.includes("4o") || lower.includes("command-r")) {
+    return "128k";
+  }
+  if (lower.includes("32k") || lower.includes("mistral-small") || lower.includes("codestral")) {
+    return "32k";
+  }
+  if (lower.includes("16k")) {
+    return "16k";
+  }
+  if (lower.includes("8k")) {
+    return "8k";
+  }
   return null;
 }
 

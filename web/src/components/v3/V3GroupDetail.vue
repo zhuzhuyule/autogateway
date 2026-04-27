@@ -1,15 +1,18 @@
 <script setup lang="ts">
 import { keysApi } from "@/api/keys";
+import { aliasesApi, type ModelAliasRow } from "@/api/aliases";
 import KeyCreateDialog from "@/components/keys/KeyCreateDialog.vue";
 import KeyDeleteDialog from "@/components/keys/KeyDeleteDialog.vue";
 import GroupCopyModal from "@/components/keys/GroupCopyModal.vue";
 import GroupFormModal from "@/components/keys/GroupFormModal.vue";
-import { findProviderByUpstreams } from "@/data/freeProviders";
+import ModelAliasModal from "@/components/keys/ModelAliasModal.vue";
+import { findProviderByUpstreams, findFreeModel } from "@/data/freeProviders";
 import type {
   APIKey,
   Group,
   GroupStatsResponse,
   KeyStatus,
+  SubGroupInfo,
 } from "@/types/models";
 import { appState, triggerSyncOperationRefresh } from "@/utils/app-state";
 import { copy as copyToClipboard } from "@/utils/clipboard";
@@ -19,62 +22,134 @@ import {
   CheckmarkCircle,
   CloseOutline,
   CopyOutline,
-  EyeOffOutline,
-  EyeOutline,
+  CubeOutline,
+  DownloadOutline,
+  HelpCircleOutline,
+  KeyOutline,
+  LinkOutline,
   LockClosedOutline,
   OpenOutline,
   PencilOutline,
   RefreshOutline,
   RemoveCircleOutline,
   SearchOutline,
+  SettingsOutline,
   Trash,
 } from "@vicons/ionicons5";
-import { NIcon, NPagination, NSpin, useDialog, useMessage } from "naive-ui";
+import { NIcon, NPagination, NSpin, NTooltip, useDialog, useMessage } from "naive-ui";
 import { computed, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
+import { useRouter } from "vue-router";
 
 const { t } = useI18n();
 
 interface Props {
   group: Group;
+  allGroups?: Group[];
 }
 
 interface Emits {
   (e: "refresh"): void;
+  (e: "select-group", id: number): void;
 }
 
-const props = defineProps<Props>();
+const props = withDefaults(defineProps<Props>(), { allGroups: () => [] });
 const emit = defineEmits<Emits>();
+
+const isAggregate = computed(() => props.group?.group_type === "aggregate");
 
 const message = useMessage();
 const dialog = useDialog();
+const router = useRouter();
 
 const stats = ref<GroupStatsResponse | null>(null);
 const statsLoading = ref(false);
 
-interface KeyRow extends APIKey {
-  is_visible: boolean;
-}
+type KeyRow = APIKey;
 
 const keys = ref<KeyRow[]>([]);
 const keysLoading = ref(false);
 const search = ref("");
 const statusFilter = ref<"all" | "active" | "invalid">("all");
 const page = ref(1);
-const pageSize = ref(15);
+const pageSize = ref(24);
 const total = ref(0);
 const totalPages = ref(0);
 const showAddKey = ref(false);
 const showDeleteKey = ref(false);
 const showEditGroup = ref(false);
 const showCopyGroup = ref(false);
+const showAliasModal = ref(false);
+const aliasModalModel = ref<string>("");
+const tab = ref<"keys" | "models" | "settings">("keys");
+const faviconFailed = ref(false);
+
+// Aggregate-specific
+const subGroups = ref<SubGroupInfo[]>([]);
+const subGroupsLoading = ref(false);
+
+// Per-key UI state
+const testingKeyId = ref<number | null>(null);
+const confirmingDeleteId = ref<number | null>(null);
+let confirmDeleteTimer: number | undefined;
+
+// Aliases (loaded once for the Models tab)
+const aliases = ref<ModelAliasRow[]>([]);
+async function loadAliases() {
+  try {
+    const res = await aliasesApi.list();
+    aliases.value = (res.data as unknown as ModelAliasRow[]) || [];
+  } catch (e) {
+    console.error("load aliases failed", e);
+    aliases.value = [];
+  }
+}
+
+function aliasesFor(modelId: string): ModelAliasRow[] {
+  if (!props.group?.id) return [];
+  return aliases.value
+    .filter(a => a.group_id === props.group.id && a.real_model === modelId && a.enabled)
+    .sort((a, b) => b.weight - a.weight);
+}
+
+function goToAliases(aliasName?: string) {
+  router.push({ name: "aliases", query: aliasName ? { alias: aliasName } : undefined });
+}
+
+function addAliasFor(modelId: string) {
+  aliasModalModel.value = modelId;
+  showAliasModal.value = true;
+}
+
+function onAliasCreated() {
+  showAliasModal.value = false;
+  loadAliases();
+}
+
+async function loadSubGroups() {
+  if (!isAggregate.value || !props.group?.id) {
+    subGroups.value = [];
+    return;
+  }
+  subGroupsLoading.value = true;
+  try {
+    subGroups.value = await keysApi.getSubGroups(props.group.id);
+  } catch (e) {
+    console.error("load sub-groups failed", e);
+    subGroups.value = [];
+  } finally {
+    subGroupsLoading.value = false;
+  }
+}
 
 const matchedProvider = computed(() =>
   findProviderByUpstreams(props.group?.upstreams || [])
 );
 
 const proxyUrl = computed(() => {
-  if (!props.group) return "";
+  if (!props.group) {
+    return "";
+  }
   const channel = props.group.channel_type;
   const path =
     channel === "anthropic"
@@ -86,6 +161,42 @@ const proxyUrl = computed(() => {
     return `/proxy${path}`;
   }
   return `/proxy/${props.group.name}${path}`;
+});
+
+// Short SDK base_url shown in the hero — drops channel-specific suffix
+// (e.g. /chat/completions). Matches v5 banner pattern.
+const sdkBaseUrl = computed(() => {
+  if (!props.group) return "";
+  const ch = props.group.channel_type;
+  const apiRoot = ch === "gemini" ? "v1beta" : "v1";
+  const host = `${window.location.protocol}//${window.location.host}`;
+  if (props.group.is_system) {
+    return `${host}/proxy/${ch}/${apiRoot}`;
+  }
+  return `${host}/proxy/${props.group.name}/${apiRoot}`;
+});
+
+const friendlyHint = computed(() => {
+  const ch = props.group?.channel_type;
+  if (isAggregate.value) {
+    if (props.group?.is_system) {
+      if (ch === "anthropic") {
+        return t("v5.hintSystemAnthropic");
+      }
+      if (ch === "gemini") {
+        return t("v5.hintSystemGemini");
+      }
+      return t("v5.hintSystemOpenAI");
+    }
+    return t("v5.hintAggregate");
+  }
+  if (ch === "anthropic") {
+    return t("v5.hintAnthropic");
+  }
+  if (ch === "gemini") {
+    return t("v5.hintGemini");
+  }
+  return t("v5.hintOpenAI");
 });
 
 const groupAvatarShort = computed(() => {
@@ -118,6 +229,58 @@ const groupAvatarClass = computed(() => {
   return "v3-pav-default";
 });
 
+const FAVICON_DOMAIN_MAP: Record<string, string> = {
+  groq: "groq.com",
+  cerebras: "cerebras.ai",
+  openrouter: "openrouter.ai",
+  together: "together.ai",
+  cloudflare: "cloudflare.com",
+  mistral: "mistral.ai",
+  google: "ai.google.dev",
+  cohere: "cohere.com",
+  github: "github.com",
+  anthropic: "anthropic.com",
+  "default-openai": "openai.com",
+  "default-anthropic": "anthropic.com",
+  "default-gemini": "gemini.google.com",
+};
+
+function extractHost(url?: string): string | null {
+  if (!url) return null;
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return null;
+  }
+}
+
+const faviconUrl = computed(() => {
+  const g = props.group;
+  if (!g) return "";
+  const role = (g.system_role || "").trim();
+  if (role && FAVICON_DOMAIN_MAP[role]) {
+    return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(FAVICON_DOMAIN_MAP[role])}&sz=64`;
+  }
+  const lower = g.name.toLowerCase();
+  for (const k of Object.keys(FAVICON_DOMAIN_MAP)) {
+    if (lower.includes(k)) {
+      return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(FAVICON_DOMAIN_MAP[k])}&sz=64`;
+    }
+  }
+  const host = extractHost(g.upstreams?.[0]?.url);
+  if (host) {
+    return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(host)}&sz=64`;
+  }
+  return "";
+});
+
+watch(
+  () => props.group?.id,
+  () => {
+    faviconFailed.value = false;
+  }
+);
+
 async function loadStats() {
   if (!props.group?.id) {
     stats.value = null;
@@ -147,10 +310,7 @@ async function loadKeys() {
       status: statusFilter.value === "all" ? undefined : (statusFilter.value as KeyStatus),
       key_value: search.value.trim() || undefined,
     });
-    keys.value = (res.items || []).map(k => ({
-      ...k,
-      is_visible: false,
-    })) as KeyRow[];
+    keys.value = (res.items || []) as KeyRow[];
     total.value = res.pagination.total_items;
     totalPages.value = res.pagination.total_pages;
   } finally {
@@ -164,8 +324,19 @@ watch(
     page.value = 1;
     statusFilter.value = "all";
     search.value = "";
+    tab.value = "keys";
+    confirmingDeleteId.value = null;
     loadStats();
-    loadKeys();
+    loadAliases();
+    if (isAggregate.value) {
+      keys.value = [];
+      total.value = 0;
+      totalPages.value = 0;
+      loadSubGroups();
+    } else {
+      subGroups.value = [];
+      loadKeys();
+    }
   },
   { immediate: true }
 );
@@ -197,7 +368,113 @@ function onSearchInput() {
 function refreshAll() {
   loadStats();
   loadKeys();
+  message.success(t("common.refresh") || "Refreshed");
 }
+
+// === Models tab ===
+function parseAvailableModels(raw: unknown): string[] {
+  if (Array.isArray(raw)) {
+    return raw.filter((m): m is string => typeof m === "string");
+  }
+  if (typeof raw === "string" && raw.trim().length > 0) {
+    try {
+      const arr = JSON.parse(raw);
+      return Array.isArray(arr)
+        ? arr.filter((m): m is string => typeof m === "string")
+        : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
+const groupModels = computed<string[]>(() => {
+  if (isAggregate.value) {
+    // Union of sub-groups' available_models
+    const set = new Set<string>();
+    for (const sg of subGroups.value) {
+      const raw = (sg.group as unknown as { available_models?: unknown })?.available_models;
+      for (const m of parseAvailableModels(raw)) set.add(m);
+    }
+    return Array.from(set).sort();
+  }
+  const raw = (props.group as unknown as { available_models?: unknown })?.available_models;
+  return parseAvailableModels(raw);
+});
+
+// Aggregate-only stats
+const aggKeyTotal = computed(() =>
+  subGroups.value.reduce((s: number, sg: SubGroupInfo) => s + (sg.active_keys || 0), 0)
+);
+const aggKeyInvalid = computed(() =>
+  subGroups.value.reduce((s: number, sg: SubGroupInfo) => s + (sg.invalid_keys || 0), 0)
+);
+
+// Notification when sub-group operations succeed inside V3SubGroupTable
+function onSubGroupRefresh() {
+  loadStats();
+  loadSubGroups();
+}
+
+function onSubGroupSelect(id: number) {
+  emit("select-group", id);
+}
+
+const modelsRefreshedAtDisplay = computed(() => {
+  const at = (props.group as unknown as { models_refreshed_at?: string | null })?.models_refreshed_at;
+  if (!at) return "";
+  try {
+    return new Date(at).toLocaleString();
+  } catch {
+    return at;
+  }
+});
+
+function tierForModel(modelId: string): "fast" | "balanced" | "max" {
+  const id = modelId.toLowerCase();
+  if (
+    id.includes("flash") ||
+    id.includes("haiku") ||
+    id.includes("8b") ||
+    id.includes("instant") ||
+    id.includes("mini") ||
+    id.includes("small")
+  ) {
+    return "fast";
+  }
+  if (
+    id.includes("pro") ||
+    id.includes("opus") ||
+    id.includes("sonnet") ||
+    id.includes("70b") ||
+    id.includes("405b") ||
+    id.includes("4o") ||
+    id.includes("o1") ||
+    id.includes("r1")
+  ) {
+    return "max";
+  }
+  return "balanced";
+}
+
+function tierChipClass(tier: "fast" | "balanced" | "max"): string {
+  if (tier === "fast") return "v3-chip v3-chip--ok";
+  if (tier === "max") return "v3-chip v3-chip--info";
+  return "v3-chip v3-chip--warn";
+}
+
+function tierLabel(tier: "fast" | "balanced" | "max"): string {
+  if (tier === "fast") return t("v3.fast") || "fast";
+  if (tier === "max") return t("v3.max") || "max";
+  return t("v3.balanced") || "balanced";
+}
+
+function isFreeModel(modelId: string): boolean {
+  return !!findFreeModel(modelId);
+}
+
+const modelCount = computed(() => groupModels.value.length);
 
 // inline notes editing
 const editingNoteId = ref<number | null>(null);
@@ -222,7 +499,6 @@ async function saveNotes(k: KeyRow) {
   }
   savingNotesId.value = k.id;
   const previous = k.notes;
-  // optimistic update
   k.notes = trimmed;
   try {
     await keysApi.updateKeyNotes(k.id, trimmed);
@@ -243,34 +519,13 @@ async function copyText(value: string, msg = "Copied") {
   else message.error("Copy failed");
 }
 
-function toggleVisible(k: KeyRow) {
-  k.is_visible = !k.is_visible;
-}
-
-function displayKey(k: KeyRow): string {
-  return k.is_visible ? k.key_value : maskKey(k.key_value);
-}
-
-function statusChipClass(s: KeyStatus): string {
-  if (s === "active") return "v3-chip v3-chip--ok";
-  if (s === "invalid") return "v3-chip v3-chip--danger";
-  return "v3-chip";
-}
-
-function statusLabel(s: KeyStatus): string {
-  if (s === "active") return t("keys.valid") || "Valid";
-  if (s === "invalid") return t("keys.invalid") || "Invalid";
-  return "—";
-}
-
 async function copyKey(k: KeyRow) {
   await copyText(k.key_value, t("keys.keyCopied") || "Key copied");
 }
 
-let testingMsg: ReturnType<typeof message.info> | null = null;
 async function testKey(k: KeyRow) {
-  if (!props.group?.id || !k.key_value || testingMsg) return;
-  testingMsg = message.info(t("keys.testingKey") || "Testing key…", { duration: 0 });
+  if (!props.group?.id || !k.key_value || testingKeyId.value === k.id) return;
+  testingKeyId.value = k.id;
   try {
     const r = await keysApi.testKeys(props.group.id, k.key_value);
     const cur = r.results?.[0];
@@ -282,31 +537,39 @@ async function testKey(k: KeyRow) {
     refreshAll();
     triggerSyncOperationRefresh(props.group.name, "TEST_SINGLE");
   } finally {
-    testingMsg?.destroy();
-    testingMsg = null;
+    testingKeyId.value = null;
   }
 }
 
+// Inline 2-step delete: first click arms; second click within 3s deletes.
 function deleteKey(k: KeyRow) {
+  if (!props.group?.id) return;
+  if (confirmingDeleteId.value !== k.id) {
+    confirmingDeleteId.value = k.id;
+    if (confirmDeleteTimer) clearTimeout(confirmDeleteTimer);
+    confirmDeleteTimer = window.setTimeout(() => {
+      if (confirmingDeleteId.value === k.id) {
+        confirmingDeleteId.value = null;
+      }
+    }, 3000);
+    return;
+  }
+  if (confirmDeleteTimer) clearTimeout(confirmDeleteTimer);
+  confirmingDeleteId.value = null;
+  doDeleteKey(k);
+}
+
+async function doDeleteKey(k: KeyRow) {
   if (!props.group?.id) return;
   const groupId = props.group.id;
   const groupName = props.group.name;
-  const d = dialog.warning({
-    title: t("keys.deleteKey") || "Delete key",
-    content: t("keys.confirmDeleteKey", { key: maskKey(k.key_value) }),
-    positiveText: t("common.confirm"),
-    negativeText: t("common.cancel"),
-    onPositiveClick: async () => {
-      d.loading = true;
-      try {
-        await keysApi.deleteKeys(groupId, k.key_value);
-        refreshAll();
-        triggerSyncOperationRefresh(groupName, "DELETE_SINGLE");
-      } finally {
-        d.loading = false;
-      }
-    },
-  });
+  try {
+    await keysApi.deleteKeys(groupId, k.key_value);
+    refreshAll();
+    triggerSyncOperationRefresh(groupName, "DELETE_SINGLE");
+  } catch (e) {
+    console.error("delete key failed", e);
+  }
 }
 
 function restoreKey(k: KeyRow) {
@@ -395,7 +658,7 @@ function fmtFailRate(failed?: number, total?: number): string {
 }
 
 function formatRelative(date?: string): string {
-  if (!date) return t("keys.never") || "never";
+  if (!date) return t("keys.never") || "—";
   const diffSec = Math.floor((Date.now() - new Date(date).getTime()) / 1000);
   if (diffSec < 60) return `${diffSec}s ago`;
   if (diffSec < 3600) return `${Math.floor(diffSec / 60)}m ago`;
@@ -428,357 +691,696 @@ function onGroupCopied() {
   showCopyGroup.value = false;
   emit("refresh");
 }
+
+const filterCounts = computed(() => ({
+  all: stats.value?.key_stats.total_keys ?? 0,
+  valid: stats.value?.key_stats.active_keys ?? 0,
+  invalid: stats.value?.key_stats.invalid_keys ?? 0,
+}));
 </script>
 
 <template>
-  <section class="v3-gd">
-    <!-- Header -->
-    <div class="v3-gd__head">
-      <span
-        class="v3-pav"
-        :class="groupAvatarClass"
-        style="width: 36px; height: 36px; border-radius: 7px; font-size: 12px"
-      >
-        {{ groupAvatarShort }}
-      </span>
-      <div style="flex: 1; min-width: 0">
-        <div class="v3-gd__title">
-          {{ getGroupDisplayName(group) }}
-          <n-icon v-if="group.is_system" :component="LockClosedOutline" :size="12" />
-        </div>
-        <div class="v3-gd__path">
-          <span class="v3-chip v3-chip--info">{{ group.channel_type }}</span>
-          <code>POST {{ proxyUrl }}</code>
-          <button
-            class="v3-btn v3-btn--ghost v3-btn--sm"
-            @click="copyText(proxyUrl, 'Endpoint copied')"
-          >
-            <n-icon :component="CopyOutline" :size="11" />
-          </button>
-        </div>
-      </div>
-      <a
-        v-if="matchedProvider?.signupUrl"
-        :href="matchedProvider.signupUrl"
-        target="_blank"
-        rel="noopener"
-        class="v3-btn"
-      >
-        <n-icon :component="OpenOutline" :size="12" />
-        {{ t("keys.getMoreKeys") || "Get more keys" }}
-      </a>
-      <button v-if="!group.is_system" class="v3-btn" @click="showEditGroup = true">
-        <n-icon :component="PencilOutline" :size="12" /> {{ t("common.edit") || "Edit" }}
-      </button>
-      <button class="v3-btn" @click="showCopyGroup = true">
-        <n-icon :component="CopyOutline" :size="12" /> {{ t("keys.copyGroup") || "Copy" }}
-      </button>
-      <button v-if="!group.is_system" class="v3-btn v3-btn--danger" @click="deleteGroup">
-        <n-icon :component="Trash" :size="12" />
-      </button>
-    </div>
-
-    <!-- Stats -->
-    <div class="v3-kvg">
-      <div>
-        <div class="v3-kvg__lbl">Keys</div>
-        <div class="v3-kvg__val tnum">
-          {{ (stats?.key_stats.total_keys ?? 0).toLocaleString() }}
-        </div>
-        <div class="v3-kvg__sub">
-          {{ stats?.key_stats.active_keys ?? 0 }} valid ·
-          {{ stats?.key_stats.invalid_keys ?? 0 }} invalid
-        </div>
-      </div>
-      <div>
-        <div class="v3-kvg__lbl">24h req</div>
-        <div class="v3-kvg__val tnum">
-          {{ (stats?.stats_24_hour.total_requests ?? 0).toLocaleString() }}
-        </div>
-        <div
-          class="v3-kvg__sub"
-          :style="{
-            color: stats?.stats_24_hour.failed_requests
-              ? 'var(--v3-danger)'
-              : undefined,
-          }"
-        >
-          {{ stats?.stats_24_hour.failed_requests ?? 0 }} fail ·
-          {{
-            fmtFailRate(
-              stats?.stats_24_hour.failed_requests,
-              stats?.stats_24_hour.total_requests
-            )
-          }}
-        </div>
-      </div>
-      <div>
-        <div class="v3-kvg__lbl">7d req</div>
-        <div class="v3-kvg__val tnum">
-          {{ (stats?.stats_7_day.total_requests ?? 0).toLocaleString() }}
-        </div>
-        <div class="v3-kvg__sub">
-          {{ stats?.stats_7_day.failed_requests ?? 0 }} fail
-        </div>
-      </div>
-      <div>
-        <div class="v3-kvg__lbl">30d req</div>
-        <div class="v3-kvg__val tnum">
-          {{ (stats?.stats_30_day.total_requests ?? 0).toLocaleString() }}
-        </div>
-        <div class="v3-kvg__sub">
-          {{ stats?.stats_30_day.failed_requests ?? 0 }} fail
-        </div>
-      </div>
-    </div>
-
-    <!-- Toolbar -->
-    <div class="v3-gd__toolbar">
-      <button class="v3-btn v3-btn--accent" @click="showAddKey = true">
-        <n-icon :component="AddOutline" :size="12" />
-        {{ t("keys.addKey") || "Add key" }}
-      </button>
-      <button class="v3-btn" @click="validateAll('all')">
-        <n-icon :component="CheckmarkCircle" :size="12" />
-        {{ t("keys.validateAllKeys") || "Test all" }}
-      </button>
-      <button class="v3-btn" @click="validateAll('invalid')">
-        <n-icon :component="RefreshOutline" :size="12" />
-        {{ t("keys.validateInvalidKeys") || "Recheck invalid" }}
-      </button>
-      <button class="v3-btn v3-btn--danger" @click="clearInvalid">
-        <n-icon :component="Trash" :size="12" />
-        {{ t("keys.clearAllInvalidKeys") || "Clear invalid" }}
-      </button>
-      <button class="v3-btn" @click="showDeleteKey = true">
-        <n-icon :component="RemoveCircleOutline" :size="12" />
-        {{ t("keys.batchDelete") || "Batch delete" }}
-      </button>
-      <button class="v3-btn" @click="exportKeys('all')">
-        <n-icon :component="OpenOutline" :size="12" />
-        {{ t("keys.exportAllKeys") || "Export all" }}
-      </button>
-      <div class="v3-spacer">
-        <select
-          v-model="statusFilter"
-          class="v3-btn v3-btn--sm"
-          style="padding-right: 24px"
-        >
-          <option value="all">{{ t("common.all") || "All" }}</option>
-          <option value="active">{{ t("keys.valid") || "Valid only" }}</option>
-          <option value="invalid">{{ t("keys.invalid") || "Invalid only" }}</option>
-        </select>
-        <div class="v3-search">
-          <n-icon :component="SearchOutline" :size="12" />
-          <input
-            v-model="search"
-            :placeholder="t('keys.searchKeyPlaceholder') || 'Filter keys…'"
-            @input="onSearchInput"
+  <section class="v5-detail">
+    <!-- ===== HERO ===== -->
+    <div class="v5-hero">
+      <div class="v5-hero__top">
+        <!-- Avatar (favicon w/ fallback letter avatar) -->
+        <div class="v5-hero__avatar v5-picon" style="width: 52px; height: 52px">
+          <img
+            v-if="faviconUrl && !faviconFailed"
+            :src="faviconUrl"
+            alt=""
+            draggable="false"
+            @error="faviconFailed = true"
           />
+          <span v-else :class="['v3-pav', groupAvatarClass]" style="
+            width: 100%; height: 100%; border-radius: 0;
+            font-size: 14px;
+          ">
+            {{ groupAvatarShort }}
+          </span>
+        </div>
+
+        <div class="v5-hero__main">
+          <div class="v5-hero__title">
+            {{ getGroupDisplayName(group) }}
+            <n-icon v-if="group.is_system" :component="LockClosedOutline" :size="13" />
+            <span v-if="isAggregate" class="v3-chip v3-chip--info" style="font-size: 11px">
+              {{ t("v5.aggregateChip") }}
+            </span>
+            <n-tooltip v-if="friendlyHint" :style="{ maxWidth: '280px' }">
+              <template #trigger>
+                <span class="v5-helpicon" tabindex="0">
+                  <n-icon :component="HelpCircleOutline" :size="12" />
+                </span>
+              </template>
+              {{ friendlyHint }}
+            </n-tooltip>
+          </div>
+          <div class="v5-hero__path">
+            <code>{{ sdkBaseUrl }}</code>
+            <button
+              class="v5-hero__copy"
+              @click="copyText(sdkBaseUrl, t('keys.endpointCopied') || 'Endpoint copied')"
+            >
+              <n-icon :component="CopyOutline" :size="11" />
+              {{ t("v5.copyUrl") }}
+            </button>
+          </div>
+        </div>
+
+        <!-- Actions -->
+        <div class="v5-hero__actions">
+          <a
+            v-if="!isAggregate && matchedProvider?.signupUrl"
+            :href="matchedProvider.signupUrl"
+            target="_blank"
+            rel="noopener"
+            class="v5-hero__btn v5-hero__btn--accent"
+          >
+            <n-icon :component="KeyOutline" :size="13" />
+            {{ t("v3.getMoreKeys") || "Get API key" }} →
+          </a>
+          <a
+            v-if="!isAggregate && matchedProvider?.docsUrl"
+            :href="matchedProvider.docsUrl"
+            target="_blank"
+            rel="noopener"
+            class="v5-hero__btn"
+          >
+            <n-icon :component="OpenOutline" :size="12" />
+            {{ t("v3.docs") || "Docs" }}
+          </a>
+          <n-tooltip v-if="!group.is_system">
+            <template #trigger>
+              <button
+                class="v5-hero__btn v5-hero__btn--icon"
+                @click="showEditGroup = true"
+              >
+                <n-icon :component="PencilOutline" :size="13" />
+              </button>
+            </template>
+            {{ t("common.edit") || "Edit" }}
+          </n-tooltip>
+          <n-tooltip v-if="!isAggregate">
+            <template #trigger>
+              <button
+                class="v5-hero__btn v5-hero__btn--icon"
+                @click="showCopyGroup = true"
+              >
+                <n-icon :component="CopyOutline" :size="13" />
+              </button>
+            </template>
+            {{ t("keys.copyGroup") || "Copy group" }}
+          </n-tooltip>
+          <n-tooltip v-if="!group.is_system">
+            <template #trigger>
+              <button
+                class="v5-hero__btn v5-hero__btn--icon v5-hero__btn--danger"
+                @click="deleteGroup"
+              >
+                <n-icon :component="Trash" :size="13" />
+              </button>
+            </template>
+            {{ t("keys.deleteGroup") || "Delete group" }}
+          </n-tooltip>
+        </div>
+      </div>
+
+      <!-- Big stats row -->
+      <div class="v5-hero__stats">
+        <!-- Aggregate: Sub-groups / Active keys (sum) / 24h / 7d -->
+        <template v-if="isAggregate">
+          <div>
+            <div class="v5-hero__stat-l">{{ t("v5.aggSubGroups") }}</div>
+            <div class="v5-hero__stat-v">{{ subGroups.length }}</div>
+            <div class="v5-hero__stat-s">{{ t("v5.aggSubGroupsSub") }}</div>
+          </div>
+          <div>
+            <div class="v5-hero__stat-l">{{ t("v5.aggActiveKeys") }}</div>
+            <div class="v5-hero__stat-v">{{ aggKeyTotal.toLocaleString() }}</div>
+            <div class="v5-hero__stat-s">
+              <template v-if="aggKeyInvalid">
+                {{ aggKeyInvalid }} {{ t("keys.invalid") || "invalid" }}
+              </template>
+              <template v-else>
+                {{ t("v5.aggActiveKeysSub") }}
+              </template>
+            </div>
+          </div>
+        </template>
+        <!-- Standard: Keys / Models -->
+        <template v-else>
+          <div>
+            <div class="v5-hero__stat-l">{{ t("v3.keys") || "Keys" }}</div>
+            <div class="v5-hero__stat-v">
+              {{ (stats?.key_stats.total_keys ?? 0).toLocaleString() }}
+            </div>
+            <div class="v5-hero__stat-s">
+              {{ stats?.key_stats.active_keys ?? 0 }} {{ t("keys.valid") || "valid" }} ·
+              {{ stats?.key_stats.invalid_keys ?? 0 }} {{ t("keys.invalid") || "invalid" }}
+            </div>
+          </div>
+          <div>
+            <div class="v5-hero__stat-l">{{ t("v5.models") }}</div>
+            <div class="v5-hero__stat-v">{{ modelCount }}</div>
+            <div class="v5-hero__stat-s">{{ t("v5.modelsAvailable") }}</div>
+          </div>
+        </template>
+
+        <!-- Common: 24h + 7d -->
+        <div>
+          <div class="v5-hero__stat-l">{{ t("v3.req24h") }}</div>
+          <div class="v5-hero__stat-v">
+            {{ (stats?.stats_24_hour.total_requests ?? 0).toLocaleString() }}
+          </div>
+          <div
+            class="v5-hero__stat-s"
+            :style="{
+              color: stats?.stats_24_hour.failed_requests ? 'var(--v3-danger)' : undefined,
+            }"
+          >
+            {{
+              fmtFailRate(stats?.stats_24_hour.failed_requests, stats?.stats_24_hour.total_requests)
+            }}
+            {{ t("v5.errorRate") }}
+          </div>
+        </div>
+        <div>
+          <div class="v5-hero__stat-l">{{ t("v5.requests7d") }}</div>
+          <div class="v5-hero__stat-v">
+            {{ (stats?.stats_7_day.total_requests ?? 0).toLocaleString() }}
+          </div>
+          <div class="v5-hero__stat-s">
+            {{ stats?.stats_7_day.failed_requests ?? 0 }} {{ t("v3.failures") || "failures" }}
+          </div>
         </div>
       </div>
     </div>
 
-    <!-- Key table -->
-    <n-spin :show="keysLoading">
-      <div style="overflow: auto">
-        <table class="v3-ktable">
-          <thead>
-            <tr>
-              <th>Key</th>
-              <th>Status</th>
-              <th>24h req</th>
-              <th>Failures</th>
-              <th>Last used</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="k in keys" :key="k.id">
-              <td>
-                <span class="v3-k-mask">
-                  {{ displayKey(k) }}
-                  <button
-                    class="v3-btn v3-btn--ghost v3-btn--icon"
-                    :title="k.is_visible ? 'Hide' : 'Show'"
-                    @click="toggleVisible(k)"
-                  >
-                    <n-icon
-                      :component="k.is_visible ? EyeOffOutline : EyeOutline"
-                      :size="12"
-                    />
-                  </button>
-                  <button
-                    class="v3-btn v3-btn--ghost v3-btn--icon"
-                    title="Copy"
-                    @click="copyKey(k)"
-                  >
-                    <n-icon :component="CopyOutline" :size="12" />
-                  </button>
-                </span>
-                <div
-                  v-if="editingNoteId === k.id"
-                  style="margin-top: 6px; display: flex; gap: 6px; align-items: center"
-                >
+    <!-- ===== TABS ===== -->
+    <div class="v5-tabs">
+      <button :class="['v5-tab', tab === 'keys' ? 'v5-tab--active' : '']" @click="tab = 'keys'">
+        <n-icon :component="isAggregate ? LinkOutline : KeyOutline" :size="13" />
+        {{ isAggregate ? t("v5.tabSubGroups") : t("v5.tabKeys") }}
+        <span class="v5-tab__badge">
+          {{ isAggregate ? subGroups.length : (stats?.key_stats.total_keys ?? 0) }}
+        </span>
+      </button>
+      <button :class="['v5-tab', tab === 'models' ? 'v5-tab--active' : '']" @click="tab = 'models'">
+        <n-icon :component="CubeOutline" :size="13" />
+        {{ t("v5.tabModels") }}
+        <span class="v5-tab__badge">{{ modelCount }}</span>
+      </button>
+      <button
+        :class="['v5-tab', tab === 'settings' ? 'v5-tab--active' : '']"
+        @click="tab = 'settings'"
+      >
+        <n-icon :component="SettingsOutline" :size="13" />
+        {{ t("v5.tabSettings") }}
+      </button>
+      <div class="v5-tabs__spacer" />
+      <div class="v5-tabs__actions">
+        <button class="v3-btn v3-btn--sm" @click="refreshAll">
+          <n-icon :component="RefreshOutline" :size="11" />
+          {{ t("common.refresh") || "Refresh" }}
+        </button>
+        <button v-if="!isAggregate" class="v3-btn v3-btn--sm" @click="exportKeys('all')">
+          <n-icon :component="DownloadOutline" :size="11" />
+          {{ t("v3.exportAll") || "Export" }}
+        </button>
+      </div>
+    </div>
+
+    <!-- ===== CONTENT ===== -->
+    <div class="v5-content scroll">
+      <!-- ===== AGGREGATE: SUB-GROUPS TAB ===== -->
+      <div v-if="tab === 'keys' && isAggregate">
+        <v3-sub-group-table
+          :selected-group="group"
+          :sub-groups="subGroups"
+          :groups="allGroups"
+          :loading="subGroupsLoading"
+          @refresh="onSubGroupRefresh"
+          @group-select="onSubGroupSelect"
+        />
+      </div>
+
+      <!-- ===== STANDARD: KEYS TAB ===== -->
+      <div v-else-if="tab === 'keys'">
+        <div class="v5-toolbar">
+          <div class="v5-segctrl">
+            <button :class="statusFilter === 'all' ? 'is-active' : ''" @click="statusFilter = 'all'">
+              {{ t("common.all") || "All" }} ({{ filterCounts.all }})
+            </button>
+            <button :class="statusFilter === 'active' ? 'is-active' : ''" @click="statusFilter = 'active'">
+              {{ t("keys.valid") || "Valid" }} ({{ filterCounts.valid }})
+            </button>
+            <button :class="statusFilter === 'invalid' ? 'is-active' : ''" @click="statusFilter = 'invalid'">
+              {{ t("keys.invalid") || "Invalid" }} ({{ filterCounts.invalid }})
+            </button>
+          </div>
+          <div class="v5-search">
+            <n-icon :component="SearchOutline" :size="12" />
+            <input
+              v-model="search"
+              :placeholder="t('keys.searchKeyPlaceholder') || 'Filter keys…'"
+              @input="onSearchInput"
+            />
+          </div>
+          <div class="v5-toolbar__spacer">
+            <button class="v3-btn v3-btn--sm" @click="validateAll('all')">
+              <n-icon :component="CheckmarkCircle" :size="11" />
+              {{ t("v3.testAll") || "Test all" }}
+            </button>
+            <button
+              v-if="filterCounts.invalid > 0"
+              class="v3-btn v3-btn--sm v3-btn--danger"
+              @click="clearInvalid"
+            >
+              <n-icon :component="Trash" :size="11" />
+              {{ t("v3.clearInvalid") || "Clear invalid" }}
+            </button>
+            <button class="v3-btn v3-btn--sm" @click="showDeleteKey = true">
+              <n-icon :component="RemoveCircleOutline" :size="11" />
+              {{ t("v3.batchDelete") || "Batch delete" }}
+            </button>
+            <button class="v3-btn v3-btn--accent v3-btn--sm" @click="showAddKey = true">
+              <n-icon :component="AddOutline" :size="11" />
+              {{ t("v3.addKey") || "Add key" }}
+            </button>
+          </div>
+        </div>
+
+        <n-spin :show="keysLoading">
+          <div v-if="keys.length" class="v5-cardgrid">
+            <div
+              v-for="k in keys"
+              :key="k.id"
+              :class="[
+                'v5-keycard',
+                k.status === 'active'
+                  ? 'v5-keycard--ok'
+                  : k.status === 'invalid'
+                    ? 'v5-keycard--invalid'
+                    : 'v5-keycard--unverified',
+              ]"
+            >
+              <!-- Row 1: pill (click → test) + (notes OR mask) + edit + copy -->
+              <div class="v5-keycard__row">
+                <n-tooltip>
+                  <template #trigger>
+                    <button
+                      :class="[
+                        'v5-keycard__pill',
+                        'v5-keycard__pill--clickable',
+                        k.status === 'active'
+                          ? 'v5-keycard__pill--ok'
+                          : k.status === 'invalid'
+                            ? 'v5-keycard__pill--invalid'
+                            : 'v5-keycard__pill--unverified',
+                        testingKeyId === k.id ? 'v5-keycard__pill--testing' : '',
+                      ]"
+                      :disabled="testingKeyId === k.id"
+                      @click.stop="testKey(k)"
+                    >
+                      <n-icon
+                        v-if="testingKeyId === k.id"
+                        :component="RefreshOutline"
+                        :size="13"
+                        class="v5-keycard__pill-spin"
+                      />
+                      <n-icon
+                        v-else
+                        :component="
+                          k.status === 'active'
+                            ? CheckmarkCircle
+                            : k.status === 'invalid'
+                              ? CloseOutline
+                              : HelpCircleOutline
+                        "
+                        :size="13"
+                      />
+                      {{
+                        testingKeyId === k.id
+                          ? t("v5.kcTesting")
+                          : k.status === "active"
+                            ? t("keys.valid") || "Valid"
+                            : k.status === "invalid"
+                              ? t("keys.invalid") || "Invalid"
+                              : t("v5.kcUnverified")
+                      }}
+                    </button>
+                  </template>
+                  {{ t("v5.kcPillTip") }}
+                </n-tooltip>
+
+                <template v-if="editingNoteId === k.id">
                   <input
                     v-model="editingNoteText"
-                    class="v3-search"
+                    class="v5-keycard__notes-input"
                     :placeholder="t('v3.notesPlaceholder')"
-                    style="
-                      flex: 1;
-                      padding: 4px 8px;
-                      font: 500 12px var(--v3-sans);
-                      color: var(--v3-ink);
-                      border: 1px solid var(--v3-line);
-                      background: var(--v3-surface);
-                      border-radius: 5px;
-                      min-width: 160px;
-                    "
                     @keyup.enter="saveNotes(k)"
                     @keyup.esc="cancelNotes"
                     @click.stop
                   />
-                  <button
-                    class="v3-btn v3-btn--accent v3-btn--sm"
-                    :disabled="savingNotesId === k.id"
-                    @click.stop="saveNotes(k)"
-                  >
-                    <n-icon :component="CheckmarkCircle" :size="11" />
-                  </button>
-                  <button
-                    class="v3-btn v3-btn--ghost v3-btn--sm"
-                    @click.stop="cancelNotes"
-                  >
-                    <n-icon :component="CloseOutline" :size="11" />
-                  </button>
-                </div>
-                <div
-                  v-else
-                  style="
-                    margin-top: 4px;
-                    display: flex;
-                    align-items: center;
-                    gap: 6px;
-                  "
-                >
-                  <span
-                    v-if="k.notes"
-                    style="font: 400 11px/1.3 var(--v3-sans); color: var(--v3-ink-3)"
-                  >
-                    {{ k.notes }}
-                  </span>
-                  <span
-                    v-else
-                    style="font: 400 11px/1.3 var(--v3-sans); color: var(--v3-ink-4)"
-                  >
-                    —
-                  </span>
-                  <button
-                    class="v3-btn v3-btn--ghost v3-btn--icon"
-                    :title="t('v3.editNotes')"
-                    @click.stop="startEditNotes(k)"
-                  >
-                    <n-icon :component="PencilOutline" :size="11" />
-                  </button>
-                </div>
-              </td>
-              <td>
-                <span :class="statusChipClass(k.status)">
-                  <span
-                    class="v3-dot"
-                    :class="{
-                      'v3-dot--ok': k.status === 'active',
-                      'v3-dot--danger': k.status === 'invalid',
-                    }"
-                  />
-                  {{ statusLabel(k.status) }}
-                </span>
-              </td>
-              <td class="tnum mono">{{ k.request_count?.toLocaleString() ?? 0 }}</td>
-              <td>
-                <div style="display: flex; align-items: center; gap: 8px">
-                  <span
-                    class="v3-k-fail-bar"
-                    :class="{ 'v3-k-fail-bar--ok': (k.failure_count || 0) === 0 }"
-                  >
-                    <i
-                      :style="{
-                        width: `${Math.min(100, (k.failure_count || 0) * 18)}%`,
-                      }"
-                    />
-                  </span>
-                  <span
-                    class="mono tnum"
-                    style="font-size: 11.5px; color: var(--v3-ink-3)"
-                  >
-                    {{ k.failure_count || 0 }} fail
-                  </span>
-                </div>
-              </td>
-              <td
-                class="mono"
-                style="color: var(--v3-ink-3); font-size: 11.5px"
-              >
-                {{ formatRelative(k.last_used_at) }}
-              </td>
-              <td style="text-align: right">
-                <button
-                  class="v3-btn v3-btn--ghost v3-btn--sm"
-                  title="Test key"
-                  @click="testKey(k)"
-                >
-                  <n-icon :component="CheckmarkCircle" :size="12" />
-                </button>
-                <button
-                  v-if="k.status === 'invalid'"
-                  class="v3-btn v3-btn--ghost v3-btn--sm"
-                  title="Restore"
-                  @click="restoreKey(k)"
-                >
-                  <n-icon :component="RefreshOutline" :size="12" />
-                </button>
-                <button
-                  class="v3-btn v3-btn--ghost v3-btn--sm v3-btn--danger"
-                  title="Delete"
-                  @click="deleteKey(k)"
-                >
-                  <n-icon :component="Trash" :size="12" />
-                </button>
-              </td>
-            </tr>
-            <tr v-if="!keys.length">
-              <td
-                colspan="6"
-                style="
-                  padding: 28px 16px;
-                  text-align: center;
-                  color: var(--v3-ink-3);
-                  font-size: 12.5px;
-                "
-              >
-                {{ t("keys.noKeys") || "No keys in this group yet." }}
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-    </n-spin>
+                  <n-tooltip>
+                    <template #trigger>
+                      <button
+                        class="v5-keycard__iconbtn v5-keycard__iconbtn--ok"
+                        :disabled="savingNotesId === k.id"
+                        @click.stop="saveNotes(k)"
+                      >
+                        <n-icon :component="CheckmarkCircle" :size="14" />
+                      </button>
+                    </template>
+                    {{ t("common.save") || "Save" }}
+                  </n-tooltip>
+                  <n-tooltip>
+                    <template #trigger>
+                      <button class="v5-keycard__iconbtn" @click.stop="cancelNotes">
+                        <n-icon :component="CloseOutline" :size="14" />
+                      </button>
+                    </template>
+                    {{ t("common.cancel") || "Cancel" }}
+                  </n-tooltip>
+                </template>
 
-    <div
-      v-if="totalPages > 1"
-      style="
-        padding: 12px 16px;
-        border-top: 1px solid var(--v3-line);
-        display: flex;
-        justify-content: flex-end;
-      "
-    >
-      <n-pagination
-        v-model:page="page"
-        :page-count="totalPages"
-        :page-size="pageSize"
-        :item-count="total"
-      />
+                <template v-else>
+                  <n-tooltip v-if="k.notes" placement="top">
+                    <template #trigger>
+                      <code class="v5-keycard__mask v5-keycard__mask--notes">{{ k.notes }}</code>
+                    </template>
+                    <span style="font-family: var(--v3-mono); font-size: 11.5px">
+                      {{ maskKey(k.key_value) }}
+                    </span>
+                  </n-tooltip>
+                  <code v-else class="v5-keycard__mask">{{ maskKey(k.key_value) }}</code>
+                  <n-tooltip>
+                    <template #trigger>
+                      <button class="v5-keycard__iconbtn" @click.stop="startEditNotes(k)">
+                        <n-icon :component="PencilOutline" :size="14" />
+                      </button>
+                    </template>
+                    {{ t("v3.editNotes") || "Notes" }}
+                  </n-tooltip>
+                  <n-tooltip>
+                    <template #trigger>
+                      <button class="v5-keycard__iconbtn" @click.stop="copyKey(k)">
+                        <n-icon :component="CopyOutline" :size="14" />
+                      </button>
+                    </template>
+                    {{ t("v5.copy") }}
+                  </n-tooltip>
+                </template>
+              </div>
+
+              <!-- Row 2: stats + icon actions -->
+              <div class="v5-keycard__row">
+                <div class="v5-keycard__inline">
+                  <span>
+                    {{ t("v5.kcReq") }}<b>{{ (k.request_count ?? 0).toLocaleString() }}</b>
+                  </span>
+                  <span :class="(k.failure_count || 0) > 0 ? 'v5-keycard__inline-fail--err' : ''">
+                    {{ t("v5.kcFail") }}<b>{{ k.failure_count ?? 0 }}</b>
+                  </span>
+                  <span>{{ formatRelative(k.last_used_at) }}</span>
+                </div>
+                <div class="v5-keycard__actions">
+                  <n-tooltip v-if="k.status === 'invalid'">
+                    <template #trigger>
+                      <button
+                        class="v5-keycard__iconbtn v5-keycard__iconbtn--lg"
+                        @click="restoreKey(k)"
+                      >
+                        <n-icon :component="RefreshOutline" :size="16" />
+                      </button>
+                    </template>
+                    {{ t("keys.restoreKey") || "Restore" }}
+                  </n-tooltip>
+                  <n-tooltip>
+                    <template #trigger>
+                      <button
+                        :class="[
+                          'v5-keycard__iconbtn',
+                          'v5-keycard__iconbtn--lg',
+                          'v5-keycard__iconbtn--danger',
+                          confirmingDeleteId === k.id ? 'v5-keycard__iconbtn--armed' : '',
+                        ]"
+                        @click="deleteKey(k)"
+                      >
+                        <n-icon :component="Trash" :size="16" />
+                      </button>
+                    </template>
+                    {{
+                      confirmingDeleteId === k.id
+                        ? t("v5.kcConfirmDelete")
+                        : t("common.delete") || "Delete"
+                    }}
+                  </n-tooltip>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div v-else class="v5-empty">
+            <div class="v5-empty__icon">
+              <n-icon :component="KeyOutline" :size="22" />
+            </div>
+            <div class="v5-empty__title">
+              {{ t("v5.noKeysTitle") }}
+            </div>
+            <div class="v5-empty__sub">
+              {{ matchedProvider?.signupUrl ? t("v5.noKeysSubWithProvider") : t("v5.noKeysSub") }}
+            </div>
+            <button class="v3-btn v3-btn--accent" style="margin-top: 8px" @click="showAddKey = true">
+              <n-icon :component="AddOutline" :size="12" />
+              {{ t("v3.addKey") }}
+            </button>
+          </div>
+        </n-spin>
+
+        <div v-if="totalPages > 1" class="v5-pagebar">
+          <n-pagination
+            v-model:page="page"
+            :page-count="totalPages"
+            :page-size="pageSize"
+            :item-count="total"
+          />
+        </div>
+      </div>
+
+      <!-- ===== MODELS TAB ===== -->
+      <div v-else-if="tab === 'models'">
+        <div class="v5-toolbar">
+          <div class="v5-toolbar__hint">
+            {{ t("v5.modelsHint") }}
+            <span v-if="modelsRefreshedAtDisplay" style="margin-left: 8px; color: var(--v3-ink-4)">
+              · {{ t("v5.refreshedAt") }} {{ modelsRefreshedAtDisplay }}
+            </span>
+          </div>
+        </div>
+
+        <div v-if="groupModels.length" class="v5-cardgrid">
+          <div v-for="modelId in groupModels" :key="modelId" class="v5-modelcard">
+            <div class="v5-modelcard__top">
+              <code class="v5-modelcard__name">{{ modelId }}</code>
+              <span :class="tierChipClass(tierForModel(modelId))" style="flex-shrink: 0">
+                {{ tierLabel(tierForModel(modelId)) }}
+              </span>
+              <span v-if="isFreeModel(modelId)" class="v3-chip v3-chip--info" style="flex-shrink: 0">
+                {{ t("v3.free") || "free" }}
+              </span>
+            </div>
+
+            <!-- Aliases inline (clickable chip → jump to Aliases page) -->
+            <div class="v5-modelcard__aliases">
+              <template v-if="aliasesFor(modelId).length">
+                <n-tooltip
+                  v-for="a in aliasesFor(modelId)"
+                  :key="a.id"
+                  placement="top"
+                >
+                  <template #trigger>
+                    <button
+                      class="v5-modelcard__alias"
+                      @click.stop="goToAliases(a.alias)"
+                    >
+                      <span>{{ a.alias }}</span>
+                      <small>w{{ a.weight }}</small>
+                    </button>
+                  </template>
+                  {{ t("v5.mcAliasTip", { weight: a.weight, priority: a.priority }) }}
+                </n-tooltip>
+              </template>
+              <n-tooltip>
+                <template #trigger>
+                  <button
+                    :class="[
+                      'v5-modelcard__alias-add',
+                      aliasesFor(modelId).length === 0 ? 'v5-modelcard__alias-add--block' : '',
+                    ]"
+                    @click.stop="addAliasFor(modelId)"
+                  >
+                    <n-icon :component="AddOutline" :size="11" />
+                    <span v-if="aliasesFor(modelId).length === 0">
+                      {{ t("v5.mcAddAlias") }}
+                    </span>
+                  </button>
+                </template>
+                {{ t("v5.mcAddAliasTip") }}
+              </n-tooltip>
+            </div>
+          </div>
+        </div>
+
+        <div v-else class="v5-empty">
+          <div class="v5-empty__icon">
+            <n-icon :component="CubeOutline" :size="22" />
+          </div>
+          <div class="v5-empty__title">{{ t("v5.noModelsTitle") }}</div>
+          <div class="v5-empty__sub">{{ t("v5.noModelsSub") }}</div>
+          <button v-if="!group.is_system" class="v3-btn" style="margin-top: 8px" @click="showEditGroup = true">
+            <n-icon :component="PencilOutline" :size="12" />
+            {{ t("v5.openGroupSettings") }}
+          </button>
+        </div>
+      </div>
+
+      <!-- ===== SETTINGS TAB ===== -->
+      <div v-else>
+        <div class="v5-toolbar">
+          <div class="v5-toolbar__hint">{{ t("v5.settingsHint") }}</div>
+          <div class="v5-toolbar__spacer">
+            <button v-if="!group.is_system" class="v3-btn v3-btn--sm" @click="showEditGroup = true">
+              <n-icon :component="PencilOutline" :size="11" />
+              {{ t("common.edit") || "Edit" }}
+            </button>
+          </div>
+        </div>
+
+        <div class="v5-settings">
+          <div class="v5-settings__row">
+            <div class="v5-settings__lbl">
+              {{ t("v5.setChannel") }}
+              <n-tooltip>
+                <template #trigger>
+                  <span class="v5-helpicon"><n-icon :component="HelpCircleOutline" :size="11" /></span>
+                </template>
+                {{ t("v5.setChannelSub") }}
+              </n-tooltip>
+            </div>
+            <div class="v5-settings__val">{{ group.channel_type }}</div>
+          </div>
+          <div v-if="!isAggregate" class="v5-settings__row">
+            <div class="v5-settings__lbl">
+              {{ t("v5.setUpstream") }}
+              <n-tooltip>
+                <template #trigger>
+                  <span class="v5-helpicon"><n-icon :component="HelpCircleOutline" :size="11" /></span>
+                </template>
+                {{ t("v5.setUpstreamSub") }}
+              </n-tooltip>
+            </div>
+            <div class="v5-settings__val">
+              <template v-if="group.upstreams?.length">
+                {{ group.upstreams[0].url }}
+                <span v-if="group.upstreams.length > 1" style="color: var(--v3-ink-4)">
+                  + {{ group.upstreams.length - 1 }}
+                </span>
+              </template>
+              <template v-else>—</template>
+            </div>
+          </div>
+          <div class="v5-settings__row">
+            <div class="v5-settings__lbl">
+              {{ t("v5.setProxyPath") }}
+              <n-tooltip>
+                <template #trigger>
+                  <span class="v5-helpicon"><n-icon :component="HelpCircleOutline" :size="11" /></span>
+                </template>
+                {{ t("v5.setProxyPathSub") }}
+              </n-tooltip>
+            </div>
+            <div class="v5-settings__val">{{ proxyUrl }}</div>
+          </div>
+          <div v-if="isAggregate" class="v5-settings__row">
+            <div class="v5-settings__lbl">
+              {{ t("v5.setMembers") }}
+              <n-tooltip>
+                <template #trigger>
+                  <span class="v5-helpicon"><n-icon :component="HelpCircleOutline" :size="11" /></span>
+                </template>
+                {{ t("v5.setMembersSub") }}
+              </n-tooltip>
+            </div>
+            <div class="v5-settings__val">
+              {{ subGroups.length }} {{ t("v5.setMembersUnit") }}
+            </div>
+          </div>
+          <div v-if="!isAggregate" class="v5-settings__row">
+            <div class="v5-settings__lbl">
+              {{ t("v5.setTestModel") }}
+              <n-tooltip>
+                <template #trigger>
+                  <span class="v5-helpicon"><n-icon :component="HelpCircleOutline" :size="11" /></span>
+                </template>
+                {{ t("v5.setTestModelSub") }}
+              </n-tooltip>
+            </div>
+            <div class="v5-settings__val">{{ group.test_model || "—" }}</div>
+          </div>
+          <div v-if="!isAggregate" class="v5-settings__row">
+            <div class="v5-settings__lbl">
+              {{ t("v5.setValidation") }}
+              <n-tooltip>
+                <template #trigger>
+                  <span class="v5-helpicon"><n-icon :component="HelpCircleOutline" :size="11" /></span>
+                </template>
+                {{ t("v5.setValidationSub") }}
+              </n-tooltip>
+            </div>
+            <div class="v5-settings__val">
+              {{ group.validation_endpoint || t("v5.setValidationDefault") }}
+            </div>
+          </div>
+          <div class="v5-settings__row">
+            <div>
+              <div class="v5-settings__lbl">{{ t("v5.setProxyPath") }}</div>
+              <div class="v5-settings__sub">{{ t("v5.setProxyPathSub") }}</div>
+            </div>
+            <div class="v5-settings__val">{{ proxyUrl }}</div>
+          </div>
+          <div class="v5-settings__row">
+            <div>
+              <div class="v5-settings__lbl">{{ t("v5.setTestModel") }}</div>
+              <div class="v5-settings__sub">{{ t("v5.setTestModelSub") }}</div>
+            </div>
+            <div class="v5-settings__val">{{ group.test_model || "—" }}</div>
+          </div>
+          <div class="v5-settings__row">
+            <div>
+              <div class="v5-settings__lbl">{{ t("v5.setValidation") }}</div>
+              <div class="v5-settings__sub">{{ t("v5.setValidationSub") }}</div>
+            </div>
+            <div class="v5-settings__val">{{ group.validation_endpoint || t("v5.setValidationDefault") }}</div>
+          </div>
+          <div class="v5-settings__row">
+            <div class="v5-settings__lbl">
+              {{ t("v5.setSystem") }}
+              <n-tooltip>
+                <template #trigger>
+                  <span class="v5-helpicon"><n-icon :component="HelpCircleOutline" :size="11" /></span>
+                </template>
+                {{ t("v5.setSystemSub") }}
+              </n-tooltip>
+            </div>
+            <div class="v5-settings__val">
+              {{ group.is_system ? t("v5.setSystemYes") : t("v5.setSystemNo") }}
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- Modals -->
@@ -803,6 +1405,13 @@ function onGroupCopied() {
       v-model:show="showCopyGroup"
       :source-group="group"
       @success="onGroupCopied"
+    />
+    <model-alias-modal
+      v-if="aliasModalModel"
+      v-model:show="showAliasModal"
+      :group="group"
+      :model-id="aliasModalModel"
+      @success="onAliasCreated"
     />
   </section>
 </template>

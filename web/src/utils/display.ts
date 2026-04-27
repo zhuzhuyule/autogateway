@@ -35,12 +35,16 @@ export function formatDisplayName(name: string): string {
  * @returns The display name for the group.
  */
 export function getGroupDisplayName(item: Group | SubGroupInfo): string {
-  if ("group" in item && item.group) {
-    const group = item.group as Group;
-    return group.display_name || formatDisplayName(group.name);
+  const raw = "group" in item && item.group
+    ? (item.group as Group)
+    : item as Group;
+  if (raw.is_system && raw.name.startsWith("default-")) {
+    const type = raw.name.replace("default-", "");
+    if (type === "openai") return "OpenAI";
+    if (type === "gemini") return "Gemini";
+    if (type === "anthropic") return "Anthropic";
   }
-  const group = item as Group;
-  return group.display_name || formatDisplayName(group.name);
+  return raw.display_name || formatDisplayName(raw.name);
 }
 
 /**

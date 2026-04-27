@@ -3,7 +3,6 @@ import {
   aliasesApi,
   RESERVED_ALIASES,
   routingSettingsApi,
-  type AliasCreatePayload,
   type ModelAliasRow,
   type RoutingSettings,
 } from "@/api/aliases";
@@ -13,6 +12,7 @@ import { getGroupDisplayName } from "@/utils/display";
 import {
   AddOutline,
   CloseOutline,
+  HelpCircleOutline,
   LockClosedOutline,
   RefreshOutline,
   Trash,
@@ -20,10 +20,10 @@ import {
 import {
   NIcon,
   NInputNumber,
-  NModal,
   NSelect,
   NSpin,
   NSwitch,
+  NTooltip,
   useDialog,
   useMessage,
   type SelectOption,
@@ -44,7 +44,10 @@ const settings = ref<RoutingSettings>({
   ComplexThreshold: 8000,
 });
 
-// Group cache for label lookup
+// Defaults applied to all newly created mappings.
+const DEFAULT_WEIGHT = 100;
+const DEFAULT_PRIORITY = 0;
+
 const groupNameById = computed<Record<number, string>>(() => {
   const m: Record<number, string> = {};
   for (const g of groups.value) if (g.id) m[g.id] = getGroupDisplayName(g);
@@ -53,12 +56,31 @@ const groupNameById = computed<Record<number, string>>(() => {
 
 const groupOptions = computed<SelectOption[]>(() =>
   groups.value
-    .filter(g => g.id)
+    .filter(g => g.id && g.group_type !== "aggregate")
     .map(g => ({
-      label: `${getGroupDisplayName(g)} (${g.name})`,
+      label: `${getGroupDisplayName(g)}`,
       value: g.id as number,
     }))
 );
+
+function modelOptionsForGroup(groupId: number | null): SelectOption[] {
+  if (!groupId) return [];
+  const g = groups.value.find(gr => gr.id === groupId);
+  if (!g) return [];
+  const raw = (g as unknown as { available_models?: unknown }).available_models;
+  let arr: string[] = [];
+  if (Array.isArray(raw)) {
+    arr = raw.filter((m): m is string => typeof m === "string");
+  } else if (typeof raw === "string" && raw.trim()) {
+    try {
+      const j = JSON.parse(raw);
+      if (Array.isArray(j)) arr = j.filter((m): m is string => typeof m === "string");
+    } catch {
+      /* ignore */
+    }
+  }
+  return arr.sort().map(m => ({ label: m, value: m }));
+}
 
 interface GroupedAlias {
   alias: string;
@@ -75,12 +97,9 @@ const grouped = computed<GroupedAlias[]>(() => {
       members: [],
     };
     cur.isReserved = cur.isReserved || r.is_reserved;
-    if (!(r.is_reserved && r.group_id === 0)) {
-      cur.members.push(r);
-    }
+    if (!(r.is_reserved && r.group_id === 0)) cur.members.push(r);
     map.set(r.alias, cur);
   }
-  // Sort: reserved on top by RESERVED_ALIASES order, then alpha
   return Array.from(map.values()).sort((a, b) => {
     const ai = RESERVED_ALIASES.indexOf(a.alias as (typeof RESERVED_ALIASES)[number]);
     const bi = RESERVED_ALIASES.indexOf(b.alias as (typeof RESERVED_ALIASES)[number]);
@@ -90,6 +109,10 @@ const grouped = computed<GroupedAlias[]>(() => {
     return a.alias.localeCompare(b.alias);
   });
 });
+
+const totalMappings = computed(() =>
+  rows.value.filter(r => !(r.is_reserved && r.group_id === 0)).length
+);
 
 async function loadAll() {
   loading.value = true;
@@ -112,38 +135,35 @@ async function loadAll() {
 
 onMounted(() => loadAll());
 
-// ----- editing -----
-const showAdd = ref(false);
-const addPayload = ref<AliasCreatePayload>({
-  alias: "",
-  group_id: 0,
-  real_model: "",
-  weight: 1,
-  priority: 100,
-});
-const addPresetAlias = ref<string | null>(null);
-
-function openAdd(presetAlias: string | null = null) {
-  addPresetAlias.value = presetAlias;
-  addPayload.value = {
-    alias: presetAlias || "",
-    group_id: 0,
-    real_model: "",
-    weight: 1,
-    priority: 100,
-  };
-  showAdd.value = true;
+// === Inline candidate add ===
+interface AddDraft {
+  alias: string;
+  group_id: number | null;
+  real_model: string;
 }
-
-async function submitAdd() {
-  if (!addPayload.value.alias.trim() || !addPayload.value.real_model.trim() || !addPayload.value.group_id) {
-    message.warning(t("v3.aliasAddIncomplete"));
+const addDraftFor = ref<Record<string, AddDraft | null>>({});
+function startAdd(alias: string) {
+  addDraftFor.value[alias] = { alias, group_id: null, real_model: "" };
+}
+function cancelAdd(alias: string) {
+  addDraftFor.value[alias] = null;
+}
+async function commitAdd(alias: string) {
+  const d = addDraftFor.value[alias];
+  if (!d || !d.group_id || !d.real_model.trim()) {
+    message.warning(t("v5.alPickGroupModel"));
     return;
   }
   try {
-    await aliasesApi.create(addPayload.value);
-    message.success(t("common.operationSuccess"));
-    showAdd.value = false;
+    await aliasesApi.create({
+      alias: alias,
+      group_id: d.group_id,
+      real_model: d.real_model.trim(),
+      weight: DEFAULT_WEIGHT,
+      priority: DEFAULT_PRIORITY,
+      enabled: true,
+    });
+    addDraftFor.value[alias] = null;
     await loadAll();
   } catch (e) {
     console.error(e);
@@ -151,40 +171,66 @@ async function submitAdd() {
   }
 }
 
-async function toggleEnabled(row: ModelAliasRow) {
-  const next = !row.enabled;
-  row.enabled = next;
-  try {
-    await aliasesApi.update(row.id, { enabled: next });
-  } catch {
-    row.enabled = !next;
-    message.error(t("common.requestFailed"));
+// === New alias card ===
+const newCardOpen = ref(false);
+const newCardName = ref("");
+const newCardCandidates = ref<AddDraft[]>([]);
+function openNewCard() {
+  newCardOpen.value = true;
+  newCardName.value = "";
+  newCardCandidates.value = [{ alias: "", group_id: null, real_model: "" }];
+}
+function cancelNewCard() {
+  newCardOpen.value = false;
+  newCardName.value = "";
+  newCardCandidates.value = [];
+}
+function addCandidateRow() {
+  newCardCandidates.value.push({ alias: "", group_id: null, real_model: "" });
+}
+function removeCandidateRow(i: number) {
+  newCardCandidates.value.splice(i, 1);
+  if (!newCardCandidates.value.length) {
+    newCardCandidates.value.push({ alias: "", group_id: null, real_model: "" });
   }
 }
-
-async function updateWeight(row: ModelAliasRow, weight: number) {
-  const old = row.weight;
-  row.weight = weight;
-  try {
-    await aliasesApi.update(row.id, { weight });
-  } catch {
-    row.weight = old;
-    message.error(t("common.requestFailed"));
+async function commitNewCard() {
+  const name = newCardName.value.trim();
+  if (!name) {
+    message.warning(t("v5.alNameRequired"));
+    return;
   }
+  const valid = newCardCandidates.value.filter(c => c.group_id && c.real_model.trim());
+  if (!valid.length) {
+    message.warning(t("v5.alPickGroupModel"));
+    return;
+  }
+  let ok = 0;
+  let fail = 0;
+  for (const c of valid) {
+    try {
+      await aliasesApi.create({
+        alias: name,
+        group_id: c.group_id as number,
+        real_model: c.real_model.trim(),
+        weight: DEFAULT_WEIGHT,
+        priority: DEFAULT_PRIORITY,
+        enabled: true,
+      });
+      ok += 1;
+    } catch (e) {
+      console.error(e);
+      fail += 1;
+    }
+  }
+  if (ok > 0) message.success(t("v5.maCreated", { ok, fail }));
+  else message.error(t("v5.maAllFailed"));
+  cancelNewCard();
+  await loadAll();
 }
 
-async function updatePriority(row: ModelAliasRow, priority: number) {
-  const old = row.priority;
-  row.priority = priority;
-  try {
-    await aliasesApi.update(row.id, { priority });
-  } catch {
-    row.priority = old;
-    message.error(t("common.requestFailed"));
-  }
-}
-
-function removeRow(row: ModelAliasRow) {
+// === Remove single mapping ===
+function removeMapping(row: ModelAliasRow) {
   dialog.warning({
     title: t("v3.aliasDeleteTitle"),
     content: t("v3.aliasDeleteConfirm", { alias: row.alias, model: row.real_model }),
@@ -193,7 +239,6 @@ function removeRow(row: ModelAliasRow) {
     onPositiveClick: async () => {
       try {
         await aliasesApi.remove(row.id);
-        message.success(t("common.operationSuccess"));
         await loadAll();
       } catch {
         message.error(t("common.requestFailed"));
@@ -202,7 +247,33 @@ function removeRow(row: ModelAliasRow) {
   });
 }
 
-// ----- settings -----
+// === Cascade delete entire alias ===
+function removeWholeAlias(alias: string) {
+  const members = rows.value.filter(
+    r => r.alias === alias && !(r.is_reserved && r.group_id === 0)
+  );
+  if (!members.length) return;
+  dialog.warning({
+    title: t("v5.alDeleteAliasTitle"),
+    content: t("v5.alDeleteAliasConfirm", { alias, n: members.length }),
+    positiveText: t("common.confirm"),
+    negativeText: t("common.cancel"),
+    onPositiveClick: async () => {
+      let fail = 0;
+      for (const m of members) {
+        try {
+          await aliasesApi.remove(m.id);
+        } catch {
+          fail += 1;
+        }
+      }
+      if (fail > 0) message.error(t("common.requestFailed"));
+      await loadAll();
+    },
+  });
+}
+
+// === Settings ===
 async function saveSettings() {
   try {
     const r = await routingSettingsApi.save({
@@ -216,16 +287,6 @@ async function saveSettings() {
     message.error(t("common.requestFailed"));
   }
 }
-
-function totalWeight(members: ModelAliasRow[]): number {
-  return members.reduce((s, m) => s + (m.enabled ? m.weight : 0), 0);
-}
-
-function pct(row: ModelAliasRow, members: ModelAliasRow[]): number {
-  const total = totalWeight(members);
-  if (!total || !row.enabled) return 0;
-  return Math.round((row.weight / total) * 100);
-}
 </script>
 
 <template>
@@ -237,28 +298,26 @@ function pct(row: ModelAliasRow, members: ModelAliasRow[]): number {
           <n-icon :component="RefreshOutline" :size="12" />
           {{ t("v3.refresh") }}
         </button>
-        <button class="v3-btn v3-btn--accent" @click="openAdd(null)">
+        <button class="v3-btn v3-btn--accent" @click="openNewCard">
           <n-icon :component="AddOutline" :size="12" />
-          {{ t("v3.aliasAddBtn") }}
+          {{ t("v5.alNewAlias") }}
         </button>
       </div>
     </div>
     <h1 class="v3-viewtitle">
       {{ t("v3.aliasesTitle") }}
       <span class="v3-viewtitle__meta">
-        {{ rows.filter(r => !(r.is_reserved && r.group_id === 0)).length }} mappings
+        {{ t("v5.alMappings", { n: totalMappings }) }}
       </span>
     </h1>
     <div class="v3-viewhead__sub" style="margin: -8px 0 16px">
       {{ t("v3.aliasesDesc") }}
     </div>
 
-    <!-- Threshold settings -->
+    <!-- Threshold settings (kept) -->
     <div class="v3-thresh-card" style="margin-bottom: 16px">
       <div style="display: flex; align-items: center; gap: 14px; margin-bottom: 4px">
-        <div style="font: 600 13px var(--v3-sans)">
-          {{ t("v3.complexityThresholds") }}
-        </div>
+        <div style="font: 600 13px var(--v3-sans)">{{ t("v3.complexityThresholds") }}</div>
         <span style="font: 400 11.5px var(--v3-mono); color: var(--v3-ink-3)">
           {{ t("v3.complexityThresholdsSub") }}
         </span>
@@ -279,17 +338,7 @@ function pct(row: ModelAliasRow, members: ModelAliasRow[]): number {
         "
       >
         <div>
-          <div
-            style="
-              font: 500 10px/1 var(--v3-mono);
-              letter-spacing: 0.1em;
-              text-transform: uppercase;
-              color: var(--v3-ink-3);
-              margin-bottom: 6px;
-            "
-          >
-            simple &lt; n tokens
-          </div>
+          <div class="v5-al-tinylbl">simple &lt; n tokens</div>
           <n-input-number
             v-model:value="settings.SimpleThreshold"
             :min="1"
@@ -298,17 +347,7 @@ function pct(row: ModelAliasRow, members: ModelAliasRow[]): number {
           />
         </div>
         <div>
-          <div
-            style="
-              font: 500 10px/1 var(--v3-mono);
-              letter-spacing: 0.1em;
-              text-transform: uppercase;
-              color: var(--v3-ink-3);
-              margin-bottom: 6px;
-            "
-          >
-            complex &gt;= n tokens
-          </div>
+          <div class="v5-al-tinylbl">complex &gt;= n tokens</div>
           <n-input-number
             v-model:value="settings.ComplexThreshold"
             :min="1"
@@ -322,254 +361,345 @@ function pct(row: ModelAliasRow, members: ModelAliasRow[]): number {
       </div>
     </div>
 
-    <!-- Aliases groups -->
+    <!-- Cards grid -->
     <n-spin :show="loading">
-      <div
-        v-for="grp in grouped"
-        :key="grp.alias"
-        class="v3-card"
-        style="margin-bottom: 12px"
-      >
-        <div class="v3-card__head">
-          <div style="flex: 1; min-width: 0">
-            <div
-              class="v3-card__title"
-              style="display: flex; align-items: center; gap: 8px"
-            >
-              <code
-                style="
-                  font: 600 13px var(--v3-mono);
-                  background: var(--v3-surface-2);
-                  padding: 2px 7px;
-                  border-radius: 4px;
-                "
-              >
-                {{ grp.alias }}
-              </code>
-              <n-icon
-                v-if="grp.isReserved"
-                :component="LockClosedOutline"
-                :size="12"
-                style="color: var(--v3-warn)"
-                :title="t('v3.aliasReservedHint')"
-              />
-              <span class="v3-chip" v-if="grp.isReserved">{{ t("v3.aliasReserved") }}</span>
-              <span class="v3-card__sub" style="margin: 0 0 0 4px">
-                {{ grp.members.length }} {{ t("v3.aliasMembers") }}
-              </span>
-            </div>
+      <div class="v5-alias-grid">
+        <!-- New alias draft card -->
+        <div v-if="newCardOpen" class="v5-alias-card v5-alias-card--draft">
+          <div class="v5-alias-card__head">
+            <input
+              v-model="newCardName"
+              :placeholder="t('v3.aliasNamePlaceholder')"
+              class="v5-alias-card__name-input"
+              @keyup.enter="commitNewCard"
+            />
+            <n-tooltip>
+              <template #trigger>
+                <button class="v5-keycard__iconbtn" @click="cancelNewCard">
+                  <n-icon :component="CloseOutline" :size="14" />
+                </button>
+              </template>
+              {{ t("common.cancel") }}
+            </n-tooltip>
           </div>
-          <button class="v3-btn v3-btn--sm" @click="openAdd(grp.alias)">
-            <n-icon :component="AddOutline" :size="11" />
-            {{ t("v3.aliasAddMember") }}
-          </button>
+          <div class="v5-alias-card__body">
+            <div
+              v-for="(c, i) in newCardCandidates"
+              :key="i"
+              class="v5-alias-card__draft-row"
+            >
+              <n-select
+                v-model:value="c.group_id"
+                :options="groupOptions"
+                filterable
+                :placeholder="t('v3.aliasGroupPlaceholder')"
+                size="small"
+                style="flex: 1; min-width: 140px"
+                @update:value="() => (c.real_model = '')"
+              />
+              <n-select
+                v-model:value="c.real_model"
+                :options="modelOptionsForGroup(c.group_id)"
+                tag
+                filterable
+                :placeholder="t('v3.aliasModelPlaceholder')"
+                size="small"
+                style="flex: 1; min-width: 140px"
+                :disabled="!c.group_id"
+              />
+              <n-tooltip v-if="newCardCandidates.length > 1">
+                <template #trigger>
+                  <button class="v5-keycard__iconbtn" @click="removeCandidateRow(i)">
+                    <n-icon :component="CloseOutline" :size="14" />
+                  </button>
+                </template>
+                {{ t("common.delete") }}
+              </n-tooltip>
+            </div>
+            <button class="v5-alias-card__add-btn" @click="addCandidateRow">
+              <n-icon :component="AddOutline" :size="11" />
+              {{ t("v5.alAddCandidate") }}
+            </button>
+          </div>
+          <div class="v5-alias-card__foot">
+            <span class="v5-alias-card__defaults">{{ t("v5.alDefaults") }}</span>
+            <button class="v3-btn v3-btn--accent v3-btn--sm" @click="commitNewCard">
+              {{ t("common.save") || "Save" }}
+            </button>
+          </div>
         </div>
 
-        <table v-if="grp.members.length" class="v3-ktable">
-          <thead>
-            <tr>
-              <th>{{ t("v3.aliasGroupCol") }}</th>
-              <th>{{ t("v3.aliasModelCol") }}</th>
-              <th style="min-width: 200px">{{ t("v3.aliasWeightShare") }}</th>
-              <th>{{ t("v3.aliasPriority") }}</th>
-              <th>{{ t("v3.aliasEnabled") }}</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="r in grp.members" :key="r.id">
-              <td>{{ groupNameById[r.group_id] || `#${r.group_id}` }}</td>
-              <td>
-                <code
-                  style="
-                    font: 500 12px var(--v3-mono);
-                    background: var(--v3-surface-2);
-                    padding: 2px 5px;
-                    border-radius: 3px;
-                  "
-                  >{{ r.real_model }}</code
-                >
-              </td>
-              <td>
-                <div style="display: flex; align-items: center; gap: 8px">
-                  <n-input-number
-                    :value="r.weight"
-                    :min="1"
-                    size="small"
-                    style="width: 80px"
-                    @update:value="v => updateWeight(r, v ?? 1)"
-                  />
-                  <span class="v3-weight-bar" style="width: 80px">
-                    <i
-                      style="background: var(--v3-accent)"
-                      :style="{ width: `${Math.max(pct(r, grp.members), 4)}%` }"
-                    />
-                  </span>
-                  <span
-                    class="mono tnum"
-                    style="font-size: 11.5px; color: var(--v3-ink-3); min-width: 32px"
-                  >
-                    {{ pct(r, grp.members) }}%
-                  </span>
-                </div>
-              </td>
-              <td>
-                <n-input-number
-                  :value="r.priority"
-                  :min="1"
-                  size="small"
-                  style="width: 90px"
-                  @update:value="v => updatePriority(r, v ?? 100)"
-                />
-              </td>
-              <td>
-                <n-switch :value="r.enabled" @update:value="() => toggleEnabled(r)" />
-              </td>
-              <td style="text-align: right">
-                <button
-                  class="v3-btn v3-btn--ghost v3-btn--sm v3-btn--danger"
-                  @click="removeRow(r)"
-                >
-                  <n-icon :component="Trash" :size="11" />
-                </button>
-              </td>
-            </tr>
-          </tbody>
-        </table>
+        <!-- Existing alias cards -->
         <div
-          v-else
-          style="
-            padding: 22px 16px;
-            text-align: center;
-            color: var(--v3-ink-3);
-            font-size: 12.5px;
-          "
+          v-for="grp in grouped"
+          :key="grp.alias"
+          :class="['v5-alias-card', grp.isReserved ? 'v5-alias-card--reserved' : '']"
         >
-          {{ t("v3.aliasNoMembers") }}
+          <div class="v5-alias-card__head">
+            <code class="v5-alias-card__name">{{ grp.alias }}</code>
+            <n-tooltip v-if="grp.isReserved">
+              <template #trigger>
+                <span class="v5-alias-card__lock">
+                  <n-icon :component="LockClosedOutline" :size="11" />
+                </span>
+              </template>
+              {{ t("v3.aliasReservedHint") }}
+            </n-tooltip>
+            <span class="v5-alias-card__count">
+              {{ t("v5.alNCandidates", { n: grp.members.length }) }}
+            </span>
+            <n-tooltip v-if="!grp.isReserved && grp.members.length">
+              <template #trigger>
+                <button
+                  class="v5-keycard__iconbtn v5-keycard__iconbtn--danger"
+                  style="margin-left: auto"
+                  @click="removeWholeAlias(grp.alias)"
+                >
+                  <n-icon :component="Trash" :size="14" />
+                </button>
+              </template>
+              {{ t("v5.alDeleteAlias") }}
+            </n-tooltip>
+          </div>
+          <div class="v5-alias-card__body">
+            <span
+              v-for="m in grp.members"
+              :key="m.id"
+              class="v5-alias-card__cand"
+            >
+              <span class="v5-alias-card__cand-grp">
+                {{ groupNameById[m.group_id] || `#${m.group_id}` }}
+              </span>
+              <span class="v5-alias-card__cand-arrow">→</span>
+              <code class="v5-alias-card__cand-model">{{ m.real_model }}</code>
+              <n-tooltip>
+                <template #trigger>
+                  <button
+                    class="v5-keycard__iconbtn v5-keycard__iconbtn--danger"
+                    @click="removeMapping(m)"
+                  >
+                    <n-icon :component="CloseOutline" :size="12" />
+                  </button>
+                </template>
+                {{ t("v5.alRemoveCandidate") }}
+              </n-tooltip>
+            </span>
+
+            <!-- Inline add -->
+            <template v-if="addDraftFor[grp.alias]">
+              <div class="v5-alias-card__draft-row">
+                <n-select
+                  v-model:value="addDraftFor[grp.alias]!.group_id"
+                  :options="groupOptions"
+                  filterable
+                  :placeholder="t('v3.aliasGroupPlaceholder')"
+                  size="small"
+                  style="flex: 1; min-width: 140px"
+                  @update:value="() => (addDraftFor[grp.alias]!.real_model = '')"
+                />
+                <n-select
+                  v-model:value="addDraftFor[grp.alias]!.real_model"
+                  :options="modelOptionsForGroup(addDraftFor[grp.alias]!.group_id)"
+                  tag
+                  filterable
+                  :placeholder="t('v3.aliasModelPlaceholder')"
+                  size="small"
+                  style="flex: 1; min-width: 140px"
+                  :disabled="!addDraftFor[grp.alias]!.group_id"
+                />
+                <n-tooltip>
+                  <template #trigger>
+                    <button
+                      class="v5-keycard__iconbtn v5-keycard__iconbtn--ok"
+                      @click="commitAdd(grp.alias)"
+                    >
+                      <n-icon :component="AddOutline" :size="14" />
+                    </button>
+                  </template>
+                  {{ t("common.save") }}
+                </n-tooltip>
+                <n-tooltip>
+                  <template #trigger>
+                    <button class="v5-keycard__iconbtn" @click="cancelAdd(grp.alias)">
+                      <n-icon :component="CloseOutline" :size="14" />
+                    </button>
+                  </template>
+                  {{ t("common.cancel") }}
+                </n-tooltip>
+              </div>
+            </template>
+            <button
+              v-else
+              class="v5-alias-card__add-btn"
+              @click="startAdd(grp.alias)"
+            >
+              <n-icon :component="AddOutline" :size="11" />
+              {{ t("v5.alAddCandidate") }}
+            </button>
+          </div>
+        </div>
+
+        <div
+          v-if="!grouped.length && !newCardOpen"
+          class="v5-empty"
+          style="grid-column: 1 / -1"
+        >
+          <div class="v5-empty__icon">
+            <n-icon :component="HelpCircleOutline" :size="22" />
+          </div>
+          <div class="v5-empty__title">{{ t("v5.alEmpty") }}</div>
+          <div class="v5-empty__sub">{{ t("v5.alEmptySub") }}</div>
+          <button class="v3-btn v3-btn--accent" style="margin-top: 8px" @click="openNewCard">
+            <n-icon :component="AddOutline" :size="12" />
+            {{ t("v5.alNewAlias") }}
+          </button>
         </div>
       </div>
     </n-spin>
-
-    <!-- Add modal -->
-    <n-modal v-model:show="showAdd" :mask-closable="false">
-      <div
-        class="v3-card"
-        style="width: 480px; max-width: calc(100vw - 32px); padding: 0"
-      >
-        <div class="v3-card__head">
-          <div style="flex: 1">
-            <div class="v3-card__title">
-              {{ addPresetAlias ? t("v3.aliasAddMember") : t("v3.aliasAddBtn") }}
-            </div>
-            <div class="v3-card__sub">
-              {{ addPresetAlias ? `→ ${addPresetAlias}` : t("v3.aliasAddSub") }}
-            </div>
-          </div>
-          <button
-            class="v3-btn v3-btn--ghost v3-btn--icon"
-            @click="showAdd = false"
-          >
-            <n-icon :component="CloseOutline" :size="13" />
-          </button>
-        </div>
-        <div class="v3-card__body" style="display: grid; gap: 12px">
-          <div v-if="!addPresetAlias">
-            <div class="v3-intake__paste-lbl" style="margin-bottom: 6px">
-              {{ t("v3.aliasNameLabel") }}
-            </div>
-            <input
-              v-model="addPayload.alias"
-              :placeholder="t('v3.aliasNamePlaceholder')"
-              style="
-                width: 100%;
-                padding: 6px 9px;
-                border: 1px solid var(--v3-line);
-                border-radius: 5px;
-                font: 500 12px var(--v3-sans);
-                background: var(--v3-surface);
-                color: var(--v3-ink);
-              "
-            />
-          </div>
-          <div>
-            <div class="v3-intake__paste-lbl" style="margin-bottom: 6px">
-              {{ t("v3.aliasGroupLabel") }}
-            </div>
-            <n-select
-              v-model:value="addPayload.group_id"
-              :options="groupOptions"
-              filterable
-              :placeholder="t('v3.aliasGroupPlaceholder')"
-            />
-          </div>
-          <div>
-            <div class="v3-intake__paste-lbl" style="margin-bottom: 6px">
-              {{ t("v3.aliasModelLabel") }}
-            </div>
-            <input
-              v-model="addPayload.real_model"
-              :placeholder="t('v3.aliasModelPlaceholder')"
-              style="
-                width: 100%;
-                padding: 6px 9px;
-                border: 1px solid var(--v3-line);
-                border-radius: 5px;
-                font: 500 12px var(--v3-mono);
-                background: var(--v3-surface);
-                color: var(--v3-ink);
-              "
-            />
-          </div>
-          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px">
-            <div>
-              <div class="v3-intake__paste-lbl" style="margin-bottom: 6px">
-                {{ t("v3.aliasWeightCol") || "Weight" }}
-              </div>
-              <n-input-number v-model:value="addPayload.weight" :min="1" />
-            </div>
-            <div>
-              <div class="v3-intake__paste-lbl" style="margin-bottom: 6px">
-                {{ t("v3.aliasPriority") }}
-              </div>
-              <n-input-number v-model:value="addPayload.priority" :min="1" />
-            </div>
-          </div>
-        </div>
-        <div
-          style="
-            padding: 12px 16px;
-            border-top: 1px solid var(--v3-line);
-            background: var(--v3-surface-2);
-            display: flex;
-            justify-content: flex-end;
-            gap: 8px;
-          "
-        >
-          <button class="v3-btn" @click="showAdd = false">
-            {{ t("common.cancel") }}
-          </button>
-          <button class="v3-btn v3-btn--accent" @click="submitAdd">
-            <n-icon :component="AddOutline" :size="12" />
-            {{ t("common.confirm") }}
-          </button>
-        </div>
-      </div>
-    </n-modal>
   </div>
 </template>
 
 <style scoped>
-.v3-weight-bar {
-  height: 6px;
-  background: var(--v3-surface-3);
-  border-radius: 3px;
-  overflow: hidden;
-  display: inline-block;
+.v5-al-tinylbl {
+  font: 500 10px/1 var(--v3-mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--v3-ink-3);
+  margin-bottom: 6px;
 }
-.v3-weight-bar > i {
-  display: block;
-  height: 100%;
-  border-radius: 3px;
-  transition: width 0.3s ease;
+
+.v5-alias-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+  gap: 12px;
+}
+
+.v5-alias-card {
+  background: var(--v3-surface);
+  border: 1px solid var(--v3-line);
+  border-radius: var(--v3-radius-md);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  transition: all 120ms;
+}
+.v5-alias-card:hover {
+  border-color: var(--v3-line-strong);
+  box-shadow: var(--v3-shadow-sm);
+}
+.v5-alias-card--reserved {
+  border-color: oklch(from var(--v3-warn) l c h / 0.32);
+  background: oklch(from var(--v3-warn) l c h / 0.04);
+}
+.v5-alias-card--draft {
+  border-color: var(--v3-info);
+  background: var(--v3-info-soft);
+}
+
+.v5-alias-card__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.v5-alias-card__name {
+  font: 600 13px var(--v3-mono);
+  background: var(--v3-surface-2);
+  border: 1px solid var(--v3-line);
+  padding: 3px 9px;
+  border-radius: 5px;
+  color: var(--v3-ink);
+}
+.v5-alias-card__name-input {
+  flex: 1;
+  font: 600 13px var(--v3-mono);
+  background: var(--v3-surface);
+  border: 1px solid var(--v3-line);
+  padding: 5px 10px;
+  border-radius: 5px;
+  color: var(--v3-ink);
+  outline: none;
+}
+.v5-alias-card__name-input:focus {
+  border-color: var(--v3-info);
+}
+.v5-alias-card__lock {
+  display: inline-flex;
+  align-items: center;
+  color: var(--v3-warn);
+}
+.v5-alias-card__count {
+  font: 500 11px/1 var(--v3-mono);
+  color: var(--v3-ink-3);
+}
+
+.v5-alias-card__body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.v5-alias-card__cand {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--v3-surface-2);
+  border: 1px solid var(--v3-line);
+  border-radius: 6px;
+  padding: 5px 8px;
+  font: 500 12px var(--v3-sans);
+  color: var(--v3-ink-2);
+  flex-wrap: wrap;
+}
+.v5-alias-card__cand-grp {
+  color: var(--v3-ink);
+}
+.v5-alias-card__cand-arrow {
+  color: var(--v3-ink-4);
+}
+.v5-alias-card__cand-model {
+  font: 500 11.5px var(--v3-mono);
+  color: var(--v3-ink);
+  flex: 1;
+  min-width: 0;
+}
+
+.v5-alias-card__draft-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.v5-alias-card__add-btn {
+  background: transparent;
+  border: 1px dashed var(--v3-line);
+  color: var(--v3-ink-3);
+  cursor: pointer;
+  padding: 6px 10px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  font: 500 12px var(--v3-sans);
+  transition: all 120ms;
+}
+.v5-alias-card__add-btn:hover {
+  border-color: var(--v3-info);
+  color: var(--v3-info);
+}
+
+.v5-alias-card__foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--v3-line);
+}
+.v5-alias-card__defaults {
+  font: 400 11px var(--v3-sans);
+  color: var(--v3-ink-3);
 }
 </style>

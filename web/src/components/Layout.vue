@@ -4,8 +4,6 @@ import GlobalTaskProgressBar from "@/components/GlobalTaskProgressBar.vue";
 import LanguageSelector from "@/components/LanguageSelector.vue";
 import Logout from "@/components/Logout.vue";
 import ThemeToggle from "@/components/ThemeToggle.vue";
-import { getDashboardStats, getGroupList } from "@/api/dashboard";
-import { themeMode } from "@/utils/theme";
 import { copy as copyToClipboard } from "@/utils/clipboard";
 import {
   GridOutline,
@@ -18,9 +16,11 @@ import {
   MenuOutline,
   CloseOutline,
   BookOutline,
+  ArrowForwardOutline,
+  ArrowBackOutline,
 } from "@vicons/ionicons5";
 import { NDrawer, NDrawerContent, NIcon, useMessage } from "naive-ui";
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRoute, useRouter } from "vue-router";
 
@@ -30,20 +30,23 @@ const router = useRouter();
 const message = useMessage();
 
 const isMenuOpen = ref(false);
-const customGroupCount = ref<number | null>(null);
+const isRailCollapsed = ref(localStorage.getItem("railCollapsed") === "true");
+
+watch(isRailCollapsed, (val) => {
+  localStorage.setItem("railCollapsed", String(val));
+});
 
 const railItems = computed(() => [
-  { name: "dashboard", icon: GridOutline, tip: t("nav.dashboard"), count: null as number | null },
+  { name: "dashboard", icon: GridOutline, tip: t("nav.dashboard") },
   {
     name: "keys",
     icon: KeyOutline,
     tip: t("nav.keys"),
-    count: customGroupCount.value,
   },
-  { name: "aliases", icon: GitBranchOutline, tip: t("nav.aliases"), count: null },
-  { name: "model-catalog", icon: CubeOutline, tip: t("nav.modelCatalog"), count: null },
-  { name: "model-dedup", icon: CopyOutline, tip: t("nav.modelDedup"), count: null },
-  { name: "logs", icon: PulseOutline, tip: t("nav.logs"), count: null },
+  { name: "aliases", icon: GitBranchOutline, tip: t("nav.aliases") },
+  { name: "model-catalog", icon: CubeOutline, tip: t("nav.modelCatalog") },
+  { name: "model-dedup", icon: CopyOutline, tip: t("nav.modelDedup") },
+  { name: "logs", icon: PulseOutline, tip: t("nav.logs") },
 ]);
 
 const activeName = computed(() => route.name);
@@ -53,27 +56,8 @@ function go(name: string) {
   isMenuOpen.value = false;
 }
 
-const stats = ref<{ rpm: number; errRate: number; keys: number } | null>(null);
-
 onMounted(async () => {
-  try {
-    const r = await getDashboardStats();
-    stats.value = {
-      rpm: r.data?.rpm?.value ?? 0,
-      errRate: r.data?.error_rate?.value ?? 0,
-      keys: r.data?.key_count?.value ?? 0,
-    };
-  } catch {
-    // chrome telemetry is decorative; tolerate failure
-  }
-  try {
-    const g = await getGroupList();
-    const list =
-      (g as unknown as { data: Array<{ is_system?: boolean }> }).data || [];
-    customGroupCount.value = list.filter(it => !it.is_system).length;
-  } catch {
-    /* badge is decorative */
-  }
+  // Stats and badge counts are no longer displayed in the UI
 });
 
 const endpoint = computed(() => {
@@ -103,31 +87,6 @@ const versionLabel = "v0.4";
           <div>
             <span class="v3-chrome__name">AutoGateway</span>
             <span class="v3-chrome__ver">{{ versionLabel }}</span>
-          </div>
-        </div>
-
-        <div class="v3-chrome__telemetry">
-          <div class="v3-tlm">
-            <span class="v3-tlm__pulse" />
-            <span class="v3-tlm__lbl">Live</span>
-            <span class="v3-tlm__val">{{ stats ? `${stats.keys} keys` : "—" }}</span>
-          </div>
-          <div class="v3-tlm">
-            <span class="v3-tlm__lbl">RPM</span>
-            <span class="v3-tlm__val">{{ stats ? stats.rpm.toFixed(1) : "—" }}</span>
-          </div>
-          <div class="v3-tlm v3-tlm--opt">
-            <span class="v3-tlm__lbl">Theme</span>
-            <span class="v3-tlm__val">{{ themeMode }}</span>
-          </div>
-          <div class="v3-tlm">
-            <span class="v3-tlm__lbl">Err</span>
-            <span
-              class="v3-tlm__val"
-              :style="{ color: stats && stats.errRate > 1 ? 'var(--v3-warn)' : undefined }"
-            >
-              {{ stats ? `${stats.errRate.toFixed(1)}%` : "—" }}
-            </span>
           </div>
         </div>
 
@@ -162,30 +121,46 @@ const versionLabel = "v0.4";
       </header>
 
       <!-- ===== Body: rail + main ===== -->
-      <div class="v3-body">
-        <nav class="v3-rail">
+      <div class="v3-body" :class="{ 'v3-body--collapsed': isRailCollapsed }">
+        <nav class="v3-rail" :class="{ 'v3-rail--collapsed': isRailCollapsed }">
           <button
             v-for="item in railItems"
             :key="item.name"
             class="v3-rail__btn"
             :class="{ 'v3-rail__btn--active': activeName === item.name }"
-            :data-tip="item.tip"
+            :data-tip="isRailCollapsed ? item.tip : undefined"
             @click="go(item.name)"
           >
             <n-icon :component="item.icon" :size="17" />
-            <span v-if="item.count != null && item.count > 0" class="v3-rail__count">
-              {{ item.count > 99 ? "99+" : item.count }}
-            </span>
+            <span v-if="!isRailCollapsed" class="v3-rail__label">{{ item.tip }}</span>
           </button>
           <div class="v3-rail__spacer" />
+          <button
+            class="v3-rail__btn v3-rail__toggle"
+            :data-tip="isRailCollapsed ? t('common.expand') || 'Expand' : undefined"
+            @click="isRailCollapsed = !isRailCollapsed"
+          >
+            <n-icon
+              :component="isRailCollapsed ? ArrowForwardOutline : ArrowBackOutline"
+              :size="16"
+            />
+            <span v-if="!isRailCollapsed" class="v3-rail__label">
+              {{
+                isRailCollapsed
+                  ? t("common.expand") || "Expand"
+                  : t("common.collapse") || "Collapse"
+              }}
+            </span>
+          </button>
           <div class="v3-rail__sep" />
           <button
             class="v3-rail__btn"
             :class="{ 'v3-rail__btn--active': activeName === 'settings' }"
-            :data-tip="t('nav.settings')"
+            :data-tip="isRailCollapsed ? t('nav.settings') : undefined"
             @click="go('settings')"
           >
             <n-icon :component="SettingsOutline" :size="17" />
+            <span v-if="!isRailCollapsed" class="v3-rail__label">{{ t("nav.settings") }}</span>
           </button>
         </nav>
 

@@ -49,10 +49,13 @@ interface SubGroupRow extends SubGroupInfo {
   percentage: number;
   status: "active" | "disabled" | "unavailable";
 }
-
 function statusOf(sg: SubGroupInfo): "active" | "disabled" | "unavailable" {
-  if (sg.weight === 0) return "disabled";
-  if (sg.weight > 0 && sg.active_keys === 0) return "unavailable";
+  if (sg.weight === 0) {
+    return "disabled";
+  }
+  if (sg.weight > 0 && sg.active_keys === 0) {
+    return "unavailable";
+  }
   return "active";
 }
 
