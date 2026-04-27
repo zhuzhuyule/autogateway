@@ -36,6 +36,8 @@ export default {
     detail: "詳細",
     more: "もっと見る",
     less: "閉じる",
+    expand: "展開",
+    collapse: "閉じる",
     all: "すべて",
     none: "なし",
     select: "選択",
@@ -235,7 +237,8 @@ export default {
     basicInfo: "基本情報",
     useFreeProvider: "無料プロバイダーから素早く開始",
     providerCount: "{n}社を収録",
-    providerPickerTip: "カードをクリックすると各項目が自動入力されます。あとはAPIキーを貼り付けるだけ。",
+    providerPickerTip:
+      "カードをクリックすると各項目が自動入力されます。あとはAPIキーを貼り付けるだけ。",
     providerSearchPlaceholder: "プロバイダーまたはモデル名で検索",
     providerSignup: "登録へ",
     providerApplied: "{name} のプリセットを適用しました",
@@ -258,7 +261,8 @@ export default {
     modelIdCopied: "モデル ID をコピーしました",
     aggregatedModelsList: "集約後の利用可能モデル(重複排除)",
     aggregatedModelsHint: "{sub} サブグループ · 重複排除後 {total} モデル",
-    aggregatedModelsEmpty: "サブグループにモデル一覧のキャッシュがありません。先にサブグループで更新してください",
+    aggregatedModelsEmpty:
+      "サブグループにモデル一覧のキャッシュがありません。先にサブグループで更新してください",
     displayName: "表示名",
     channelType: "チャンネルタイプ",
     sortOrder: "並び順",
@@ -601,6 +605,14 @@ export default {
   charts: {
     requestTrend24h: "24時間リクエストトレンド",
     allGroups: "すべてのグループ",
+    last6h: "直近 6h",
+    last12h: "直近 12h",
+    last24h: "直近 24h",
+    last48h: "直近 48h",
+    labelEveryHour: "1時間ごと",
+    labelEvery2Hours: "2時間ごと",
+    labelEvery3Hours: "3時間ごと",
+    axisNote: "Y: リクエスト数 · X: 時間",
   },
   security: {
     warningsWithHigh:
@@ -757,7 +769,8 @@ export default {
     requestVolume24hSub: "channel 別",
     routingActive: "ルーティング有効",
     routingPassthrough: "パススルー",
-    autoRoutingDesc: "シンプルなプロンプトは安価モデル、フラグシップは必要な時だけ。各モデルを tier ごとに別グループへマップできます。",
+    autoRoutingDesc:
+      "シンプルなプロンプトは安価モデル、フラグシップは必要な時だけ。各モデルを tier ごとに別グループへマップできます。",
     complexityThresholds: "複雑度しきい値",
     complexityThresholdsSub: "tokens → tier",
     addNewMappingTitle: "モデルマッピング追加",
@@ -867,7 +880,8 @@ export default {
     selected: "選択済み",
     useThis: "これを使う",
     getKey: "Key 取得",
-    newGroupFootHint: "「テストのみ」「テストして保存」時に自動でグループ作成 — Key は非同期インポート。",
+    newGroupFootHint:
+      "「テストのみ」「テストして保存」時に自動でグループ作成 — Key は非同期インポート。",
     docs: "ドキュメント",
     editNotes: "メモを編集",
     notesPlaceholder: "この Key へのメモ(任意)…",

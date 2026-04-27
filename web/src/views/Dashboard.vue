@@ -8,7 +8,13 @@ import V3Sparkline from "@/components/v3/V3Sparkline.vue";
 import { V3_PROVIDER_DIR, pavClass } from "@/data/v3Catalog";
 import type { DashboardStatsResponse, Group, StatCard } from "@/types/models";
 import { copy as copyToClipboard } from "@/utils/clipboard";
-import { CopyOutline, DownloadOutline, RefreshOutline } from "@vicons/ionicons5";
+import { getGroupDisplayName } from "@/utils/display";
+import {
+  ChevronForwardOutline,
+  CopyOutline,
+  DownloadOutline,
+  RefreshOutline,
+} from "@vicons/ionicons5";
 import { NIcon, useMessage } from "naive-ui";
 import { computed, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
@@ -27,9 +33,11 @@ interface ChannelGroup {
 }
 
 const groupList = ref<ChannelGroup[]>([]);
+const allGroups = ref<Group[]>([]);
 const groupStatsMap = ref<Record<string, { req24h: number; failed: number }>>({});
 const topModelsApi = ref<TopModelStat[]>([]);
 const topModelsLoaded = ref(false);
+const quickStartOpen = ref(false);
 
 onMounted(() => {
   loadAll();
@@ -70,9 +78,21 @@ async function loadGroupsAndStats() {
     const r = await getGroupList();
     groupList.value = (r as unknown as { data: ChannelGroup[] }).data || [];
     // best-effort: pull per-group stats so Top models has real numbers
-    const allGroups = await keysApi.getGroups();
-    const promises = allGroups
-      .filter(g => g.id != null && g.group_type !== "aggregate")
+    const groups = await keysApi.getGroups();
+    allGroups.value = groups;
+    await Promise.all(
+      groups
+        .filter(g => g.id != null && g.group_type === "aggregate")
+        .map(async g => {
+          try {
+            g.sub_groups = await keysApi.getSubGroups(g.id!);
+          } catch {
+            g.sub_groups = [];
+          }
+        })
+    );
+    const promises = groups
+      .filter(g => g.id != null)
       .map(async (g: Group) => {
         try {
           const s = await keysApi.getGroupStats(g.id!);
@@ -187,6 +207,36 @@ const kpis = computed<KpiSpec[]>(() => {
   ];
 });
 
+const baseUrl = computed(() => `${window.location.protocol}//${window.location.host}`);
+
+function aggRequestPath(group: Group): string {
+  if (group.channel_type === "anthropic") return "/proxy/anthropic/v1/messages";
+  if (group.channel_type === "gemini") return "/proxy/gemini/v1beta/models/*:generateContent";
+  return "/proxy/openai/v1/chat/completions";
+}
+
+function aggregateLabel(group: Group): string {
+  const provider =
+    group.channel_type === "gemini"
+      ? "Gemini"
+      : group.channel_type === "anthropic"
+        ? "Anthropic"
+        : "OpenAI";
+  return `${getGroupDisplayName(group)} · ${provider} 聚合`;
+}
+
+function aggregateChildren(group: Group): string[] {
+  return (group.sub_groups || []).map(sg => getGroupDisplayName(sg)).filter(Boolean);
+}
+
+const systemAggregates = computed(() =>
+  allGroups.value.filter(g => g.group_type === "aggregate" && g.is_system)
+);
+
+async function copyAggregateUrl(group: Group) {
+  await copyText(`${baseUrl.value}${aggRequestPath(group)}`);
+}
+
 interface TopModelRow {
   id: string;
   calls: number;
@@ -203,9 +253,7 @@ function parseModels(raw: unknown): string[] {
   if (typeof raw === "string" && raw.trim().length > 0) {
     try {
       const arr = JSON.parse(raw);
-      return Array.isArray(arr)
-        ? arr.filter((m): m is string => typeof m === "string")
-        : [];
+      return Array.isArray(arr) ? arr.filter((m): m is string => typeof m === "string") : [];
     } catch {
       return [];
     }
@@ -371,7 +419,7 @@ async function copyText(value: string) {
 </script>
 
 <template>
-  <div>
+  <div class="dashboard-page">
     <encryption-mismatch-alert />
     <security-alert v-if="stats?.security_warnings?.length" :warnings="stats.security_warnings" />
 
@@ -389,6 +437,103 @@ async function copyText(value: string) {
       </div>
     </div>
     <h1 class="v3-viewtitle">{{ t("v3.operations") }}</h1>
+
+    <section class="v5-qs" :class="{ 'v5-qs--open': quickStartOpen }">
+      <div class="v5-qs__head" @click="quickStartOpen = !quickStartOpen">
+        <div class="v5-qs__chev">
+          <n-icon :component="ChevronForwardOutline" :size="15" />
+        </div>
+        <div class="v5-qs__title">
+          一个
+          <em>密钥</em>
+          ，所有 Provider。
+        </div>
+        <div class="v5-qs__quickbtns" @click.stop>
+          <button class="v3-btn v3-btn--primary v3-btn--sm" @click="copyText('AUTH_KEY')">
+            <n-icon :component="CopyOutline" :size="12" />
+            复制 AUTH_KEY
+          </button>
+        </div>
+      </div>
+      <div v-if="quickStartOpen" class="v5-qs__body">
+        <div v-for="ep in endpoints" :key="ep.channel" class="v5-qs__row">
+          <div>
+            <div class="v5-qs__row-lbl">{{ ep.channel }}</div>
+          </div>
+          <div class="v5-qs__row-val">{{ ep.url }}</div>
+          <button class="v3-btn v3-btn--ghost v3-btn--sm" @click="copyText(ep.url)">
+            <n-icon :component="CopyOutline" :size="11" />
+            {{ t("common.copy") }}
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <section v-if="systemAggregates.length">
+      <div class="v5-section-title">
+        <h3>
+          System
+          <em>聚合分组</em>
+        </h3>
+        <span class="v5-section-title__sub">系统自动管理 · 永久 · 共享 AUTH_KEY</span>
+      </div>
+      <div class="v5-agg-grid">
+        <div
+          v-for="agg in systemAggregates"
+          :key="agg.id || agg.name"
+          class="v5-agg"
+          @click="$router.push({ name: 'keys', query: { groupId: agg.id } })"
+        >
+          <div class="v5-agg__head">
+            <div class="v5-agg__icon">
+              <span>
+                {{
+                  V3_PROVIDER_DIR[inferProvider(agg.name, agg.channel_type)]?.short ||
+                  agg.channel_type?.slice(0, 2).toUpperCase() ||
+                  "AI"
+                }}
+              </span>
+            </div>
+            <div class="v5-agg__main">
+              <div class="v5-agg__title-row">
+                <div class="v5-agg__name">{{ aggregateLabel(agg) }}</div>
+                <button
+                  class="v5-agg__copy"
+                  :title="t('common.copy')"
+                  @click.stop="copyAggregateUrl(agg)"
+                >
+                  <n-icon :component="CopyOutline" :size="13" />
+                </button>
+              </div>
+            </div>
+          </div>
+          <div class="v5-agg__children">
+            <template v-if="aggregateChildren(agg).length">
+              <span v-for="child in aggregateChildren(agg)" :key="child" class="v5-agg__child">
+                {{ child }}
+              </span>
+            </template>
+            <span v-else class="v5-agg__children-empty">还没有子分组 — 在分组管理里添加。</span>
+          </div>
+          <div class="v5-agg__stats">
+            <div>
+              <div class="v5-agg__stat-lbl">子分组</div>
+              <div class="v5-agg__stat-val">{{ aggregateChildren(agg).length }}</div>
+            </div>
+            <div>
+              <div class="v5-agg__stat-lbl">可用密钥</div>
+              <div class="v5-agg__stat-val">
+                {{ (agg.sub_groups || []).reduce((sum, sg) => sum + (sg.active_keys || 0), 0) }}
+              </div>
+            </div>
+            <div>
+              <div class="v5-agg__stat-lbl">24h 请求</div>
+              <div class="v5-agg__stat-val">{{ groupStatsMap[agg.name]?.req24h || 0 }}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
 
     <!-- KPI row -->
     <div class="v3-kpi-row">
@@ -411,7 +556,7 @@ async function copyText(value: string) {
     </div>
 
     <!-- Top models + Heat / Endpoints -->
-    <div class="v3-dash-grid">
+    <div v-if="false" class="v3-dash-grid">
       <!-- Top models -->
       <div class="v3-tm-card">
         <div class="v3-tm-head">
@@ -426,22 +571,12 @@ async function copyText(value: string) {
             </button>
           </div>
         </div>
-        <div
-          v-for="(m, i) in topModels"
-          :key="m.id + i"
-          class="v3-tm-row"
-        >
+        <div v-for="(m, i) in topModels" :key="m.id + i" class="v3-tm-row">
           <div class="v3-tm-row__rank">#{{ i + 1 }}</div>
           <div>
             <div class="v3-tm-row__name">{{ m.id }}</div>
             <div
-              style="
-                display: flex;
-                align-items: center;
-                gap: 8px;
-                margin-top: 5px;
-                flex-wrap: wrap;
-              "
+              style="display: flex; align-items: center; gap: 8px; margin-top: 5px; flex-wrap: wrap"
             >
               <span
                 class="v3-chip"
@@ -449,32 +584,23 @@ async function copyText(value: string) {
               >
                 {{ m.tier }}
               </span>
-              <span
-                v-if="m.avgMs != null && m.avgMs > 0"
-                class="v3-tm-row__sub"
-                style="margin-top: 0"
-              >
+              <span v-if="Number(m.avgMs || 0) > 0" class="v3-tm-row__sub" style="margin-top: 0">
                 avg {{ m.avgMs }}ms
                 <span
                   v-if="m.errorRate != null"
                   :style="{
-                    color: m.errorRate > 5 ? 'var(--v3-danger)' : 'var(--v3-ink-3)',
+                    color: Number(m.errorRate || 0) > 5 ? 'var(--v3-danger)' : 'var(--v3-ink-3)',
                     marginLeft: '4px',
                   }"
                 >
-                  · err {{ m.errorRate.toFixed(1) }}%
+                  · err {{ Number(m.errorRate || 0).toFixed(1) }}%
                 </span>
               </span>
             </div>
           </div>
           <div>
             <div class="v3-tm-row__provs">
-              <span
-                v-for="p in m.providers"
-                :key="p"
-                class="v3-tm-row__pchip"
-                :class="pavClass(p)"
-              >
+              <span v-for="p in m.providers" :key="p" class="v3-tm-row__pchip" :class="pavClass(p)">
                 {{ V3_PROVIDER_DIR[p]?.short || p.slice(0, 2).toUpperCase() }}
               </span>
             </div>
@@ -496,28 +622,16 @@ async function copyText(value: string) {
               />
             </div>
             <div class="v3-tm-row__count-sub" style="text-align: right; margin-top: 5px">
-              {{
-                topModels[0]?.calls
-                  ? ((m.calls / topModels[0].calls) * 100).toFixed(0)
-                  : 0
-              }}%
+              {{ topModels[0]?.calls ? ((m.calls / topModels[0].calls) * 100).toFixed(0) : 0 }}%
             </div>
           </div>
           <div style="width: 48px; height: 22px; opacity: 0.45">
-            <v3-sparkline
-              :data="[1, 2, 2, 3, 4, 4, 5, 6]"
-              :color="tierColor(m.tier)"
-            />
+            <v3-sparkline :data="[1, 2, 2, 3, 4, 4, 5, 6]" :color="tierColor(m.tier)" />
           </div>
         </div>
         <div
           v-if="!topModels.length"
-          style="
-            padding: 28px 16px;
-            text-align: center;
-            color: var(--v3-ink-3);
-            font-size: 12.5px;
-          "
+          style="padding: 28px 16px; text-align: center; color: var(--v3-ink-3); font-size: 12.5px"
         >
           {{ t("v3.noKeys") }}
         </div>

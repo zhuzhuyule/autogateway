@@ -3,10 +3,10 @@
 :root,
 :root.light {
   /* 背景色 */
-  --bg-primary: #f8fafc;
-  --bg-secondary: #f1f5f9;
-  --bg-tertiary: #e2e8f0;
-  --bg-gradient: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
+  --bg-primary: #ffffff;
+  --bg-secondary: #ffffff;
+  --bg-tertiary: #ffffff;
+  --bg-gradient: #ffffff;
 
   /* 文字颜色 */
   --text-primary: #0f172a;

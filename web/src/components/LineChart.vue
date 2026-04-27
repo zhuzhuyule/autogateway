@@ -11,6 +11,8 @@ const { t } = useI18n();
 // 图表数据
 const chartData = ref<ChartData | null>(null);
 const selectedGroup = ref<number | null>(null);
+const selectedHours = ref(24);
+const selectedLabelStep = ref(1);
 const loading = ref(true);
 const animationProgress = ref(0);
 const hoveredPoint = ref<{
@@ -33,10 +35,21 @@ const chartSvg = ref<SVGElement>();
 // 图表尺寸和边距
 const chartWidth = 800;
 const chartHeight = 260;
-const padding = { top: 40, right: 40, bottom: 60, left: 80 };
+const padding = { top: 40, right: 40, bottom: 72, left: 80 };
 
 // 格式化分组选项
 const groupOptions = ref<Array<{ label: string; value: number | null }>>([]);
+const hourOptions = computed(() => [
+  { label: t("charts.last6h"), value: 6 },
+  { label: t("charts.last12h"), value: 12 },
+  { label: t("charts.last24h"), value: 24 },
+  { label: t("charts.last48h"), value: 48 },
+]);
+const labelStepOptions = computed(() => [
+  { label: t("charts.labelEveryHour"), value: 1 },
+  { label: t("charts.labelEvery2Hours"), value: 2 },
+  { label: t("charts.labelEvery3Hours"), value: 3 },
+]);
 
 // 计算有效的绘图区域
 const plotWidth = chartWidth - padding.left - padding.right;
@@ -57,6 +70,13 @@ const dataRange = computed(() => {
     return { min: 0, max: 10 };
   }
 
+  if (max <= 10) {
+    return {
+      min: 0,
+      max: Math.max(1, Math.ceil(max)),
+    };
+  }
+
   // 添加一些padding让图表更好看
   const paddingValue = Math.max((max - min) * 0.1, 1);
   return {
@@ -68,6 +88,17 @@ const dataRange = computed(() => {
 // 生成Y轴刻度
 const yTicks = computed(() => {
   const { min, max } = dataRange.value;
+  if (max <= 10) {
+    const top = Math.max(1, Math.ceil(max));
+    const step = top <= 5 ? 1 : 2;
+    const ticks: number[] = [];
+    for (let value = Math.floor(min); value <= top; value += step) {
+      ticks.push(value);
+    }
+    if (ticks[ticks.length - 1] !== top) ticks.push(top);
+    return ticks;
+  }
+
   const range = max - min;
   const tickCount = 5;
   const step = range / (tickCount - 1);
@@ -92,12 +123,11 @@ const visibleLabels = computed(() => {
   }
 
   const labels = chartData.value.labels;
-  const maxLabels = 8; // 最多显示8个标签
-  const step = Math.ceil(labels.length / maxLabels);
+  const step = selectedLabelStep.value;
 
   return labels
     .map((label, index) => ({ text: formatTimeLabel(label), index }))
-    .filter((_, i) => i % step === 1);
+    .filter((_, i) => i % step === 0);
 });
 
 // 位置计算函数
@@ -344,8 +374,8 @@ const fetchGroups = async () => {
 const fetchChartData = async () => {
   try {
     loading.value = true;
-    const response = await getDashboardChart(selectedGroup.value || undefined);
-    chartData.value = response.data;
+    const response = await getDashboardChart(selectedGroup.value || undefined, selectedHours.value);
+    chartData.value = chartDataForSelectedRange(response.data);
 
     // 延迟启动动画，确保DOM更新完成
     setTimeout(() => {
@@ -363,6 +393,25 @@ watch(selectedGroup, () => {
   fetchChartData();
 });
 
+watch(selectedHours, hours => {
+  selectedLabelStep.value = hours > 24 ? 2 : 1;
+  fetchChartData();
+});
+
+function chartDataForSelectedRange(data: ChartData): ChartData {
+  if (data.labels.length <= selectedHours.value) {
+    return data;
+  }
+  const start = data.labels.length - selectedHours.value;
+  return {
+    labels: data.labels.slice(start),
+    datasets: data.datasets.map(dataset => ({
+      ...dataset,
+      data: dataset.data.slice(start),
+    })),
+  };
+}
+
 onMounted(() => {
   fetchGroups();
   fetchChartData();
@@ -372,27 +421,45 @@ onMounted(() => {
 <template>
   <div class="chart-container">
     <div class="chart-header">
-      <div class="chart-title-section">
-        <h3 class="chart-title">{{ t("charts.requestTrend24h") }}</h3>
-      </div>
-      <n-select
-        v-model:value="selectedGroup"
-        :options="groupOptions as any"
-        :placeholder="t('charts.allGroups')"
-        size="small"
-        style="width: 150px"
-        clearable
-      />
-    </div>
-
-    <div v-if="chartData" class="chart-content">
-      <div class="chart-wrapper">
+      <div class="chart-left">
         <div class="chart-legend">
-          <div v-for="dataset in chartData.datasets" :key="dataset.label" class="legend-item">
+          <div
+            v-for="dataset in chartData?.datasets || []"
+            :key="dataset.label"
+            class="legend-item"
+          >
             <div class="legend-indicator" :style="{ backgroundColor: dataset.color }" />
             <span class="legend-label">{{ dataset.label }}</span>
           </div>
         </div>
+        <div class="chart-axis-note">{{ t("charts.axisNote") }}</div>
+      </div>
+      <div class="chart-controls">
+        <n-select
+          v-model:value="selectedHours"
+          :options="hourOptions"
+          size="small"
+          class="chart-range-select"
+        />
+        <n-select
+          v-model:value="selectedLabelStep"
+          :options="labelStepOptions"
+          size="small"
+          class="chart-step-select"
+        />
+        <n-select
+          v-model:value="selectedGroup"
+          :options="groupOptions as any"
+          :placeholder="t('charts.allGroups')"
+          size="small"
+          class="chart-group-select"
+          clearable
+        />
+      </div>
+    </div>
+
+    <div v-if="chartData" class="chart-content">
+      <div class="chart-wrapper">
         <svg
           ref="chartSvg"
           viewBox="0 0 800 260"
@@ -465,9 +532,10 @@ onMounted(() => {
               />
               <text
                 :x="getXPosition(label.index)"
-                :y="chartHeight - padding.bottom + 18"
+                :y="chartHeight - padding.bottom + 24"
                 text-anchor="middle"
                 class="axis-label"
+                :transform="`rotate(-35 ${getXPosition(label.index)} ${chartHeight - padding.bottom + 24})`"
               >
                 {{ label.text }}
               </text>
@@ -935,5 +1003,132 @@ onMounted(() => {
 
 .legend-item:nth-child(3) {
   animation-delay: 0.2s;
+}
+
+.chart-container {
+  padding: 0;
+  border-radius: 0;
+  border: 0;
+  backdrop-filter: none;
+  background: transparent !important;
+  color: var(--v3-ink);
+  animation: none;
+}
+
+.chart-header {
+  align-items: center;
+  margin-bottom: 14px;
+}
+
+.chart-left {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.chart-controls {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.chart-range-select {
+  width: 106px;
+}
+
+.chart-step-select {
+  width: 104px;
+}
+
+.chart-group-select {
+  width: 150px;
+}
+
+.chart-axis-note {
+  font: 500 11.5px/1 var(--v3-sans);
+  color: var(--v3-ink-3);
+}
+
+.chart-legend {
+  position: static;
+  transform: none;
+  display: flex;
+  justify-content: flex-start;
+  gap: 8px;
+  padding: 0;
+  border: 0;
+  background: transparent !important;
+  backdrop-filter: none;
+}
+
+.legend-item {
+  padding: 0;
+  gap: 7px;
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  color: var(--v3-ink-2) !important;
+  font: 600 12px/1 var(--v3-sans);
+  animation: none;
+}
+
+.legend-item:hover {
+  transform: none !important;
+  box-shadow: none !important;
+}
+
+.legend-indicator {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+}
+
+.legend-indicator::after {
+  display: none;
+}
+
+.chart-wrapper {
+  display: block;
+}
+
+.chart-svg {
+  display: block;
+  width: 100%;
+  min-height: 280px;
+  background: linear-gradient(180deg, #ffffff 0%, oklch(0.985 0.01 235) 100%) !important;
+  border: 1px solid var(--v3-line) !important;
+  border-radius: 10px;
+  box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.8);
+}
+
+.axis-label {
+  fill: var(--v3-ink-3);
+  font: 500 11px/1 var(--v3-mono);
+}
+
+.chart-loading {
+  color: var(--v3-ink-3);
+}
+
+@media (max-width: 768px) {
+  .chart-header {
+    align-items: stretch;
+  }
+
+  .chart-left,
+  .chart-controls {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .chart-range-select,
+  .chart-step-select,
+  .chart-group-select {
+    width: 100%;
+  }
 }
 </style>

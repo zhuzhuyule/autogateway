@@ -36,6 +36,8 @@ export default {
     detail: "详情",
     more: "更多",
     less: "收起",
+    expand: "展开",
+    collapse: "收起",
     all: "全部",
     none: "无",
     select: "选择",
@@ -584,6 +586,14 @@ export default {
   charts: {
     requestTrend24h: "24小时请求趋势",
     allGroups: "全部分组",
+    last6h: "最近 6h",
+    last12h: "最近 12h",
+    last24h: "最近 24h",
+    last48h: "最近 48h",
+    labelEveryHour: "每小时",
+    labelEvery2Hours: "每 2h",
+    labelEvery3Hours: "每 3h",
+    axisNote: "纵轴：请求次数 · 横轴：小时",
   },
   security: {
     warningsWithHigh: "发现 {count} 个安全配置问题，{highCount} 个需要优先处理",

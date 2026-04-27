@@ -28,13 +28,12 @@
 }
 
 html {
-  background: var(--header-bg);
+  background: #ffffff;
 }
 
 body {
   height: 100%;
-  background: var(--bg-gradient);
-  background-attachment: fixed;
+  background: #ffffff;
   color: var(--text-primary);
 }
 

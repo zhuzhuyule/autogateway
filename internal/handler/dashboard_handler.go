@@ -1,12 +1,13 @@
 package handler
 
 import (
-	"fmt"
 	"autogateway/internal/encryption"
 	app_errors "autogateway/internal/errors"
 	"autogateway/internal/i18n"
 	"autogateway/internal/models"
 	"autogateway/internal/response"
+	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -117,10 +118,20 @@ func (s *Server) Stats(c *gin.Context) {
 // Chart Get dashboard chart data
 func (s *Server) Chart(c *gin.Context) {
 	groupID := c.Query("groupId")
+	hours := 24
+	if rawHours := strings.TrimSpace(c.DefaultQuery("hours", "24")); rawHours != "" {
+		parsedHours, err := strconv.Atoi(rawHours)
+		if err == nil {
+			switch parsedHours {
+			case 6, 12, 24, 48:
+				hours = parsedHours
+			}
+		}
+	}
 
 	now := time.Now()
 	endHour := now.Truncate(time.Hour)
-	startHour := endHour.Add(-23 * time.Hour)
+	startHour := endHour.Add(-time.Duration(hours-1) * time.Hour)
 
 	var hourlyStats []models.GroupHourlyStat
 	query := s.DB.Table("group_hourly_stats").
@@ -149,7 +160,7 @@ func (s *Server) Chart(c *gin.Context) {
 	var labels []string
 	var successData, failureData []int64
 
-	for i := range 24 {
+	for i := range hours {
 		hour := startHour.Add(time.Duration(i) * time.Hour)
 		labels = append(labels, hour.Format(time.RFC3339))
 

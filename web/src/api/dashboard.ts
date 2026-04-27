@@ -11,10 +11,14 @@ export const getDashboardStats = () => {
 /**
  * 获取仪表盘图表数据
  * @param groupId 可选的分组ID
+ * @param hours 请求最近多少小时的数据
  */
-export const getDashboardChart = (groupId?: number) => {
+export const getDashboardChart = (groupId?: number, hours = 24) => {
   return http.get<ChartData>("/dashboard/chart", {
-    params: groupId ? { groupId } : {},
+    params: {
+      ...(groupId ? { groupId } : {}),
+      hours,
+    },
   });
 };
 
