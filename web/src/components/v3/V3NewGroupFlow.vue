@@ -188,6 +188,24 @@ function onFaviconErr(id: string) {
   faviconErr.value[id] = true;
 }
 
+function rateTag(p: FreeProvider): string {
+  return p.freeTier
+    .replace(/requests?\/day/gi, "/day")
+    .replace(/tokens?\/day/gi, "tk/day")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function featTags(p: FreeProvider): string[] {
+  if (!p.description) {
+    return [];
+  }
+  return p.description
+    .split(/[,，/|·、]/)
+    .map(s => s.trim())
+    .filter(Boolean);
+}
+
 function badgeLabel(badge?: FreeProvider["badge"]) {
   if (badge === "fast") {
     return "⚡ fast";
@@ -581,13 +599,15 @@ async function testAndSave() {
               </div>
               <div style="flex: 1; min-width: 0">
                 <div class="v3-pc__name">{{ prov.name }}</div>
-                <div class="v3-pc__free">★ {{ prov.freeTier }}</div>
               </div>
               <span v-if="prov.badge" :class="badgeClass(prov.badge)">
                 {{ badgeLabel(prov.badge) }}
               </span>
             </div>
-            <div class="v3-pc__desc">{{ prov.description }}</div>
+            <div class="v3-pc__tags">
+              <span class="v3-pc__tag v3-pc__tag--rate">★ {{ rateTag(prov) }}</span>
+              <span v-for="t in featTags(prov)" :key="t" class="v3-pc__tag">{{ t }}</span>
+            </div>
             <div class="v3-pc__foot">
               <button
                 class="v3-btn v3-btn--sm"
@@ -703,20 +723,28 @@ async function testAndSave() {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.v3-pc__free {
-  font: 500 9.5px var(--v3-mono);
-  color: var(--v3-ok);
-  margin-top: 1px;
-}
-.v3-pc__desc {
-  font: 400 11.5px/1.4 var(--v3-sans);
-  color: var(--v3-ink-3);
+.v3-pc__tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
   margin-bottom: 10px;
-  height: 32px;
-  overflow: hidden;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
+  flex: 1;
+  align-content: flex-start;
+}
+.v3-pc__tag {
+  font: 500 10px/1.4 var(--v3-mono);
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--v3-surface-2);
+  color: var(--v3-ink-2);
+  border: 1px solid var(--v3-line);
+  white-space: nowrap;
+}
+.v3-pc__tag--rate {
+  background: var(--v3-ok-soft);
+  color: var(--v3-ok);
+  border-color: transparent;
+  font-weight: 700;
 }
 .v3-pc__foot {
   display: flex;
