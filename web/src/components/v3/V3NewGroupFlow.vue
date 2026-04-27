@@ -884,11 +884,7 @@ async function testAndSave() {
 .v3-msel__chip--paid {
   border-style: dashed;
 }
-.v3-msel__chip-id {
-  max-width: 180px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
+.v3-msel__chip-id { white-space: nowrap; }
 .v3-msel__chip-badge {
   font-size: 9px;
   padding: 1px 3px;

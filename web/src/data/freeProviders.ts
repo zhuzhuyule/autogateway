@@ -93,6 +93,7 @@ export const FREE_PROVIDERS: FreeProvider[] = [
     baseUrl: "https://openrouter.ai/api",
     testModel: "mistralai/mistral-7b-instruct:free",
     models: [
+      "openrouter/auto",
       "deepseek/deepseek-r1-0528:free",
       "deepseek/deepseek-chat-v3-0324:free",
       "qwen/qwen3.6-plus:free",
@@ -556,6 +557,7 @@ export const FREE_MODELS: FreeModel[] = [
   },
 
   // OpenRouter (含 :free 后缀)
+  { providerId: "openrouter", modelId: "openrouter/auto", tier: "balanced", notes: "自动路由" },
   {
     providerId: "openrouter",
     modelId: "deepseek/deepseek-r1-0528:free",
