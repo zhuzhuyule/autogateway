@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { keysApi } from "@/api/keys";
+import { detectFromText } from "@/data/keyDetector";
+import { getProviderById } from "@/data/freeProviders";
 import { appState } from "@/utils/app-state";
 import { CloudUploadOutline, DocumentTextOutline } from "@vicons/ionicons5";
 import { NButton, NCard, NIcon, NModal, NUpload, type UploadFileInfo } from "naive-ui";
-import { ref, watch } from "vue";
+import { computed, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 
 interface Props {
@@ -27,6 +29,14 @@ const loading = ref(false);
 const keysText = ref("");
 const inputMode = ref<"text" | "file">("text");
 const fileList = ref<UploadFileInfo[]>([]);
+
+const keyHint = computed(() => {
+  if (inputMode.value !== "text" || !keysText.value.trim()) return null;
+  const d = detectFromText(keysText.value);
+  if (!d) return null;
+  const p = getProviderById(d.providerId);
+  return { ...d, providerDisplayName: p?.name ?? d.providerName };
+});
 
 watch(
   () => props.show,
@@ -157,6 +167,12 @@ function isSubmitDisabled() {
             :placeholder="t('keys.enterKeysPlaceholder')"
             rows="8"
           />
+          <div v-if="keyHint" class="v3-key-hint">
+            <span class="v3-key-hint__badge" :class="keyHint.confidence === 'high' ? 'ok' : 'warn'">
+              {{ keyHint.confidence === 'high' ? '✓' : '?' }}
+            </span>
+            <span>{{ t('v3.smartDetectMatch', { provider: keyHint.providerDisplayName, hint: keyHint.hint }) }}</span>
+          </div>
         </div>
 
         <div v-else class="v3-upload-wrapper">
@@ -318,6 +334,24 @@ function isSubmitDisabled() {
   font: 400 11px/1 var(--v3-sans);
   color: var(--v3-ink-3);
 }
+
+.v3-key-hint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: var(--v3-surface-2);
+  border-top: 1px solid var(--v3-line);
+  font: 400 11.5px var(--v3-sans);
+  color: var(--v3-ink-2);
+}
+.v3-key-hint__badge {
+  font: 700 10px var(--v3-mono);
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+.v3-key-hint__badge.ok { background: var(--v3-ok-soft); color: var(--v3-ok); }
+.v3-key-hint__badge.warn { background: oklch(0.96 0.05 80); color: oklch(0.5 0.15 80); }
 
 .v3-modal-footer {
   display: flex;

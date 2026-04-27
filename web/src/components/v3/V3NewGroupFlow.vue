@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { keysApi } from "@/api/keys";
+import { detectFromText, type KeyDetection } from "@/data/keyDetector";
 import { FREE_PROVIDERS, type FreeProvider } from "@/data/freeProviders";
 import type { Group } from "@/types/models";
 import {
   CheckmarkOutline,
   CloseOutline,
+  FlashOutline,
   KeyOutline,
   OpenOutline,
   PlayOutline,
@@ -38,6 +40,19 @@ const submitting = ref(false);
 const testing = ref(false);
 const testResults = ref<{ ok: number; fail: number } | null>(null);
 
+// Smart detection
+const smartInput = ref("");
+const smartDetection = computed<KeyDetection | null>(() => detectFromText(smartInput.value));
+
+function applySmartDetection() {
+  if (!smartDetection.value) return;
+  const provider = FREE_PROVIDERS.find(p => p.id === smartDetection.value!.providerId);
+  if (!provider) return;
+  pickProvider(provider);
+  pasted.value = smartInput.value;
+  smartInput.value = "";
+}
+
 watch(
   () => props.show,
   v => {
@@ -48,6 +63,7 @@ watch(
       submitting.value = false;
       testing.value = false;
       testResults.value = null;
+      smartInput.value = "";
     }
   }
 );
@@ -89,6 +105,35 @@ function openKeyPage() {
     window.open(picked.value.signupUrl, "_blank", "noopener");
   }
 }
+
+// Favicon support
+const FAVICON_DOMAIN_MAP: Record<string, string> = {
+  openai: "openai.com",
+  gemini: "gemini.google.com",
+  anthropic: "anthropic.com",
+  google: "google.com",
+  groq: "groq.com",
+  cerebras: "cerebras.ai",
+  openrouter: "openrouter.ai",
+  together: "together.ai",
+  cloudflare: "cloudflare.com",
+  mistral: "mistral.ai",
+  cohere: "cohere.com",
+  github: "github.com",
+  siliconflow: "siliconflow.cn",
+  zhipu: "zhipuai.cn",
+  nvidia: "nvidia.com",
+  gitee: "gitee.com",
+  modelscope: "modelscope.cn",
+};
+
+function faviconFor(id: string): string {
+  const domain = FAVICON_DOMAIN_MAP[id];
+  if (domain) return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=64`;
+  return "";
+}
+const faviconErr = ref<Record<string, boolean>>({});
+function onFaviconErr(id: string) { faviconErr.value[id] = true; }
 
 function badgeLabel(badge?: FreeProvider["badge"]) {
   if (badge === "fast") return "⚡ fast";
@@ -336,6 +381,38 @@ async function testAndSave() {
           </div>
         </div>
 
+        <!-- Smart detect bar (hidden once provider is picked) -->
+        <div v-if="!picked" class="v3-sdet">
+          <div class="v3-sdet__head">
+            <n-icon :component="FlashOutline" :size="12" style="color: var(--v3-accent)" />
+            <span class="v3-sdet__title">{{ t("v3.smartDetect") }}</span>
+          </div>
+          <div class="v3-sdet__body">
+            <textarea
+              v-model="smartInput"
+              class="v3-sdet__input"
+              :placeholder="t('v3.smartDetectPlaceholder')"
+              rows="2"
+              spellcheck="false"
+            />
+            <div class="v3-sdet__result" :class="{ 'v3-sdet__result--visible': smartDetection }">
+              <template v-if="smartDetection">
+                <span class="v3-sdet__badge" :class="smartDetection.confidence === 'high' ? 'v3-sdet__badge--high' : 'v3-sdet__badge--med'">
+                  {{ smartDetection.confidence === 'high' ? '✓ 高置信度' : '? 低置信度' }}
+                </span>
+                <span class="v3-sdet__name">{{ smartDetection.providerName }}</span>
+                <span class="v3-sdet__hint">{{ smartDetection.hint }}</span>
+                <button class="v3-btn v3-btn--accent v3-btn--sm" style="margin-left: auto" @click="applySmartDetection">
+                  {{ t("v3.smartApply") }} →
+                </button>
+              </template>
+              <template v-else-if="smartInput.trim()">
+                <span class="v3-sdet__hint">{{ t("v3.smartNoMatch") }}</span>
+              </template>
+            </div>
+          </div>
+        </div>
+
         <!-- Provider catalog grid -->
         <div
           style="
@@ -370,12 +447,18 @@ async function testAndSave() {
             @click="pickProvider(prov)"
           >
             <div class="v3-pc__head">
-              <span
-                :class="pavClassFor(prov.id) + ' v3-pc__logo'"
-                style="font-size: 11px"
-              >
-                {{ prov.name.replace(/[^A-Za-z0-9]/g, "").slice(0, 2).toUpperCase() }}
-              </span>
+              <div class="v3-pc__logo-wrapper">
+                <img
+                  v-if="faviconFor(prov.id) && !faviconErr[prov.id]"
+                  :src="faviconFor(prov.id)"
+                  alt=""
+                  @error="onFaviconErr(prov.id)"
+                  class="v3-pc__favicon"
+                />
+                <span v-else :class="pavClassFor(prov.id) + ' v3-pc__logo'">
+                  {{ prov.name.replace(/[^A-Za-z0-9]/g, "").slice(0, 2).toUpperCase() }}
+                </span>
+              </div>
               <div style="flex: 1; min-width: 0">
                 <div class="v3-pc__name">{{ prov.name }}</div>
                 <div class="v3-pc__free">★ {{ prov.freeTier }}</div>
@@ -388,14 +471,9 @@ async function testAndSave() {
             <div class="v3-pc__foot">
               <button
                 class="v3-btn v3-btn--sm"
-                style="flex: 1"
+                style="flex: 1; height: 26px; font-size: 11px"
                 @click.stop="pickProvider(prov)"
               >
-                <n-icon
-                  v-if="picked?.id === prov.id"
-                  :component="CheckmarkOutline"
-                  :size="11"
-                />
                 {{ picked?.id === prov.id ? t("v3.selected") : t("v3.useThis") }}
               </button>
               <a
@@ -403,9 +481,10 @@ async function testAndSave() {
                 target="_blank"
                 rel="noopener noreferrer"
                 class="v3-btn v3-btn--sm"
+                style="height: 26px; font-size: 11px"
                 @click.stop
               >
-                <n-icon :component="OpenOutline" :size="11" />
+                <n-icon :component="OpenOutline" :size="10" />
                 {{ t("v3.getKey") }}
               </a>
             </div>
@@ -442,10 +521,98 @@ async function testAndSave() {
   border-bottom: 1px solid var(--v3-line);
 }
 .v3-ngf__body {
-  padding: 16px;
+  padding: 14px;
   overflow: auto;
   flex: 1;
 }
+.v3-pc-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 10px;
+}
+.v3-pc {
+  background: var(--v3-surface);
+  border: 1px solid var(--v3-line);
+  border-radius: var(--v3-radius-md);
+  padding: 10px 12px;
+  cursor: pointer;
+  transition: all 120ms;
+  display: flex;
+  flex-direction: column;
+}
+.v3-pc:hover {
+  border-color: var(--v3-line-strong);
+  box-shadow: var(--v3-shadow-sm);
+}
+.v3-pc--selected {
+  border-color: var(--v3-accent);
+  background: var(--v3-accent-soft);
+}
+.v3-pc__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+.v3-pc__logo-wrapper {
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.v3-pc__favicon {
+  width: 24px;
+  height: 24px;
+  object-fit: contain;
+}
+.v3-pc__logo {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+}
+.v3-pc__name {
+  font: 700 13px var(--v3-sans);
+  color: var(--v3-ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.v3-pc__free {
+  font: 500 9.5px var(--v3-mono);
+  color: var(--v3-ok);
+  margin-top: 1px;
+}
+.v3-pc__desc {
+  font: 400 11.5px/1.4 var(--v3-sans);
+  color: var(--v3-ink-3);
+  margin-bottom: 10px;
+  height: 32px;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.v3-pc__foot {
+  display: flex;
+  gap: 6px;
+  margin-top: auto;
+}
+.v3-pc__badge {
+  font: 700 8.5px var(--v3-mono);
+  padding: 1px 4px;
+  border-radius: 3px;
+  text-transform: uppercase;
+}
+.v3-pc__badge--fast { background: var(--v3-ok-soft); color: var(--v3-ok); }
+.v3-pc__badge--high { background: var(--v3-accent-soft); color: var(--v3-accent); }
+.v3-pc__badge--multi { background: var(--v3-info-soft); color: var(--v3-info); }
+
 .v3-ngf__foot {
   display: flex;
   align-items: center;
@@ -454,6 +621,63 @@ async function testAndSave() {
   border-top: 1px solid var(--v3-line);
   background: var(--v3-surface-2);
 }
+
+/* Smart detect */
+.v3-sdet {
+  margin-top: 4px;
+  border: 1px solid var(--v3-accent);
+  border-radius: var(--v3-radius-md);
+  overflow: hidden;
+  background: var(--v3-accent-soft);
+}
+.v3-sdet__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-bottom: 1px solid oklch(from var(--v3-accent) l c h / 0.15);
+}
+.v3-sdet__title {
+  font: 600 11px/1 var(--v3-mono);
+  color: var(--v3-accent);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.v3-sdet__body {
+  display: flex;
+  flex-direction: column;
+}
+.v3-sdet__input {
+  width: 100%;
+  padding: 8px 12px;
+  background: transparent;
+  border: none;
+  outline: none;
+  font: 500 12px/1.5 var(--v3-mono);
+  color: var(--v3-ink);
+  resize: none;
+}
+.v3-sdet__input::placeholder { color: var(--v3-ink-4); }
+.v3-sdet__result {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  min-height: 32px;
+  border-top: 1px solid oklch(from var(--v3-accent) l c h / 0.12);
+  font: 400 11.5px var(--v3-sans);
+  color: var(--v3-ink-2);
+}
+.v3-sdet__badge {
+  font: 700 9px/1 var(--v3-mono);
+  padding: 2px 5px;
+  border-radius: 3px;
+  text-transform: uppercase;
+}
+.v3-sdet__badge--high { background: var(--v3-ok-soft); color: var(--v3-ok); }
+.v3-sdet__badge--med { background: var(--v3-warn-soft, oklch(0.96 0.05 80)); color: var(--v3-warn, oklch(0.6 0.15 80)); }
+.v3-sdet__name { font: 600 12px var(--v3-sans); color: var(--v3-ink); }
+.v3-sdet__hint { font: 400 11px var(--v3-mono); color: var(--v3-ink-3); }
 @media (max-width: 700px) {
   .v3-intake__steps {
     grid-template-columns: 1fr;
