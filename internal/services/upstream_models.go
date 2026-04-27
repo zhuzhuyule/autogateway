@@ -7,11 +7,26 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
 	"autogateway/internal/models"
 )
+
+// versionPathRe matches a trailing /vN segment so we don't double-append /v1.
+var versionPathRe = regexp.MustCompile(`/v\d+(?:beta\d*)?$`)
+
+// joinModelsPath appends the OpenAI-style models endpoint to baseURL,
+// avoiding /v1/v1/models when baseURL already ends with /vN.
+func joinModelsPath(baseURL, fallbackVersionPath string) string {
+	base := strings.TrimRight(baseURL, "/")
+	u, err := url.Parse(base)
+	if err == nil && versionPathRe.MatchString(u.Path) {
+		return base + "/models"
+	}
+	return base + fallbackVersionPath
+}
 
 // FetchUpstreamModels 调用 group 第一个 upstream 的 /v1/models (或 channel 等价端点)
 // 返回模型 ID 列表. 不支持的 channel 返回错误.
@@ -58,7 +73,7 @@ func firstUpstreamURL(group *models.Group) (string, error) {
 }
 
 func fetchOpenAIModels(ctx context.Context, baseURL, apiKey string) ([]string, error) {
-	endpoint := baseURL + "/v1/models"
+	endpoint := joinModelsPath(baseURL, "/v1/models")
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return nil, err
@@ -99,7 +114,7 @@ func fetchOpenAIModels(ctx context.Context, baseURL, apiKey string) ([]string, e
 }
 
 func fetchAnthropicModels(ctx context.Context, baseURL, apiKey string) ([]string, error) {
-	endpoint := baseURL + "/v1/models"
+	endpoint := joinModelsPath(baseURL, "/v1/models")
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return nil, err
@@ -130,7 +145,7 @@ func fetchAnthropicModels(ctx context.Context, baseURL, apiKey string) ([]string
 }
 
 func fetchGeminiModels(ctx context.Context, baseURL, apiKey string) ([]string, error) {
-	endpoint := baseURL + "/v1beta/models?key=" + url.QueryEscape(apiKey)
+	endpoint := joinModelsPath(baseURL, "/v1beta/models") + "?key=" + url.QueryEscape(apiKey)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return nil, err

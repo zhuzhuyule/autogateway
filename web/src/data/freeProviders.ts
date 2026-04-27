@@ -444,8 +444,9 @@ export const FREE_PROVIDERS: FreeProvider[] = [
     docsUrl: "https://ai.gitee.com/docs/openapi/v1",
     channelType: "openai",
     baseUrl: "https://ai.gitee.com/v1",
-    testModel: "Qwen3-8B",
+    testModel: "internlm3-8b-instruct",
     models: [
+      "internlm3-8b-instruct",
       "Qwen3-8B",
       "Qwen3-4B",
       "DeepSeek-R1-Distill-Qwen-14B",
@@ -806,6 +807,7 @@ export const FREE_MODELS: FreeModel[] = [
   { providerId: "xfyun", modelId: "xdeepseekr1", tier: "max", notes: "推理增强" },
 
   // Gitee AI (永久免费小模型)
+  { providerId: "gitee-ai", modelId: "internlm3-8b-instruct", tier: "fast", notes: "永久免费" },
   { providerId: "gitee-ai", modelId: "Qwen3-8B", tier: "fast", notes: "永久免费" },
   { providerId: "gitee-ai", modelId: "Qwen3-4B", tier: "fast", notes: "永久免费" },
   {
