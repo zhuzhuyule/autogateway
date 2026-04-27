@@ -87,6 +87,27 @@ const RULES: Rule[] = [
     confidence: "medium",
     hint: "UUID 格式 · Cohere Trial Key",
   },
+  // 美团 LongCat
+  {
+    test: k => /^ak_[A-Za-z0-9]{20,}/.test(k),
+    providerId: "longcat",
+    confidence: "high",
+    hint: "ak_ 前缀（美团 LongCat）",
+  },
+  // 讯飞星辰 MaaS — APIKey:APISecret（冒号分隔，各 16-44 位字母数字）
+  {
+    test: k => /^[A-Za-z0-9]{16,44}:[A-Za-z0-9]{16,64}$/.test(k),
+    providerId: "xfyun",
+    confidence: "high",
+    hint: "APIKey:APISecret 格式（讯飞星辰）",
+  },
+  // Gitee AI — 全大写字母+数字，38-42位
+  {
+    test: k => /^[A-Z0-9]{38,42}$/.test(k),
+    providerId: "gitee-ai",
+    confidence: "high",
+    hint: "全大写字母+数字，约40位（Gitee AI）",
+  },
   // Generic sk- — could be OpenAI (old), Together, SiliconFlow, AIHubMix…
   {
     test: k => /^sk-[A-Za-z0-9]{20,}$/.test(k),
@@ -107,6 +128,9 @@ const PROVIDER_NAMES: Record<string, string> = {
   "nvidia-nim": "NVIDIA NIM",
   cerebras: "Cerebras",
   cohere: "Cohere",
+  longcat: "美团 LongCat",
+  xfyun: "讯飞星辰",
+  "gitee-ai": "Gitee AI",
 };
 
 /** Detect provider from a single key string. Returns null if unrecognised. */

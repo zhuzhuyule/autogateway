@@ -340,6 +340,39 @@ export const FREE_PROVIDERS: FreeProvider[] = [
     verifiedAt: "2026-04",
   },
   {
+    id: "longcat",
+    name: "美团 LongCat",
+    freeTier: "500K tokens/day · Flash-Lite 5000万 tokens/day",
+    description: "美团旗下长文本模型，256K上下文，OpenAI 兼容",
+    signupUrl: "https://longcat.chat/platform",
+    docsUrl: "https://longcat.chat/platform/docs/zh/",
+    channelType: "openai",
+    baseUrl: "https://api.longcat.chat/openai",
+    testModel: "longcat-flash-lite",
+    models: ["longcat-flash-lite", "longcat-flash-chat", "longcat-flash-thinking", "longcat-2.0-preview"],
+    recommendedGroupName: "longcat",
+    recommendedDisplayName: "美团 LongCat",
+    upstreamHosts: ["api.longcat.chat"],
+    badge: "high-quota",
+    verifiedAt: "2026-04",
+  },
+  {
+    id: "xfyun",
+    name: "讯飞星辰",
+    freeTier: "含永久免费模型（Qwen3.5-2B 等）",
+    description: "科大讯飞 MaaS 平台，65+ 模型，Key 格式 APIKey:APISecret",
+    signupUrl: "https://maas.xfyun.cn",
+    docsUrl: "https://maas.xfyun.cn/modelService",
+    channelType: "openai",
+    baseUrl: "https://maas-api.cn-huabei-1.xf-yun.com/v2",
+    testModel: "xop35qwen2b",
+    models: ["xop35qwen2b", "test_ent", "xop3qwen8b", "xdeepseekv3", "xdeepseekr1"],
+    recommendedGroupName: "xfyun",
+    recommendedDisplayName: "讯飞星辰",
+    upstreamHosts: ["maas-api.cn-huabei-1.xf-yun.com"],
+    verifiedAt: "2026-04",
+  },
+  {
     id: "gitee-ai",
     name: "Gitee AI",
     freeTier: "注册赠体验额度,200+ 国产模型",
@@ -553,6 +586,17 @@ export const FREE_MODELS: FreeModel[] = [
   { providerId: "kilo", modelId: "kilo-auto/free", tier: "balanced", notes: "自动路由" },
   { providerId: "kilo", modelId: "nvidia/nemotron-3-super-120b-a12b:free", tier: "max" },
   { providerId: "kilo", modelId: "x-ai/grok-code-fast-1:optimized:free", tier: "balanced", notes: "代码专用" },
+
+  // 美团 LongCat
+  { providerId: "longcat", modelId: "longcat-flash-lite", tier: "fast", notes: "5000万 tokens/day 免费" },
+  { providerId: "longcat", modelId: "longcat-flash-chat", tier: "balanced", notes: "500K tokens/day" },
+  { providerId: "longcat", modelId: "longcat-flash-thinking", tier: "max", notes: "推理模型,500K tokens/day" },
+
+  // 讯飞星辰（免费模型 price=0）
+  { providerId: "xfyun", modelId: "xop35qwen2b", tier: "fast", notes: "Qwen3.5-2B 免费" },
+  { providerId: "xfyun", modelId: "test_ent", tier: "fast", notes: "Qwen3-1.7B 免费" },
+  { providerId: "xfyun", modelId: "xop3qwen8b", tier: "balanced" },
+  { providerId: "xfyun", modelId: "xdeepseekr1", tier: "max", notes: "推理增强" },
 
   // Gitee AI
   { providerId: "gitee-ai", modelId: "DeepSeek-V4-Flash", tier: "fast", notes: "284B MoE,1M 上下文" },

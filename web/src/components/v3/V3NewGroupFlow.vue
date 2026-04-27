@@ -125,6 +125,11 @@ const FAVICON_DOMAIN_MAP: Record<string, string> = {
   nvidia: "nvidia.com",
   gitee: "gitee.com",
   modelscope: "modelscope.cn",
+  longcat: "longcat.chat",
+  xfyun: "xfyun.cn",
+  aihubmix: "aihubmix.com",
+  kilo: "kilo.ai",
+  llm7: "llm7.io",
 };
 
 function faviconFor(id: string): string {
