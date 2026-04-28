@@ -36,6 +36,12 @@ export interface RoutingSettings {
   ComplexThreshold: number;
 }
 
+export interface AliasSuggestion {
+  model: string;
+  count: number;
+  last_seen: string;
+}
+
 export const RESERVED_ALIASES = ["auto-simple", "auto-medium", "auto-complex"] as const;
 export type ReservedAlias = (typeof RESERVED_ALIASES)[number];
 
@@ -46,6 +52,7 @@ export const aliasesApi = {
   update: (id: number, payload: AliasUpdatePayload) =>
     http.put<ModelAliasRow>(`/aliases/${id}`, payload),
   remove: (id: number) => http.delete(`/aliases/${id}`),
+  suggestions: () => http.get<AliasSuggestion[]>("/aliases/suggestions"),
 };
 
 export const routingSettingsApi = {

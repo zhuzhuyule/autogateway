@@ -3,6 +3,7 @@ import {
   aliasesApi,
   RESERVED_ALIASES,
   routingSettingsApi,
+  type AliasSuggestion,
   type ModelAliasRow,
   type RoutingSettings,
 } from "@/api/aliases";
@@ -402,7 +403,24 @@ async function loadAll() {
   }
 }
 
-onMounted(() => loadAll());
+const suggestions = ref<AliasSuggestion[]>([]);
+async function loadSuggestions() {
+  try {
+    const r = await aliasesApi.suggestions();
+    suggestions.value = (r as unknown as { data: AliasSuggestion[] | null }).data || [];
+  } catch {
+    suggestions.value = [];
+  }
+}
+
+function onClickSuggestion(s: AliasSuggestion) {
+  openPicker(s.model);
+}
+
+onMounted(async () => {
+  await loadAll();
+  await loadSuggestions();
+});
 
 // === Tier board distribution ===
 const tiers = computed(() => {
@@ -557,6 +575,24 @@ function saveSettingsThrottled() {
         {{ t("v5.alMappings", { n: totalMappings }) }}
       </span>
     </h1>
+
+    <div v-if="suggestions.length" class="v5-suggest-banner">
+      <div class="v5-suggest-banner__title">
+        {{ t("v5.suggestionsTitle") || "Detected unknown models in recent requests" }}
+      </div>
+      <div class="v5-suggest-banner__list">
+        <button
+          v-for="s in suggestions"
+          :key="s.model"
+          class="v5-suggest-chip"
+          @click="onClickSuggestion(s)"
+          :title="`Last seen ${s.last_seen}`"
+        >
+          {{ s.model }}
+          <span class="v5-suggest-count">×{{ s.count }}</span>
+        </button>
+      </div>
+    </div>
 
     <!-- Threshold settings with Custom Visual Slider -->
     <div class="v3-thresh-card" style="margin-bottom: 24px; padding: 20px 24px">
@@ -1581,5 +1617,38 @@ function saveSettingsThrottled() {
 .v5-keycard__iconbtn:hover {
   background: var(--v3-surface-3);
   color: var(--v3-ink);
+}
+.v5-suggest-banner {
+  padding: 12px 14px;
+  margin-bottom: 16px;
+  background: var(--v3-bg-soft, var(--v3-bg));
+  border: 1px solid var(--v3-rule);
+  border-radius: var(--v3-radius);
+}
+.v5-suggest-banner__title {
+  font: 500 12px/1.4 var(--v3-sans);
+  color: var(--v3-ink-2);
+  margin-bottom: 8px;
+}
+.v5-suggest-banner__list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.v5-suggest-chip {
+  padding: 4px 8px;
+  border: 1px solid var(--v3-rule);
+  border-radius: 4px;
+  background: var(--v3-bg);
+  cursor: pointer;
+  font: 500 11px/1 var(--v3-mono);
+  color: var(--v3-ink);
+}
+.v5-suggest-chip:hover {
+  border-color: var(--v3-accent);
+}
+.v5-suggest-count {
+  margin-left: 4px;
+  color: var(--v3-ink-3);
 }
 </style>
