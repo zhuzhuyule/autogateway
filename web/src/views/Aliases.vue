@@ -13,6 +13,7 @@ import { V3_PROVIDER_DIR, pavClass } from "@/data/v3Catalog";
 import { findProviderByUpstreams, isFree } from "@/data/freeProviders";
 import {
   AddOutline,
+  BanOutline,
   CheckmarkCircle,
   CloseOutline,
   CreateOutline,
@@ -102,6 +103,7 @@ interface PickerModelView {
   id: string;
   isFree: boolean;
   alreadyBound: boolean;
+  blocked: boolean;
 }
 
 const filteredPickerModels = computed<PickerModelView[]>(() => {
@@ -136,6 +138,10 @@ const filteredPickerModels = computed<PickerModelView[]>(() => {
       .filter(r => r.alias === aliasName && r.group_id === g.id)
       .map(r => r.real_model)
   );
+  // 黑名单 - 这些选了也不会被路由
+  const blockedSet = new Set(
+    parseModelArray((g as unknown as { blocked_models?: unknown }).blocked_models)
+  );
 
   // 4. 搜索过滤
   const q = pickerSearch.value.toLowerCase().trim();
@@ -147,6 +153,7 @@ const filteredPickerModels = computed<PickerModelView[]>(() => {
       id,
       isFree: isFree(providerId, id) === true,
       alreadyBound: boundSet.has(id),
+      blocked: blockedSet.has(id),
     }))
     .sort((a, b) => {
       if (a.isFree !== b.isFree) {
@@ -970,14 +977,17 @@ function saveSettingsThrottled() {
                 :class="{
                   'v3-picker-model-btn--picked': isModelPending(m.id),
                   'v3-picker-model-btn--bound': m.alreadyBound,
+                  'v3-picker-model-btn--blocked': m.blocked,
                 }"
-                :disabled="m.alreadyBound"
+                :disabled="m.alreadyBound || m.blocked"
                 :title="
-                  m.alreadyBound
-                    ? t('v3.aliasAlreadyBound') || '已绑定到此别名'
-                    : m.id
+                  m.blocked
+                    ? t('v3.aliasBlockedTip') || '此模型已被加入黑名单,不会被路由'
+                    : m.alreadyBound
+                      ? t('v3.aliasAlreadyBound') || '已绑定到此别名'
+                      : m.id
                 "
-                @click="!m.alreadyBound && togglePendingPick(m.id)"
+                @click="!m.alreadyBound && !m.blocked && togglePendingPick(m.id)"
               >
                 <span
                   v-if="m.isFree"
@@ -986,7 +996,12 @@ function saveSettingsThrottled() {
                 >🆓</span>
                 <span class="v3-picker-model-btn__id">{{ m.id }}</span>
                 <n-icon
-                  v-if="m.alreadyBound"
+                  v-if="m.blocked"
+                  :component="BanOutline"
+                  class="v3-picker-model-btn__add"
+                />
+                <n-icon
+                  v-else-if="m.alreadyBound"
                   :component="LockClosedOutline"
                   class="v3-picker-model-btn__add"
                 />
@@ -1434,11 +1449,22 @@ function saveSettingsThrottled() {
   color: var(--v3-ok);
   opacity: 1;
 }
-.v3-picker-model-btn--bound {
+.v3-picker-model-btn--bound,
+.v3-picker-model-btn--blocked {
   cursor: not-allowed;
   opacity: 0.55;
   border-style: dashed;
   background: var(--v3-surface);
+}
+.v3-picker-model-btn--blocked {
+  border-color: var(--v3-danger);
+}
+.v3-picker-model-btn--blocked .v3-picker-model-btn__id {
+  color: var(--v3-danger);
+  text-decoration: line-through;
+}
+.v3-picker-model-btn--blocked .v3-picker-model-btn__add {
+  color: var(--v3-danger);
 }
 .v3-picker-model-btn--bound:hover {
   border-color: var(--v3-line);

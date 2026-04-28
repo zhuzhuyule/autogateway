@@ -218,14 +218,14 @@ func (s *Selector) loadCandidates(ctx context.Context, alias string) ([]Candidat
 	return out, nil
 }
 
-// filterByExposed removes candidates whose group is in "specified" routing
-// mode and whose RealModel is NOT in that group's exposed_models JSON.
-// passthrough mode (or missing/empty mode) lets all candidates through.
+// filterByExposed removes candidates whose group rejects the model:
+//   - blocked_models 命中(无视 mode) → 拒绝
+//   - specified 模式 + 不在 exposed_models → 拒绝
+//   - passthrough 模式 → 仅黑名单生效
 //
-// One DB roundtrip looks up mode + exposed_models for the unique group IDs.
-// On query error we fall back to passing candidates through (fail open),
-// since gating routing by exposure is meant to be a UX guardrail not a
-// security boundary — proxy_keys / auth still gate access.
+// One DB roundtrip looks up mode + exposed_models + blocked_models for the
+// unique group IDs. On query error we fall back to passing candidates through
+// (fail open), since gating routing is a UX guardrail not a security boundary.
 func (s *Selector) filterByExposed(ctx context.Context, cands []Candidate) []Candidate {
 	if len(cands) == 0 {
 		return cands
@@ -239,14 +239,15 @@ func (s *Selector) filterByExposed(ctx context.Context, cands []Candidate) []Can
 		ids = append(ids, id)
 	}
 	type row struct {
-		ID                uint
-		ModelRoutingMode  string
-		ExposedModels     string
+		ID               uint
+		ModelRoutingMode string
+		ExposedModels    string
+		BlockedModels    string
 	}
 	var rows []row
 	if err := s.db.WithContext(ctx).
 		Table("groups").
-		Select("id, model_routing_mode, exposed_models").
+		Select("id, model_routing_mode, exposed_models, blocked_models").
 		Where("id IN ?", ids).
 		Scan(&rows).Error; err != nil {
 		return cands
@@ -259,6 +260,10 @@ func (s *Selector) filterByExposed(ctx context.Context, cands []Candidate) []Can
 	for _, c := range cands {
 		r, ok := info[c.GroupID]
 		if !ok {
+			continue
+		}
+		// 黑名单优先 — 命中即拒绝,无视 mode
+		if jsonContainsString(r.BlockedModels, c.RealModel) {
 			continue
 		}
 		if r.ModelRoutingMode != "specified" {

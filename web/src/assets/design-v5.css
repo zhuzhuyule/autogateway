@@ -620,6 +620,18 @@
   background: var(--v3-info-soft);
 }
 
+/* ===== Blocked model state (orthogonal to mode) ===== */
+.v5-modelcard--blocked {
+  border-color: var(--v3-danger);
+  background: oklch(from var(--v3-danger) l c h / 0.04);
+  opacity: 0.8;
+}
+.v5-modelcard--blocked .v5-modelcard__name {
+  text-decoration: line-through;
+  text-decoration-color: var(--v3-danger);
+  text-decoration-thickness: 1px;
+}
+
 /* ===== Model card states for specified routing mode ===== */
 .v5-modelcard--exposed {
   background: oklch(from var(--v3-accent) l c h / 0.04);

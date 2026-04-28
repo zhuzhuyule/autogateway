@@ -14,6 +14,7 @@ import { copy as copyToClipboard } from "@/utils/clipboard";
 import { getGroupDisplayName, maskKey } from "@/utils/display";
 import {
   AddOutline,
+  BanOutline,
   CheckmarkCircle,
   CloseOutline,
   CopyOutline,
@@ -559,6 +560,7 @@ type RoutingMode = "passthrough" | "specified";
 
 const routingMode = ref<RoutingMode>("passthrough");
 const exposedModels = ref<string[]>([]);
+const blockedModels = ref<string[]>([]);
 const availFilter = ref<"all" | "free" | "paid">("all");
 const savingMode = ref(false);
 
@@ -567,6 +569,9 @@ function syncFromGroup() {
   exposedModels.value = Array.isArray(props.group?.exposed_models)
     ? [...(props.group!.exposed_models as string[])]
     : [];
+  blockedModels.value = Array.isArray(props.group?.blocked_models)
+    ? [...(props.group!.blocked_models as string[])]
+    : [];
 }
 syncFromGroup();
 // 只在切换分组时重置本地状态;同一分组下的服务端更新交给 updateGroup 的
@@ -574,6 +579,7 @@ syncFromGroup();
 watch(() => props.group?.id, syncFromGroup);
 
 const exposedSet = computed(() => new Set(exposedModels.value));
+const blockedSet = computed(() => new Set(blockedModels.value));
 
 // 已暴露列表(顶部区,specified 模式才显示) — 应用 search + free/paid 过滤
 const filteredExposed = computed(() => {
@@ -608,6 +614,7 @@ const filteredAvailable = computed(() => {
 async function persistGroupPatch(patch: {
   model_routing_mode?: RoutingMode;
   exposed_models?: string[];
+  blocked_models?: string[];
 }) {
   if (!props.group?.id) {
     return;
@@ -629,7 +636,11 @@ async function persistGroupPatch(patch: {
       patch.exposed_models === undefined ||
       JSON.stringify(updated.exposed_models || []) ===
         JSON.stringify(patch.exposed_models);
-    if (!modeOk || !exposedOk) {
+    const blockedOk =
+      patch.blocked_models === undefined ||
+      JSON.stringify((updated as { blocked_models?: string[] }).blocked_models || []) ===
+        JSON.stringify(patch.blocked_models);
+    if (!modeOk || !exposedOk || !blockedOk) {
       message.warning(
         t("v3.routingPersistDrift") ||
           "后端未识别新字段,请重启服务并刷新 — 改动暂存于本地"
@@ -669,6 +680,16 @@ async function removeFromExposed(modelId: string) {
   const next = exposedModels.value.filter(m => m !== modelId);
   exposedModels.value = next; // optimistic
   await persistGroupPatch({ exposed_models: next });
+}
+
+// 黑名单 toggle:加入 blocked_models 后,即使在 exposed 或 alias 里也不会被路由
+async function toggleBlock(modelId: string) {
+  const isBlocked = blockedSet.value.has(modelId);
+  const next = isBlocked
+    ? blockedModels.value.filter(m => m !== modelId)
+    : [...blockedModels.value, modelId];
+  blockedModels.value = next;
+  await persistGroupPatch({ blocked_models: next });
 }
 
 // 拖拽排序(specified 模式上方区)
@@ -1486,7 +1507,10 @@ const filterCounts = computed(() => ({
               v-for="modelId in filteredExposed"
               :key="`exposed-${modelId}`"
               class="v5-modelcard v5-modelcard--exposed"
-              :class="{ 'v5-modelcard--dragging': dragIdx === exposedModels.indexOf(modelId) }"
+              :class="{
+                'v5-modelcard--dragging': dragIdx === exposedModels.indexOf(modelId),
+                'v5-modelcard--blocked': blockedSet.has(modelId),
+              }"
               draggable="true"
               @dragstart="onExposedDragStart(exposedModels.indexOf(modelId))"
               @dragover.prevent
@@ -1502,6 +1526,9 @@ const filterCounts = computed(() => ({
                 <span v-if="isFreeModel(modelId)" class="v3-chip v3-chip--info" style="flex-shrink: 0; font-size: 10px">
                   {{ t("v3.free") || "free" }}
                 </span>
+                <span v-if="blockedSet.has(modelId)" class="v3-chip v3-chip--danger" style="flex-shrink: 0; font-size: 10px">
+                  🚫 {{ t("v3.blocked") || "blocked" }}
+                </span>
                 <div class="v5-modelcard__spacer" style="flex: 1"></div>
                 <div class="v5-modelcard__aliases">
                   <n-tooltip v-for="a in aliasesFor(modelId)" :key="a.id" placement="top">
@@ -1514,6 +1541,14 @@ const filterCounts = computed(() => ({
                   </n-tooltip>
                   <button class="v5-modelcard__alias-add" style="font-size: 10.5px; padding: 2px 8px; min-height: 22px" @click.stop="addAliasFor(modelId)">
                     @{{ t("v3.alias") || "别名" }}
+                  </button>
+                  <button
+                    class="v3-btn v3-btn--sm v3-btn--icon"
+                    style="min-height: 22px"
+                    :title="blockedSet.has(modelId) ? (t('v3.unblock') || '解除拉黑') : (t('v3.block') || '加入黑名单')"
+                    @click.stop="toggleBlock(modelId)"
+                  >
+                    <n-icon :component="BanOutline" :size="12" />
                   </button>
                   <button class="v3-btn v3-btn--sm v3-btn--icon" style="min-height: 22px" :title="t('v3.removeFromExposed') || 'Remove from exposed'" @click.stop="removeFromExposed(modelId)">
                     <n-icon :component="CloseOutline" :size="12" />
@@ -1537,7 +1572,10 @@ const filterCounts = computed(() => ({
               v-for="modelId in filteredAvailable"
               :key="`avail-${modelId}`"
               class="v5-modelcard"
-              :class="{ 'v5-modelcard--inexposed': exposedSet.has(modelId) }"
+              :class="{
+                'v5-modelcard--inexposed': exposedSet.has(modelId),
+                'v5-modelcard--blocked': blockedSet.has(modelId),
+              }"
             >
               <div class="v5-modelcard__row">
                 <code class="v5-modelcard__name">{{ modelId }}</code>
@@ -1549,7 +1587,18 @@ const filterCounts = computed(() => ({
                 <span v-if="isFreeModel(modelId)" class="v3-chip v3-chip--info" style="flex-shrink: 0; font-size: 10px">
                   {{ t("v3.free") || "free" }}
                 </span>
+                <span v-if="blockedSet.has(modelId)" class="v3-chip v3-chip--danger" style="flex-shrink: 0; font-size: 10px">
+                  🚫 {{ t("v3.blocked") || "blocked" }}
+                </span>
                 <div class="v5-modelcard__spacer" style="flex: 1"></div>
+                <button
+                  class="v3-btn v3-btn--sm v3-btn--icon"
+                  style="min-height: 22px"
+                  :title="blockedSet.has(modelId) ? (t('v3.unblock') || '解除拉黑') : (t('v3.block') || '加入黑名单')"
+                  @click.stop="toggleBlock(modelId)"
+                >
+                  <n-icon :component="BanOutline" :size="12" />
+                </button>
                 <button v-if="exposedSet.has(modelId)" class="v3-btn v3-btn--sm" disabled style="font-size: 10.5px; padding: 2px 8px; min-height: 22px">
                   ✓ {{ t("v3.alreadyExposed") || "已加入" }}
                 </button>
@@ -1569,7 +1618,12 @@ const filterCounts = computed(() => ({
         <!-- =================================== -->
         <template v-else>
           <div v-if="filteredAvailable.length" class="v5-cardgrid">
-            <div v-for="modelId in filteredAvailable" :key="modelId" class="v5-modelcard">
+            <div
+              v-for="modelId in filteredAvailable"
+              :key="modelId"
+              class="v5-modelcard"
+              :class="{ 'v5-modelcard--blocked': blockedSet.has(modelId) }"
+            >
               <div class="v5-modelcard__row">
                 <code class="v5-modelcard__name">{{ modelId }}</code>
               </div>
@@ -1579,6 +1633,9 @@ const filterCounts = computed(() => ({
                 </span>
                 <span v-if="isFreeModel(modelId)" class="v3-chip v3-chip--info" style="flex-shrink: 0; font-size: 10px">
                   {{ t("v3.free") || "free" }}
+                </span>
+                <span v-if="blockedSet.has(modelId)" class="v3-chip v3-chip--danger" style="flex-shrink: 0; font-size: 10px">
+                  🚫 {{ t("v3.blocked") || "blocked" }}
                 </span>
                 <div class="v5-modelcard__spacer" style="flex: 1"></div>
                 <div class="v5-modelcard__aliases">
@@ -1592,6 +1649,14 @@ const filterCounts = computed(() => ({
                   </n-tooltip>
                   <button class="v5-modelcard__alias-add" style="font-size: 10.5px; padding: 2px 8px; min-height: 22px" @click.stop="addAliasFor(modelId)">
                     @{{ t("v3.alias") || "别名" }}
+                  </button>
+                  <button
+                    class="v3-btn v3-btn--sm v3-btn--icon"
+                    style="min-height: 22px"
+                    :title="blockedSet.has(modelId) ? (t('v3.unblock') || '解除拉黑') : (t('v3.block') || '加入黑名单')"
+                    @click.stop="toggleBlock(modelId)"
+                  >
+                    <n-icon :component="BanOutline" :size="12" />
                   </button>
                 </div>
               </div>

@@ -83,6 +83,8 @@ export interface Group {
   model_routing_mode?: "passthrough" | "specified";
   /** specified 模式下的模型白名单;passthrough 模式忽略 */
   exposed_models?: string[];
+  /** 黑名单 — 与 routing mode 正交,passthrough/specified 都生效 */
+  blocked_models?: string[];
   available_models?: string[] | string;
   header_rules?: HeaderRule[];
   proxy_keys: string;

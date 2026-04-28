@@ -84,9 +84,19 @@ func Middleware(s *Selector, resolver AliasResolver) gin.HandlerFunc {
 			}
 		}
 		if err != nil || picked == nil {
-			// alias / exact-name 都没命中,看原 group 是否处于 specified 模式;
-			// 若是且 model 不在 exposed_models 中,直接 405,避免穿透到上游再失败.
+			// alias / exact-name 都没命中,检查原 group 的准入策略:
+			// 1. blocked_models 命中 → 直接 405 (无视 mode)
+			// 2. specified + model 不在 exposed_models → 405
 			if originalGroup, _ := resolver.GetGroupByName(c.Param("group_name")); originalGroup != nil {
+				if modelIsExposed(originalGroup.BlockedModels, model) {
+					c.AbortWithStatusJSON(http.StatusMethodNotAllowed, gin.H{
+						"error": gin.H{
+							"code":    "model_blocked",
+							"message": "model " + model + " is blocked in group " + originalGroup.Name,
+						},
+					})
+					return
+				}
 				if originalGroup.ModelRoutingMode == "specified" &&
 					!modelIsExposed(originalGroup.ExposedModels, model) {
 					c.AbortWithStatusJSON(http.StatusMethodNotAllowed, gin.H{

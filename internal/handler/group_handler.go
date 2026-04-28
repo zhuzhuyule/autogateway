@@ -65,6 +65,7 @@ type GroupCreateRequest struct {
 	ProxyKeys           string              `json:"proxy_keys"`
 	ModelRoutingMode    string              `json:"model_routing_mode"`
 	ExposedModels       []string            `json:"exposed_models"`
+	BlockedModels       []string            `json:"blocked_models"`
 	// AvailableModels 给那些上游没有 /v1/models 端点的 provider 用
 	// (e.g. LongCat) — 建组时直接把静态清单灌入,避免后续 refresh 拉空。
 	AvailableModels []string `json:"available_models"`
@@ -96,6 +97,7 @@ func (s *Server) CreateGroup(c *gin.Context) {
 		ProxyKeys:           req.ProxyKeys,
 		ModelRoutingMode:    req.ModelRoutingMode,
 		ExposedModels:       req.ExposedModels,
+		BlockedModels:       req.BlockedModels,
 		AvailableModels:     req.AvailableModels,
 	}
 
@@ -159,6 +161,7 @@ type GroupUpdateRequest struct {
 	ProxyKeys           *string             `json:"proxy_keys,omitempty"`
 	ModelRoutingMode    *string             `json:"model_routing_mode,omitempty"`
 	ExposedModels       *[]string           `json:"exposed_models,omitempty"`
+	BlockedModels       *[]string           `json:"blocked_models,omitempty"`
 }
 
 type GroupReorderItemRequest struct {
@@ -221,6 +224,7 @@ func (s *Server) UpdateGroup(c *gin.Context) {
 		ProxyKeys:           req.ProxyKeys,
 		ModelRoutingMode:    req.ModelRoutingMode,
 		ExposedModels:       req.ExposedModels,
+		BlockedModels:       req.BlockedModels,
 	}
 
 	if req.Upstreams != nil {
@@ -299,6 +303,7 @@ type GroupResponse struct {
 	ModelsRefreshedAt   *time.Time          `json:"models_refreshed_at,omitempty"`
 	ModelRoutingMode    string              `json:"model_routing_mode"`
 	ExposedModels       datatypes.JSON      `json:"exposed_models,omitempty"`
+	BlockedModels       datatypes.JSON      `json:"blocked_models,omitempty"`
 	KeyCount            int64               `json:"key_count"`
 	CreatedAt           time.Time           `json:"created_at"`
 	UpdatedAt           time.Time           `json:"updated_at"`
@@ -364,6 +369,7 @@ func (s *Server) newGroupResponse(group *models.Group) *GroupResponse {
 		ModelsRefreshedAt:   group.ModelsRefreshedAt,
 		ModelRoutingMode:    group.ModelRoutingMode,
 		ExposedModels:       group.ExposedModels,
+		BlockedModels:       group.BlockedModels,
 		KeyCount:            group.KeyCount,
 		CreatedAt:           group.CreatedAt,
 		UpdatedAt:           group.UpdatedAt,

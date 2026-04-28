@@ -103,6 +103,7 @@ type GroupCreateParams struct {
 	SubGroups           []SubGroupInput
 	ModelRoutingMode    string   // "passthrough" | "specified", 空字符串走默认
 	ExposedModels       []string // specified 模式下的白名单
+	BlockedModels       []string // 黑名单 (与 mode 正交)
 	AvailableModels     []string // 静态模型清单 (LongCat 等无 /models 端点的 provider 用)
 }
 
@@ -128,6 +129,7 @@ type GroupUpdateParams struct {
 	SubGroups           *[]SubGroupInput
 	ModelRoutingMode    *string
 	ExposedModels       *[]string
+	BlockedModels       *[]string
 }
 
 // GroupReorderItem captures a group ID and target sort value.
@@ -261,6 +263,15 @@ func (s *GroupService) CreateGroup(ctx context.Context, params GroupCreateParams
 		availableModelsJSON = buf
 	}
 
+	var blockedModelsJSON datatypes.JSON
+	if params.BlockedModels != nil {
+		buf, err := json.Marshal(params.BlockedModels)
+		if err != nil {
+			return nil, fmt.Errorf("marshal blocked_models: %w", err)
+		}
+		blockedModelsJSON = buf
+	}
+
 	group := models.Group{
 		Name:                name,
 		DisplayName:         strings.TrimSpace(params.DisplayName),
@@ -279,6 +290,7 @@ func (s *GroupService) CreateGroup(ctx context.Context, params GroupCreateParams
 		ProxyKeys:           strings.TrimSpace(params.ProxyKeys),
 		ModelRoutingMode:    routingMode,
 		ExposedModels:       exposedModelsJSON,
+		BlockedModels:       blockedModelsJSON,
 		AvailableModels:     availableModelsJSON,
 	}
 	if availableModelsJSON != nil {
@@ -650,6 +662,14 @@ func (s *GroupService) UpdateGroup(ctx context.Context, id uint, params GroupUpd
 			return nil, fmt.Errorf("marshal exposed_models: %w", err)
 		}
 		group.ExposedModels = buf
+	}
+
+	if params.BlockedModels != nil {
+		buf, err := json.Marshal(*params.BlockedModels)
+		if err != nil {
+			return nil, fmt.Errorf("marshal blocked_models: %w", err)
+		}
+		group.BlockedModels = buf
 	}
 
 	if params.ValidationEndpoint != nil {

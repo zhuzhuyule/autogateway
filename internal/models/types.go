@@ -134,6 +134,9 @@ type Group struct {
 	// ExposedModels — specified 模式下允许调用的模型白名单 (string[] JSON).
 	// passthrough 模式下忽略.
 	ExposedModels datatypes.JSON `gorm:"type:json" json:"exposed_models"`
+	// BlockedModels — 黑名单 (string[] JSON), 与 routing mode 正交:
+	// passthrough / specified 都生效, 包含的模型即使在 exposed 或 alias 命中也会被拒绝。
+	BlockedModels datatypes.JSON `gorm:"type:json" json:"blocked_models"`
 	CreatedAt     time.Time      `json:"created_at"`
 	UpdatedAt     time.Time      `json:"updated_at"`
 
