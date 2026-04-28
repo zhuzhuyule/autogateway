@@ -6,16 +6,15 @@ import ProxyKeysInput from "@/components/common/ProxyKeysInput.vue";
 import {
   FREE_PROVIDERS,
   bootstrapExposedModels,
-  findFreeModel,
   findProviderByUpstreams,
   isFree,
   type FreeProvider,
-  type ModelTier,
 } from "@/data/freeProviders";
 import type { Group, GroupConfigOption, UpstreamInfo } from "@/types/models";
 import {
   Add,
   Close,
+  CopyOutline,
   HelpCircleOutline,
   OpenOutline,
   RefreshOutline,
@@ -173,26 +172,6 @@ const filteredAvailableModels = computed(() => {
   });
 });
 
-function tierTagType(tier?: ModelTier): "success" | "warning" | "error" | "default" {
-  switch (tier) {
-    case "fast":
-      return "success";
-    case "balanced":
-      return "warning";
-    case "max":
-      return "error";
-    default:
-      return "default";
-  }
-}
-
-function tierLabel(tier?: ModelTier): string {
-  if (!tier) {
-    return "";
-  }
-  return t(`modelcatalog.tier${tier.charAt(0).toUpperCase() + tier.slice(1)}`);
-}
-
 function refreshedAtDisplay(iso: string | null): string {
   if (!iso) {
     return "";
@@ -211,14 +190,6 @@ async function copyModelId(modelId: string) {
   } catch {
     message.error(t("common.requestFailed"));
   }
-}
-
-function setAsTestModel(modelId: string) {
-  formData.test_model = modelId;
-  if (!props.group) {
-    userModifiedFields.value.test_model = true;
-  }
-  message.success(t("keys.setAsTestModelSuccess", { model: modelId }));
 }
 
 const testModelOptions = computed(() => {
@@ -1164,28 +1135,19 @@ async function handleSubmit() {
 
                   <div class="models-grid">
                     <div v-for="m in filteredAvailableModels" :key="m" class="model-item">
-                      <div class="model-item-main">
-                        <span class="model-item-id">{{ m }}</span>
-                        <n-tag v-if="modelIsFree(m)" size="tiny" type="success" :bordered="false">
-                          🆓 {{ t("modelcatalog.freeTag") }}
-                        </n-tag>
-                        <n-tag
-                          v-if="findFreeModel(m)?.tier"
-                          size="tiny"
-                          :type="tierTagType(findFreeModel(m)?.tier)"
-                          :bordered="false"
-                        >
-                          {{ tierLabel(findFreeModel(m)?.tier) }}
-                        </n-tag>
-                      </div>
-                      <div class="model-item-actions">
-                        <n-button size="tiny" text @click="copyModelId(m)">
-                          {{ t("common.copy") }}
-                        </n-button>
-                        <n-button size="tiny" text type="primary" @click="setAsTestModel(m)">
-                          {{ t("keys.setAsTestModel") }}
-                        </n-button>
-                      </div>
+                      <span
+                        v-if="modelIsFree(m)"
+                        class="model-item-free"
+                        :title="t('modelcatalog.freeTag')"
+                      >🆓</span>
+                      <span class="model-item-id" :title="m">{{ m }}</span>
+                      <button
+                        class="model-item-copy"
+                        :title="t('common.copy')"
+                        @click="copyModelId(m)"
+                      >
+                        <n-icon :component="CopyOutline" :size="14" />
+                      </button>
                     </div>
                   </div>
                 </template>
@@ -1726,6 +1688,11 @@ async function handleSubmit() {
   padding: 6px 12px;
 }
 
+/* 去掉 n-collapse-item 内容区默认 padding,避免 header/toolbar 间一大块空白 */
+.upstream-models-section :deep(.n-collapse-item__content-inner) {
+  padding-top: 4px !important;
+}
+
 .upstream-models-header {
   display: inline-flex;
   align-items: center;
@@ -1733,31 +1700,30 @@ async function handleSubmit() {
 }
 
 .empty-models-hint {
-  padding: 12px 0 4px;
+  padding: 4px 0;
 }
 
 .models-toolbar {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin: 8px 0 12px;
+  margin: 0 0 8px;
 }
 
 .models-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 6px;
+  gap: 4px;
   max-height: 360px;
   overflow-y: auto;
-  padding: 4px 2px;
+  padding: 2px;
 }
 
 .model-item {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 6px;
-  padding: 6px 10px;
+  padding: 4px 8px;
   border: 1px solid var(--v3-line);
   border-radius: var(--v3-radius-sm);
   background: var(--v3-surface);
@@ -1772,27 +1738,38 @@ async function handleSubmit() {
   background: var(--v3-primary-bg);
 }
 
-.model-item-main {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  min-width: 0;
-  flex: 1;
+.model-item-free {
+  font-size: 13px;
+  line-height: 1;
+  flex-shrink: 0;
+  cursor: help;
 }
 
 .model-item-id {
-  font-family: monospace;
+  font-family: var(--v3-mono, monospace);
   font-size: 12px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  flex: 1;
+  min-width: 0;
 }
 
-.model-item-actions {
+.model-item-copy {
+  border: 0;
+  background: transparent;
+  padding: 2px 4px;
+  border-radius: 4px;
+  cursor: pointer;
+  color: var(--v3-ink-3);
   display: inline-flex;
   align-items: center;
-  gap: 4px;
   flex-shrink: 0;
+  transition: all 120ms;
+}
+.model-item-copy:hover {
+  background: var(--v3-accent-soft);
+  color: var(--v3-accent);
 }
 
 .hint {
