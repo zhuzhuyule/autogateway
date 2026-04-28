@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { keysApi } from "@/api/keys";
-import { findFreeModel, type ModelTier } from "@/data/freeProviders";
+import { findFreeModel, findProviderByUpstreams, isFree, type ModelTier } from "@/data/freeProviders";
 import type {
   Group,
   GroupConfigOption,
@@ -11,7 +11,14 @@ import type {
 import { appState } from "@/utils/app-state";
 import { copy } from "@/utils/clipboard";
 import { getGroupDisplayName, maskProxyKeys } from "@/utils/display";
-import { CopyOutline, EyeOffOutline, EyeOutline, Pencil, RefreshOutline, Trash } from "@vicons/ionicons5";
+import {
+  CopyOutline,
+  EyeOffOutline,
+  EyeOutline,
+  Pencil,
+  RefreshOutline,
+  Trash,
+} from "@vicons/ionicons5";
 import {
   NButton,
   NButtonGroup,
@@ -83,19 +90,36 @@ function parseAvailable(raw: unknown): string[] {
 }
 
 const groupAvailableModels = computed<string[]>(() => {
-  if (!props.group) return [];
-  return parseAvailable((props.group as unknown as { available_models?: unknown }).available_models);
+  if (!props.group) {
+    return [];
+  }
+  return parseAvailable(
+    (props.group as unknown as { available_models?: unknown }).available_models
+  );
 });
+
+const groupProviderId = computed<string | undefined>(() => {
+  if (!props.group?.upstreams) {
+    return undefined;
+  }
+  return findProviderByUpstreams(props.group.upstreams)?.id;
+});
+
+function modelIsFree(modelId: string): boolean {
+  return isFree(groupProviderId.value, modelId) === true;
+}
 
 const filteredGroupModels = computed<string[]>(() => {
   const q = modelsSearch.value.trim().toLowerCase();
   return groupAvailableModels.value
-    .filter((m) => !q || m.toLowerCase().includes(q))
+    .filter(m => !q || m.toLowerCase().includes(q))
     .slice()
     .sort((a, b) => {
-      const fa = !!findFreeModel(a);
-      const fb = !!findFreeModel(b);
-      if (fa !== fb) return fa ? -1 : 1;
+      const fa = modelIsFree(a);
+      const fb = modelIsFree(b);
+      if (fa !== fb) {
+        return fa ? -1 : 1;
+      }
       return a.localeCompare(b);
     });
 });
@@ -106,13 +130,19 @@ interface AggregatedModel {
   providers: string[]; // 子分组 displayName 或 name
 }
 const aggregateModels = computed<AggregatedModel[]>(() => {
-  if (!props.subGroups || props.subGroups.length === 0) return [];
+  if (!props.subGroups || props.subGroups.length === 0) {
+    return [];
+  }
   const map = new Map<string, Set<string>>();
   for (const sg of props.subGroups) {
-    const list = parseAvailable((sg.group as unknown as { available_models?: unknown }).available_models);
+    const list = parseAvailable(
+      (sg.group as unknown as { available_models?: unknown }).available_models
+    );
     const label = sg.group.display_name || sg.group.name;
     for (const m of list) {
-      if (!map.has(m)) map.set(m, new Set());
+      if (!map.has(m)) {
+        map.set(m, new Set());
+      }
       map.get(m)!.add(label);
     }
   }
@@ -125,19 +155,24 @@ const aggregateModels = computed<AggregatedModel[]>(() => {
 const filteredAggregateModels = computed<AggregatedModel[]>(() => {
   const q = modelsSearch.value.trim().toLowerCase();
   return aggregateModels.value
-    .filter((r) => !q || r.modelId.toLowerCase().includes(q))
+    .filter(r => !q || r.modelId.toLowerCase().includes(q))
     .slice()
     .sort((a, b) => {
-      const fa = !!findFreeModel(a.modelId);
-      const fb = !!findFreeModel(b.modelId);
-      if (fa !== fb) return fa ? -1 : 1;
+      const fa = modelIsFree(a.modelId);
+      const fb = modelIsFree(b.modelId);
+      if (fa !== fb) {
+        return fa ? -1 : 1;
+      }
       return a.modelId.localeCompare(b.modelId);
     });
 });
 
 const modelsRefreshedAtDisplay = computed(() => {
-  const at = (props.group as unknown as { models_refreshed_at?: string | null })?.models_refreshed_at;
-  if (!at) return "";
+  const at = (props.group as unknown as { models_refreshed_at?: string | null })
+    ?.models_refreshed_at;
+  if (!at) {
+    return "";
+  }
   try {
     return new Date(at).toLocaleString();
   } catch {
@@ -147,25 +182,33 @@ const modelsRefreshedAtDisplay = computed(() => {
 
 function tierTagType(tier?: ModelTier): "success" | "warning" | "error" | "default" {
   switch (tier) {
-    case "fast": return "success";
-    case "balanced": return "warning";
-    case "max": return "error";
-    default: return "default";
+    case "fast":
+      return "success";
+    case "balanced":
+      return "warning";
+    case "max":
+      return "error";
+    default:
+      return "default";
   }
 }
 function tierLabel(tier?: ModelTier): string {
-  if (!tier) return "";
+  if (!tier) {
+    return "";
+  }
   return t(`modelcatalog.tier${tier.charAt(0).toUpperCase() + tier.slice(1)}`);
 }
 
 async function refreshGroupModels() {
-  if (!props.group?.id) return;
+  if (!props.group?.id) {
+    return;
+  }
   modelsRefreshLoading.value = true;
   try {
     const response = await fetch(`/api/groups/${props.group.id}/refresh-models`, {
       method: "POST",
       headers: {
-        "Authorization": `Bearer ${localStorage.getItem("authKey") || ""}`,
+        Authorization: `Bearer ${localStorage.getItem("authKey") || ""}`,
         "Content-Type": "application/json",
       },
     });
@@ -814,10 +857,16 @@ function resetPage() {
                     <template #header>
                       <div class="upstream-models-header">
                         <span class="section-title" style="margin: 0; padding: 0; border: none">
-                          {{ isAggregateGroup ? t("keys.aggregatedModelsList") : t("keys.upstreamModelsList") }}
+                          {{
+                            isAggregateGroup
+                              ? t("keys.aggregatedModelsList")
+                              : t("keys.upstreamModelsList")
+                          }}
                         </span>
                         <n-tag size="tiny" type="info" :bordered="false">
-                          {{ isAggregateGroup ? aggregateModels.length : groupAvailableModels.length }}
+                          {{
+                            isAggregateGroup ? aggregateModels.length : groupAvailableModels.length
+                          }}
                         </n-tag>
                         <span v-if="!isAggregateGroup && modelsRefreshedAtDisplay" class="hint">
                           {{ t("keys.lastRefreshed", { at: modelsRefreshedAtDisplay }) }}
@@ -834,7 +883,11 @@ function resetPage() {
                           clearable
                           style="width: 240px"
                         />
-                        <n-button size="small" :loading="modelsRefreshLoading" @click="refreshGroupModels">
+                        <n-button
+                          size="small"
+                          :loading="modelsRefreshLoading"
+                          @click="refreshGroupModels"
+                        >
                           <template #icon>
                             <n-icon :component="RefreshOutline" />
                           </template>
@@ -844,14 +897,23 @@ function resetPage() {
                       <div v-if="filteredGroupModels.length === 0">
                         <n-empty
                           size="small"
-                          :description="groupAvailableModels.length === 0 ? t('keys.upstreamModelsEmpty') : t('common.noData')"
+                          :description="
+                            groupAvailableModels.length === 0
+                              ? t('keys.upstreamModelsEmpty')
+                              : t('common.noData')
+                          "
                         />
                       </div>
                       <div v-else class="models-grid">
                         <div v-for="m in filteredGroupModels" :key="m" class="model-item">
                           <div class="model-item-main">
                             <span class="model-item-id">{{ m }}</span>
-                            <n-tag v-if="findFreeModel(m)" size="tiny" type="success" :bordered="false">
+                            <n-tag
+                              v-if="modelIsFree(m)"
+                              size="tiny"
+                              type="success"
+                              :bordered="false"
+                            >
                               🆓 {{ t("modelcatalog.freeTag") }}
                             </n-tag>
                             <n-tag
@@ -880,17 +942,31 @@ function resetPage() {
                           style="width: 240px"
                         />
                         <span class="hint">
-                          {{ t("keys.aggregatedModelsHint", { sub: subGroups?.length || 0, total: aggregateModels.length }) }}
+                          {{
+                            t("keys.aggregatedModelsHint", {
+                              sub: subGroups?.length || 0,
+                              total: aggregateModels.length,
+                            })
+                          }}
                         </span>
                       </div>
                       <div v-if="filteredAggregateModels.length === 0">
                         <n-empty size="small" :description="t('keys.aggregatedModelsEmpty')" />
                       </div>
                       <div v-else class="models-grid">
-                        <div v-for="r in filteredAggregateModels" :key="r.modelId" class="model-item model-item-tall">
+                        <div
+                          v-for="r in filteredAggregateModels"
+                          :key="r.modelId"
+                          class="model-item model-item-tall"
+                        >
                           <div class="model-item-main">
                             <span class="model-item-id">{{ r.modelId }}</span>
-                            <n-tag v-if="findFreeModel(r.modelId)" size="tiny" type="success" :bordered="false">
+                            <n-tag
+                              v-if="modelIsFree(r.modelId)"
+                              size="tiny"
+                              type="success"
+                              :bordered="false"
+                            >
                               🆓 {{ t("modelcatalog.freeTag") }}
                             </n-tag>
                             <n-tag
@@ -1192,7 +1268,6 @@ function resetPage() {
   color: var(--text-color-3, #999);
   font-size: 12px;
 }
-
 
 .upstream-url {
   font-family: monospace;

@@ -3,9 +3,24 @@ import { getGroupList } from "@/api/dashboard";
 import { keysApi } from "@/api/keys";
 import { settingsApi } from "@/api/settings";
 import ProxyKeysInput from "@/components/common/ProxyKeysInput.vue";
-import { FREE_PROVIDERS, findFreeModel, findProviderByUpstreams, type FreeProvider, type ModelTier } from "@/data/freeProviders";
+import {
+  FREE_PROVIDERS,
+  findFreeModel,
+  findProviderByUpstreams,
+  isFree,
+  type FreeProvider,
+  type ModelTier,
+} from "@/data/freeProviders";
 import type { Group, GroupConfigOption, UpstreamInfo } from "@/types/models";
-import { Add, Close, HelpCircleOutline, OpenOutline, RefreshOutline, Remove, RocketOutline } from "@vicons/ionicons5";
+import {
+  Add,
+  Close,
+  HelpCircleOutline,
+  OpenOutline,
+  RefreshOutline,
+  Remove,
+  RocketOutline,
+} from "@vicons/ionicons5";
 import {
   NButton,
   NCard,
@@ -135,34 +150,52 @@ const modelsRefreshedAt = ref<string | null>(null);
 const modelsListExpanded = ref<string[]>([]);
 const modelsListSearch = ref("");
 
+const formProviderId = computed<string | undefined>(
+  () => findProviderByUpstreams(formData.upstreams)?.id
+);
+
+function modelIsFree(modelId: string): boolean {
+  return isFree(formProviderId.value, modelId) === true;
+}
+
 const filteredAvailableModels = computed(() => {
   const q = modelsListSearch.value.trim().toLowerCase();
-  const list = availableModels.value.filter((m) => !q || m.toLowerCase().includes(q));
+  const list = availableModels.value.filter(m => !q || m.toLowerCase().includes(q));
   // 免费在前 + 按 id 排序
   return list.sort((a, b) => {
-    const fa = !!findFreeModel(a);
-    const fb = !!findFreeModel(b);
-    if (fa !== fb) return fa ? -1 : 1;
+    const fa = modelIsFree(a);
+    const fb = modelIsFree(b);
+    if (fa !== fb) {
+      return fa ? -1 : 1;
+    }
     return a.localeCompare(b);
   });
 });
 
 function tierTagType(tier?: ModelTier): "success" | "warning" | "error" | "default" {
   switch (tier) {
-    case "fast": return "success";
-    case "balanced": return "warning";
-    case "max": return "error";
-    default: return "default";
+    case "fast":
+      return "success";
+    case "balanced":
+      return "warning";
+    case "max":
+      return "error";
+    default:
+      return "default";
   }
 }
 
 function tierLabel(tier?: ModelTier): string {
-  if (!tier) return "";
+  if (!tier) {
+    return "";
+  }
   return t(`modelcatalog.tier${tier.charAt(0).toUpperCase() + tier.slice(1)}`);
 }
 
 function refreshedAtDisplay(iso: string | null): string {
-  if (!iso) return "";
+  if (!iso) {
+    return "";
+  }
   try {
     return new Date(iso).toLocaleString();
   } catch {
@@ -181,7 +214,9 @@ async function copyModelId(modelId: string) {
 
 function setAsTestModel(modelId: string) {
   formData.test_model = modelId;
-  if (!props.group) userModifiedFields.value.test_model = true;
+  if (!props.group) {
+    userModifiedFields.value.test_model = true;
+  }
   message.success(t("keys.setAsTestModelSuccess", { model: modelId }));
 }
 
@@ -191,32 +226,39 @@ const testModelOptions = computed(() => {
   if (availableModels.value.length === 0 && !props.group) {
     // 创建模式且未拉取过,从 channel_type 默认值给一个占位
     const placeholder = formData.test_model;
-    if (placeholder) merged.add(placeholder);
+    if (placeholder) {
+      merged.add(placeholder);
+    }
   }
-  availableModels.value.forEach((m) => merged.add(m));
+  availableModels.value.forEach(m => merged.add(m));
   // 当前已选值始终保留为合法选项
-  if (formData.test_model) merged.add(formData.test_model);
-  return Array.from(merged).map((id) => ({ label: id, value: id }));
+  if (formData.test_model) {
+    merged.add(formData.test_model);
+  }
+  return Array.from(merged).map(id => ({ label: id, value: id }));
 });
 
 const filteredProviders = computed<FreeProvider[]>(() => {
   const q = providerSearch.value.trim().toLowerCase();
-  if (!q) return FREE_PROVIDERS;
-  return FREE_PROVIDERS.filter((p) =>
-    [p.id, p.name, p.description, p.freeTier, ...p.models].some((s) =>
-      s.toLowerCase().includes(q),
-    ),
+  if (!q) {
+    return FREE_PROVIDERS;
+  }
+  return FREE_PROVIDERS.filter(p =>
+    [p.id, p.name, p.description, p.freeTier, ...p.models].some(s => s.toLowerCase().includes(q))
   );
 });
 
 async function refreshUsedProviders() {
   try {
     const response = await getGroupList();
-    const list = (response as unknown as { data?: Array<{ upstreams?: Array<{ url?: string }> }> }).data || [];
+    const list =
+      (response as unknown as { data?: Array<{ upstreams?: Array<{ url?: string }> }> }).data || [];
     const ids = new Set<string>();
     for (const g of list) {
       const matched = findProviderByUpstreams(g.upstreams || []);
-      if (matched) ids.add(matched.id);
+      if (matched) {
+        ids.add(matched.id);
+      }
     }
     usedProviderIds.value = ids;
   } catch {
@@ -224,9 +266,7 @@ async function refreshUsedProviders() {
   }
 }
 
-const showProviderPicker = computed(
-  () => !props.group && formData.group_type !== "aggregate",
-);
+const showProviderPicker = computed(() => !props.group && formData.group_type !== "aggregate");
 
 function applyProvider(p: FreeProvider) {
   const alreadyUsed = usedProviderIds.value.has(p.id);
@@ -493,7 +533,9 @@ function loadGroupData() {
   } else if (typeof cached === "string" && cached.length > 0) {
     try {
       const arr = JSON.parse(cached);
-      availableModels.value = Array.isArray(arr) ? arr.filter((m): m is string => typeof m === "string") : [];
+      availableModels.value = Array.isArray(arr)
+        ? arr.filter((m): m is string => typeof m === "string")
+        : [];
     } catch {
       availableModels.value = [];
     }
@@ -515,7 +557,7 @@ async function refreshModels() {
     const response = await fetch(`/api/groups/${props.group.id}/refresh-models`, {
       method: "POST",
       headers: {
-        "Authorization": `Bearer ${localStorage.getItem("authKey") || ""}`,
+        Authorization: `Bearer ${localStorage.getItem("authKey") || ""}`,
         "Content-Type": "application/json",
       },
     });
@@ -526,7 +568,9 @@ async function refreshModels() {
     const list = (result.data?.models || []) as string[];
     availableModels.value = list;
     modelsRefreshedAt.value = new Date().toISOString();
-    if (list.length > 0) modelsListExpanded.value = ["models"];
+    if (list.length > 0) {
+      modelsListExpanded.value = ["models"];
+    }
     message.success(t("keys.refreshModelsSuccess", { n: list.length }));
   } catch (e) {
     message.error((e as Error).message);
@@ -771,770 +815,784 @@ async function handleSubmit() {
           require-mark-placement="right-hanging"
           class="group-form"
         >
-        <!-- 免费 Provider 快速预填(仅创建标准分组时显示) -->
-        <div v-if="showProviderPicker" class="form-section provider-picker">
-          <n-collapse v-model:expanded-names="providerPanelExpanded">
-            <n-collapse-item name="picker">
-              <template #header>
-                <div class="provider-picker-header">
-                  <n-icon :component="RocketOutline" class="provider-picker-icon" />
-                  <span class="section-title" style="margin: 0">
-                    {{ t("keys.useFreeProvider") }}
-                  </span>
-                  <n-tag size="small" type="success" round style="margin-left: 8px">
-                    {{ t("keys.providerCount", { n: FREE_PROVIDERS.length }) }}
-                  </n-tag>
-                </div>
-              </template>
-              <p class="provider-picker-tip">{{ t("keys.providerPickerTip") }}</p>
-              <n-input
-                v-model:value="providerSearch"
-                :placeholder="t('keys.providerSearchPlaceholder')"
-                clearable
-                style="margin-bottom: 12px"
-              />
-              <div class="provider-grid">
-                <div
-                  v-for="p in filteredProviders"
-                  :key="p.id"
-                  class="provider-card"
-                  :class="{ 'provider-card-used': usedProviderIds.has(p.id) }"
-                  @click="applyProvider(p)"
-                >
-                  <div class="provider-card-head">
-                    <span class="provider-card-name">{{ p.name }}</span>
-                    <div class="provider-card-tags">
-                      <n-tag
-                        v-if="usedProviderIds.has(p.id)"
-                        size="tiny"
-                        type="success"
-                        :bordered="false"
-                      >
-                        {{ t("keys.providerAdded") }}
-                      </n-tag>
-                      <n-tag
-                        v-if="p.badge"
-                        size="tiny"
-                        :type="p.badge === 'fast' ? 'warning' : p.badge === 'high-quota' ? 'success' : 'info'"
-                      >
-                        {{ t(`keys.providerBadge_${p.badge.replace('-', '_')}`) }}
-                      </n-tag>
-                    </div>
+          <!-- 免费 Provider 快速预填(仅创建标准分组时显示) -->
+          <div v-if="showProviderPicker" class="form-section provider-picker">
+            <n-collapse v-model:expanded-names="providerPanelExpanded">
+              <n-collapse-item name="picker">
+                <template #header>
+                  <div class="provider-picker-header">
+                    <n-icon :component="RocketOutline" class="provider-picker-icon" />
+                    <span class="section-title" style="margin: 0">
+                      {{ t("keys.useFreeProvider") }}
+                    </span>
+                    <n-tag size="small" type="success" round style="margin-left: 8px">
+                      {{ t("keys.providerCount", { n: FREE_PROVIDERS.length }) }}
+                    </n-tag>
                   </div>
-                  <div class="provider-card-tier">{{ p.freeTier }}</div>
-                  <a
-                    :href="p.signupUrl"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    class="provider-card-signup"
-                    @click.stop
-                  >
-                    <n-icon :component="OpenOutline" />
-                    {{ t("keys.providerSignup") }}
-                  </a>
-                </div>
-              </div>
-            </n-collapse-item>
-          </n-collapse>
-        </div>
-
-        <!-- 基础信息 -->
-        <div class="form-section">
-          <h4 class="section-title">{{ t("keys.basicInfo") }}</h4>
-
-          <!-- Group name and display name on the same row -->
-          <div class="form-row">
-            <n-form-item :label="t('keys.groupName')" path="name" class="form-item-half">
-              <template #label>
-                <div class="form-label-with-tooltip">
-                  {{ t("keys.groupName") }}
-                  <n-tooltip trigger="hover" placement="top">
-                    <template #trigger>
-                      <n-icon :component="HelpCircleOutline" class="help-icon" />
-                    </template>
-                    {{ t("keys.groupNameTooltip") }}
-                  </n-tooltip>
-                </div>
-              </template>
-              <n-input v-model:value="formData.name" placeholder="gemini" />
-            </n-form-item>
-
-            <n-form-item :label="t('keys.displayName')" path="display_name" class="form-item-half">
-              <template #label>
-                <div class="form-label-with-tooltip">
-                  {{ t("keys.displayName") }}
-                  <n-tooltip trigger="hover" placement="top">
-                    <template #trigger>
-                      <n-icon :component="HelpCircleOutline" class="help-icon" />
-                    </template>
-                    {{ t("keys.displayNameTooltip") }}
-                  </n-tooltip>
-                </div>
-              </template>
-              <n-input v-model:value="formData.display_name" placeholder="Google Gemini" />
-            </n-form-item>
-          </div>
-
-          <!-- Channel type and sort order on the same row -->
-          <div class="form-row">
-            <n-form-item :label="t('keys.channelType')" path="channel_type" class="form-item-half">
-              <template #label>
-                <div class="form-label-with-tooltip">
-                  {{ t("keys.channelType") }}
-                  <n-tooltip trigger="hover" placement="top">
-                    <template #trigger>
-                      <n-icon :component="HelpCircleOutline" class="help-icon" />
-                    </template>
-                    {{ t("keys.channelTypeTooltip") }}
-                  </n-tooltip>
-                </div>
-              </template>
-              <n-select
-                v-model:value="formData.channel_type"
-                :options="channelTypeOptions"
-                :placeholder="t('keys.selectChannelType')"
-              />
-            </n-form-item>
-
-            <n-form-item :label="t('keys.sortOrder')" path="sort" class="form-item-half">
-              <template #label>
-                <div class="form-label-with-tooltip">
-                  {{ t("keys.sortOrder") }}
-                  <n-tooltip trigger="hover" placement="top">
-                    <template #trigger>
-                      <n-icon :component="HelpCircleOutline" class="help-icon" />
-                    </template>
-                    {{ t("keys.sortOrderTooltip") }}
-                  </n-tooltip>
-                </div>
-              </template>
-              <n-input-number
-                v-model:value="formData.sort"
-                :min="0"
-                :placeholder="t('keys.sortValue')"
-                style="width: 100%"
-              />
-            </n-form-item>
-          </div>
-
-          <!-- Test model and test path on the same row -->
-          <div class="form-row">
-            <n-form-item :label="t('keys.testModel')" path="test_model" class="form-item-half">
-              <template #label>
-                <div class="form-label-with-tooltip">
-                  {{ t("keys.testModel") }}
-                  <n-tooltip trigger="hover" placement="top">
-                    <template #trigger>
-                      <n-icon :component="HelpCircleOutline" class="help-icon" />
-                    </template>
-                    {{ t("keys.testModelTooltip") }}
-                  </n-tooltip>
-                </div>
-              </template>
-              <div style="display: flex; gap: 6px; width: 100%">
-                <n-select
-                  v-model:value="formData.test_model"
-                  :options="testModelOptions"
-                  :placeholder="testModelPlaceholder"
-                  filterable
-                  tag
+                </template>
+                <p class="provider-picker-tip">{{ t("keys.providerPickerTip") }}</p>
+                <n-input
+                  v-model:value="providerSearch"
+                  :placeholder="t('keys.providerSearchPlaceholder')"
                   clearable
-                  style="flex: 1"
-                  @update:value="() => !props.group && (userModifiedFields.test_model = true)"
+                  style="margin-bottom: 12px"
                 />
-                <n-tooltip trigger="hover" :disabled="!!props.group">
-                  <template #trigger>
+                <div class="provider-grid">
+                  <div
+                    v-for="p in filteredProviders"
+                    :key="p.id"
+                    class="provider-card"
+                    :class="{ 'provider-card-used': usedProviderIds.has(p.id) }"
+                    @click="applyProvider(p)"
+                  >
+                    <div class="provider-card-head">
+                      <span class="provider-card-name">{{ p.name }}</span>
+                      <div class="provider-card-tags">
+                        <n-tag
+                          v-if="usedProviderIds.has(p.id)"
+                          size="tiny"
+                          type="success"
+                          :bordered="false"
+                        >
+                          {{ t("keys.providerAdded") }}
+                        </n-tag>
+                        <n-tag
+                          v-if="p.badge"
+                          size="tiny"
+                          :type="
+                            p.badge === 'fast'
+                              ? 'warning'
+                              : p.badge === 'high-quota'
+                                ? 'success'
+                                : 'info'
+                          "
+                        >
+                          {{ t(`keys.providerBadge_${p.badge.replace("-", "_")}`) }}
+                        </n-tag>
+                      </div>
+                    </div>
+                    <div class="provider-card-tier">{{ p.freeTier }}</div>
+                    <a
+                      :href="p.signupUrl"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      class="provider-card-signup"
+                      @click.stop
+                    >
+                      <n-icon :component="OpenOutline" />
+                      {{ t("keys.providerSignup") }}
+                    </a>
+                  </div>
+                </div>
+              </n-collapse-item>
+            </n-collapse>
+          </div>
+
+          <!-- 基础信息 -->
+          <div class="form-section">
+            <h4 class="section-title">{{ t("keys.basicInfo") }}</h4>
+
+            <!-- Group name and display name on the same row -->
+            <div class="form-row">
+              <n-form-item :label="t('keys.groupName')" path="name" class="form-item-half">
+                <template #label>
+                  <div class="form-label-with-tooltip">
+                    {{ t("keys.groupName") }}
+                    <n-tooltip trigger="hover" placement="top">
+                      <template #trigger>
+                        <n-icon :component="HelpCircleOutline" class="help-icon" />
+                      </template>
+                      {{ t("keys.groupNameTooltip") }}
+                    </n-tooltip>
+                  </div>
+                </template>
+                <n-input v-model:value="formData.name" placeholder="gemini" />
+              </n-form-item>
+
+              <n-form-item
+                :label="t('keys.displayName')"
+                path="display_name"
+                class="form-item-half"
+              >
+                <template #label>
+                  <div class="form-label-with-tooltip">
+                    {{ t("keys.displayName") }}
+                    <n-tooltip trigger="hover" placement="top">
+                      <template #trigger>
+                        <n-icon :component="HelpCircleOutline" class="help-icon" />
+                      </template>
+                      {{ t("keys.displayNameTooltip") }}
+                    </n-tooltip>
+                  </div>
+                </template>
+                <n-input v-model:value="formData.display_name" placeholder="Google Gemini" />
+              </n-form-item>
+            </div>
+
+            <!-- Channel type and sort order on the same row -->
+            <div class="form-row">
+              <n-form-item
+                :label="t('keys.channelType')"
+                path="channel_type"
+                class="form-item-half"
+              >
+                <template #label>
+                  <div class="form-label-with-tooltip">
+                    {{ t("keys.channelType") }}
+                    <n-tooltip trigger="hover" placement="top">
+                      <template #trigger>
+                        <n-icon :component="HelpCircleOutline" class="help-icon" />
+                      </template>
+                      {{ t("keys.channelTypeTooltip") }}
+                    </n-tooltip>
+                  </div>
+                </template>
+                <n-select
+                  v-model:value="formData.channel_type"
+                  :options="channelTypeOptions"
+                  :placeholder="t('keys.selectChannelType')"
+                />
+              </n-form-item>
+
+              <n-form-item :label="t('keys.sortOrder')" path="sort" class="form-item-half">
+                <template #label>
+                  <div class="form-label-with-tooltip">
+                    {{ t("keys.sortOrder") }}
+                    <n-tooltip trigger="hover" placement="top">
+                      <template #trigger>
+                        <n-icon :component="HelpCircleOutline" class="help-icon" />
+                      </template>
+                      {{ t("keys.sortOrderTooltip") }}
+                    </n-tooltip>
+                  </div>
+                </template>
+                <n-input-number
+                  v-model:value="formData.sort"
+                  :min="0"
+                  :placeholder="t('keys.sortValue')"
+                  style="width: 100%"
+                />
+              </n-form-item>
+            </div>
+
+            <!-- Test model and test path on the same row -->
+            <div class="form-row">
+              <n-form-item :label="t('keys.testModel')" path="test_model" class="form-item-half">
+                <template #label>
+                  <div class="form-label-with-tooltip">
+                    {{ t("keys.testModel") }}
+                    <n-tooltip trigger="hover" placement="top">
+                      <template #trigger>
+                        <n-icon :component="HelpCircleOutline" class="help-icon" />
+                      </template>
+                      {{ t("keys.testModelTooltip") }}
+                    </n-tooltip>
+                  </div>
+                </template>
+                <div style="display: flex; gap: 6px; width: 100%">
+                  <n-select
+                    v-model:value="formData.test_model"
+                    :options="testModelOptions"
+                    :placeholder="testModelPlaceholder"
+                    filterable
+                    tag
+                    clearable
+                    style="flex: 1"
+                    @update:value="() => !props.group && (userModifiedFields.test_model = true)"
+                  />
+                  <n-tooltip trigger="hover" :disabled="!!props.group">
+                    <template #trigger>
+                      <n-button
+                        size="small"
+                        :loading="modelsRefreshLoading"
+                        :disabled="!props.group"
+                        @click="refreshModels"
+                        style="flex-shrink: 0"
+                      >
+                        <template #icon>
+                          <n-icon :component="RefreshOutline" />
+                        </template>
+                      </n-button>
+                    </template>
+                    {{ t("keys.refreshModelsRequiresSave") }}
+                  </n-tooltip>
+                </div>
+              </n-form-item>
+
+              <n-form-item
+                :label="t('keys.testPath')"
+                path="validation_endpoint"
+                class="form-item-half"
+                v-if="formData.channel_type !== 'gemini'"
+              >
+                <template #label>
+                  <div class="form-label-with-tooltip">
+                    {{ t("keys.testPath") }}
+                    <n-tooltip trigger="hover" placement="top">
+                      <template #trigger>
+                        <n-icon :component="HelpCircleOutline" class="help-icon" />
+                      </template>
+                      <div>
+                        {{ t("keys.testPathTooltip1") }}
+                        <br />
+                        • OpenAI: /v1/chat/completions
+                        <br />
+                        • OpenAI Response: /v1/responses
+                        <br />
+                        • Anthropic: /v1/messages
+                        <br />
+                        {{ t("keys.testPathTooltip2") }}
+                      </div>
+                    </n-tooltip>
+                  </div>
+                </template>
+                <n-input
+                  v-model:value="formData.validation_endpoint"
+                  :placeholder="
+                    validationEndpointPlaceholder || t('keys.optionalCustomValidationPath')
+                  "
+                />
+              </n-form-item>
+
+              <!-- When gemini channel, test path is hidden, need placeholder div to keep layout -->
+              <div v-else class="form-item-half" />
+            </div>
+
+            <!-- Proxy keys -->
+            <n-form-item :label="t('keys.proxyKeys')" path="proxy_keys">
+              <template #label>
+                <div class="form-label-with-tooltip">
+                  {{ t("keys.proxyKeys") }}
+                  <n-tooltip trigger="hover" placement="top">
+                    <template #trigger>
+                      <n-icon :component="HelpCircleOutline" class="help-icon" />
+                    </template>
+                    {{ t("keys.proxyKeysTooltip") }}
+                  </n-tooltip>
+                </div>
+              </template>
+              <proxy-keys-input
+                v-model="formData.proxy_keys"
+                :placeholder="t('keys.multiKeysPlaceholder')"
+                size="medium"
+              />
+            </n-form-item>
+
+            <!-- Description takes full row -->
+            <n-form-item :label="t('common.description')" path="description">
+              <template #label>
+                <div class="form-label-with-tooltip">
+                  {{ t("common.description") }}
+                  <n-tooltip trigger="hover" placement="top">
+                    <template #trigger>
+                      <n-icon :component="HelpCircleOutline" class="help-icon" />
+                    </template>
+                    {{ t("keys.descriptionTooltip") }}
+                  </n-tooltip>
+                </div>
+              </template>
+              <n-input
+                v-model:value="formData.description"
+                type="textarea"
+                placeholder=""
+                :rows="1"
+                :autosize="{ minRows: 1, maxRows: 5 }"
+                style="resize: none"
+              />
+            </n-form-item>
+          </div>
+
+          <!-- Upstream available models -->
+          <div class="form-section upstream-models-section" style="margin-top: 10px">
+            <n-collapse v-model:expanded-names="modelsListExpanded">
+              <n-collapse-item name="models">
+                <template #header>
+                  <div class="upstream-models-header">
+                    <span class="section-title" style="margin: 0; padding: 0; border: none">
+                      {{ t("keys.upstreamModelsList") }}
+                    </span>
+                    <n-tag size="tiny" type="info" :bordered="false">
+                      {{ availableModels.length }}
+                    </n-tag>
+                    <span v-if="modelsRefreshedAt" class="hint" style="margin-left: 8px">
+                      {{ t("keys.lastRefreshed", { at: refreshedAtDisplay(modelsRefreshedAt) }) }}
+                    </span>
+                  </div>
+                </template>
+
+                <div v-if="availableModels.length === 0" class="empty-models-hint">
+                  <n-empty
+                    size="small"
+                    :description="
+                      props.group
+                        ? t('keys.upstreamModelsEmpty')
+                        : t('keys.refreshModelsRequiresSave')
+                    "
+                  />
+                </div>
+
+                <template v-else>
+                  <div class="models-toolbar">
+                    <n-input
+                      v-model:value="modelsListSearch"
+                      :placeholder="t('keys.searchModelPlaceholder')"
+                      clearable
+                      style="width: 240px"
+                    />
                     <n-button
                       size="small"
                       :loading="modelsRefreshLoading"
                       :disabled="!props.group"
                       @click="refreshModels"
-                      style="flex-shrink: 0"
                     >
                       <template #icon>
                         <n-icon :component="RefreshOutline" />
                       </template>
+                      {{ t("common.refresh") }}
                     </n-button>
-                  </template>
-                  {{ t("keys.refreshModelsRequiresSave") }}
-                </n-tooltip>
-              </div>
-            </n-form-item>
+                  </div>
 
+                  <div class="models-grid">
+                    <div v-for="m in filteredAvailableModels" :key="m" class="model-item">
+                      <div class="model-item-main">
+                        <span class="model-item-id">{{ m }}</span>
+                        <n-tag v-if="modelIsFree(m)" size="tiny" type="success" :bordered="false">
+                          🆓 {{ t("modelcatalog.freeTag") }}
+                        </n-tag>
+                        <n-tag
+                          v-if="findFreeModel(m)?.tier"
+                          size="tiny"
+                          :type="tierTagType(findFreeModel(m)?.tier)"
+                          :bordered="false"
+                        >
+                          {{ tierLabel(findFreeModel(m)?.tier) }}
+                        </n-tag>
+                      </div>
+                      <div class="model-item-actions">
+                        <n-button size="tiny" text @click="copyModelId(m)">
+                          {{ t("common.copy") }}
+                        </n-button>
+                        <n-button size="tiny" text type="primary" @click="setAsTestModel(m)">
+                          {{ t("keys.setAsTestModel") }}
+                        </n-button>
+                      </div>
+                    </div>
+                  </div>
+                </template>
+              </n-collapse-item>
+            </n-collapse>
+          </div>
+
+          <!-- Upstream addresses -->
+          <div class="form-section" style="margin-top: 10px">
+            <h4 class="section-title">{{ t("keys.upstreamAddresses") }}</h4>
             <n-form-item
-              :label="t('keys.testPath')"
-              path="validation_endpoint"
-              class="form-item-half"
-              v-if="formData.channel_type !== 'gemini'"
+              v-for="(upstream, index) in formData.upstreams"
+              :key="index"
+              :label="`${t('keys.upstream')} ${index + 1}`"
+              :path="`upstreams[${index}].url`"
+              :rule="{
+                required: true,
+                message: '',
+                trigger: ['blur', 'input'],
+              }"
             >
               <template #label>
                 <div class="form-label-with-tooltip">
-                  {{ t("keys.testPath") }}
+                  {{ t("keys.upstream") }} {{ index + 1 }}
                   <n-tooltip trigger="hover" placement="top">
                     <template #trigger>
                       <n-icon :component="HelpCircleOutline" class="help-icon" />
                     </template>
-                    <div>
-                      {{ t("keys.testPathTooltip1") }}
-                      <br />
-                      • OpenAI: /v1/chat/completions
-                      <br />
-                      • OpenAI Response: /v1/responses
-                      <br />
-                      • Anthropic: /v1/messages
-                      <br />
-                      {{ t("keys.testPathTooltip2") }}
-                    </div>
+                    {{ t("keys.upstreamTooltip") }}
                   </n-tooltip>
                 </div>
               </template>
-              <n-input
-                v-model:value="formData.validation_endpoint"
-                :placeholder="
-                  validationEndpointPlaceholder || t('keys.optionalCustomValidationPath')
-                "
-              />
+              <div class="upstream-row">
+                <div class="upstream-url">
+                  <n-input
+                    v-model:value="upstream.url"
+                    :placeholder="upstreamPlaceholder"
+                    @input="
+                      () => !props.group && index === 0 && (userModifiedFields.upstream = true)
+                    "
+                  />
+                </div>
+                <div class="upstream-weight">
+                  <span class="weight-label">{{ t("keys.weight") }}</span>
+                  <n-tooltip trigger="hover" placement="top" style="width: 100%">
+                    <template #trigger>
+                      <n-input-number
+                        v-model:value="upstream.weight"
+                        :min="0"
+                        :placeholder="t('keys.weight')"
+                        style="width: 100%"
+                      />
+                    </template>
+                    {{ t("keys.weightTooltip") }}
+                  </n-tooltip>
+                </div>
+                <div class="upstream-actions">
+                  <n-button
+                    v-if="formData.upstreams.length > 1"
+                    @click="removeUpstream(index)"
+                    type="error"
+                    quaternary
+                    circle
+                    size="small"
+                  >
+                    <template #icon>
+                      <n-icon :component="Remove" />
+                    </template>
+                  </n-button>
+                </div>
+              </div>
             </n-form-item>
 
-            <!-- When gemini channel, test path is hidden, need placeholder div to keep layout -->
-            <div v-else class="form-item-half" />
+            <n-form-item>
+              <n-button @click="addUpstream" dashed style="width: 100%">
+                <template #icon>
+                  <n-icon :component="Add" />
+                </template>
+                {{ t("keys.addUpstream") }}
+              </n-button>
+            </n-form-item>
           </div>
 
-          <!-- Proxy keys -->
-          <n-form-item :label="t('keys.proxyKeys')" path="proxy_keys">
-            <template #label>
-              <div class="form-label-with-tooltip">
-                {{ t("keys.proxyKeys") }}
-                <n-tooltip trigger="hover" placement="top">
-                  <template #trigger>
-                    <n-icon :component="HelpCircleOutline" class="help-icon" />
-                  </template>
-                  {{ t("keys.proxyKeysTooltip") }}
-                </n-tooltip>
-              </div>
-            </template>
-            <proxy-keys-input
-              v-model="formData.proxy_keys"
-              :placeholder="t('keys.multiKeysPlaceholder')"
-              size="medium"
-            />
-          </n-form-item>
+          <!-- Advanced configuration -->
+          <div class="form-section" style="margin-top: 10px">
+            <n-collapse>
+              <n-collapse-item name="advanced">
+                <template #header>{{ t("keys.advancedConfig") }}</template>
+                <div class="config-section">
+                  <h5 class="config-title-with-tooltip">
+                    {{ t("keys.groupConfig") }}
+                    <n-tooltip trigger="hover" placement="top">
+                      <template #trigger>
+                        <n-icon :component="HelpCircleOutline" class="help-icon config-help" />
+                      </template>
+                      {{ t("keys.groupConfigTooltip") }}
+                    </n-tooltip>
+                  </h5>
 
-          <!-- Description takes full row -->
-          <n-form-item :label="t('common.description')" path="description">
-            <template #label>
-              <div class="form-label-with-tooltip">
-                {{ t("common.description") }}
-                <n-tooltip trigger="hover" placement="top">
-                  <template #trigger>
-                    <n-icon :component="HelpCircleOutline" class="help-icon" />
-                  </template>
-                  {{ t("keys.descriptionTooltip") }}
-                </n-tooltip>
-              </div>
-            </template>
-            <n-input
-              v-model:value="formData.description"
-              type="textarea"
-              placeholder=""
-              :rows="1"
-              :autosize="{ minRows: 1, maxRows: 5 }"
-              style="resize: none"
-            />
-          </n-form-item>
-        </div>
-
-        <!-- Upstream available models -->
-        <div class="form-section upstream-models-section" style="margin-top: 10px">
-          <n-collapse v-model:expanded-names="modelsListExpanded">
-            <n-collapse-item name="models">
-              <template #header>
-                <div class="upstream-models-header">
-                  <span class="section-title" style="margin: 0; padding: 0; border: none">
-                    {{ t("keys.upstreamModelsList") }}
-                  </span>
-                  <n-tag size="tiny" type="info" :bordered="false">
-                    {{ availableModels.length }}
-                  </n-tag>
-                  <span v-if="modelsRefreshedAt" class="hint" style="margin-left: 8px">
-                    {{ t("keys.lastRefreshed", { at: refreshedAtDisplay(modelsRefreshedAt) }) }}
-                  </span>
-                </div>
-              </template>
-
-              <div v-if="availableModels.length === 0" class="empty-models-hint">
-                <n-empty
-                  size="small"
-                  :description="props.group ? t('keys.upstreamModelsEmpty') : t('keys.refreshModelsRequiresSave')"
-                />
-              </div>
-
-              <template v-else>
-                <div class="models-toolbar">
-                  <n-input
-                    v-model:value="modelsListSearch"
-                    :placeholder="t('keys.searchModelPlaceholder')"
-                    clearable
-                    style="width: 240px"
-                  />
-                  <n-button
-                    size="small"
-                    :loading="modelsRefreshLoading"
-                    :disabled="!props.group"
-                    @click="refreshModels"
-                  >
-                    <template #icon>
-                      <n-icon :component="RefreshOutline" />
-                    </template>
-                    {{ t("common.refresh") }}
-                  </n-button>
-                </div>
-
-                <div class="models-grid">
-                  <div
-                    v-for="m in filteredAvailableModels"
-                    :key="m"
-                    class="model-item"
-                  >
-                    <div class="model-item-main">
-                      <span class="model-item-id">{{ m }}</span>
-                      <n-tag
-                        v-if="findFreeModel(m)"
-                        size="tiny"
-                        type="success"
-                        :bordered="false"
-                      >
-                        🆓 {{ t("modelcatalog.freeTag") }}
-                      </n-tag>
-                      <n-tag
-                        v-if="findFreeModel(m)?.tier"
-                        size="tiny"
-                        :type="tierTagType(findFreeModel(m)?.tier)"
-                        :bordered="false"
-                      >
-                        {{ tierLabel(findFreeModel(m)?.tier) }}
-                      </n-tag>
-                    </div>
-                    <div class="model-item-actions">
-                      <n-button size="tiny" text @click="copyModelId(m)">
-                        {{ t("common.copy") }}
-                      </n-button>
-                      <n-button size="tiny" text type="primary" @click="setAsTestModel(m)">
-                        {{ t("keys.setAsTestModel") }}
-                      </n-button>
-                    </div>
-                  </div>
-                </div>
-              </template>
-            </n-collapse-item>
-          </n-collapse>
-        </div>
-
-        <!-- Upstream addresses -->
-        <div class="form-section" style="margin-top: 10px">
-          <h4 class="section-title">{{ t("keys.upstreamAddresses") }}</h4>
-          <n-form-item
-            v-for="(upstream, index) in formData.upstreams"
-            :key="index"
-            :label="`${t('keys.upstream')} ${index + 1}`"
-            :path="`upstreams[${index}].url`"
-            :rule="{
-              required: true,
-              message: '',
-              trigger: ['blur', 'input'],
-            }"
-          >
-            <template #label>
-              <div class="form-label-with-tooltip">
-                {{ t("keys.upstream") }} {{ index + 1 }}
-                <n-tooltip trigger="hover" placement="top">
-                  <template #trigger>
-                    <n-icon :component="HelpCircleOutline" class="help-icon" />
-                  </template>
-                  {{ t("keys.upstreamTooltip") }}
-                </n-tooltip>
-              </div>
-            </template>
-            <div class="upstream-row">
-              <div class="upstream-url">
-                <n-input
-                  v-model:value="upstream.url"
-                  :placeholder="upstreamPlaceholder"
-                  @input="() => !props.group && index === 0 && (userModifiedFields.upstream = true)"
-                />
-              </div>
-              <div class="upstream-weight">
-                <span class="weight-label">{{ t("keys.weight") }}</span>
-                <n-tooltip trigger="hover" placement="top" style="width: 100%">
-                  <template #trigger>
-                    <n-input-number
-                      v-model:value="upstream.weight"
-                      :min="0"
-                      :placeholder="t('keys.weight')"
-                      style="width: 100%"
-                    />
-                  </template>
-                  {{ t("keys.weightTooltip") }}
-                </n-tooltip>
-              </div>
-              <div class="upstream-actions">
-                <n-button
-                  v-if="formData.upstreams.length > 1"
-                  @click="removeUpstream(index)"
-                  type="error"
-                  quaternary
-                  circle
-                  size="small"
-                >
-                  <template #icon>
-                    <n-icon :component="Remove" />
-                  </template>
-                </n-button>
-              </div>
-            </div>
-          </n-form-item>
-
-          <n-form-item>
-            <n-button @click="addUpstream" dashed style="width: 100%">
-              <template #icon>
-                <n-icon :component="Add" />
-              </template>
-              {{ t("keys.addUpstream") }}
-            </n-button>
-          </n-form-item>
-        </div>
-
-        <!-- Advanced configuration -->
-        <div class="form-section" style="margin-top: 10px">
-          <n-collapse>
-            <n-collapse-item name="advanced">
-              <template #header>{{ t("keys.advancedConfig") }}</template>
-              <div class="config-section">
-                <h5 class="config-title-with-tooltip">
-                  {{ t("keys.groupConfig") }}
-                  <n-tooltip trigger="hover" placement="top">
-                    <template #trigger>
-                      <n-icon :component="HelpCircleOutline" class="help-icon config-help" />
-                    </template>
-                    {{ t("keys.groupConfigTooltip") }}
-                  </n-tooltip>
-                </h5>
-
-                <div class="config-items">
-                  <n-form-item
-                    v-for="(configItem, index) in formData.configItems"
-                    :key="index"
-                    class="config-item-row"
-                    :label="`${t('keys.config')} ${index + 1}`"
-                    :path="`configItems[${index}].key`"
-                    :rule="{
-                      required: true,
-                      message: '',
-                      trigger: ['blur', 'change'],
-                    }"
-                  >
-                    <template #label>
-                      <div class="form-label-with-tooltip">
-                        {{ t("keys.config") }} {{ index + 1 }}
-                        <n-tooltip trigger="hover" placement="top">
-                          <template #trigger>
-                            <n-icon :component="HelpCircleOutline" class="help-icon" />
-                          </template>
-                          {{ t("keys.configTooltip") }}
-                        </n-tooltip>
-                      </div>
-                    </template>
-                    <div class="config-item-content">
-                      <div class="config-select">
-                        <n-select
-                          v-model:value="configItem.key"
-                          :options="
-                            configOptions.map(opt => ({
-                              label: opt.name,
-                              value: opt.key,
-                              disabled:
-                                formData.configItems
-                                  .map((item: ConfigItem) => item.key)
-                                  ?.includes(opt.key) && opt.key !== configItem.key,
-                            }))
-                          "
-                          :placeholder="t('keys.selectConfigParam')"
-                          @update:value="value => handleConfigKeyChange(index, value)"
-                          clearable
-                        />
-                      </div>
-                      <div class="config-value">
-                        <n-tooltip trigger="hover" placement="top">
-                          <template #trigger>
-                            <n-input-number
-                              v-if="typeof configItem.value === 'number'"
-                              v-model:value="configItem.value"
-                              :placeholder="t('keys.paramValue')"
-                              :precision="0"
-                              style="width: 100%"
-                            />
-                            <n-switch
-                              v-else-if="typeof configItem.value === 'boolean'"
-                              v-model:value="configItem.value"
-                              size="small"
-                            />
-                            <n-input
-                              v-else
-                              v-model:value="configItem.value"
-                              :placeholder="t('keys.paramValue')"
-                            />
-                          </template>
-                          {{
-                            getConfigOption(configItem.key)?.description || t("keys.setConfigValue")
-                          }}
-                        </n-tooltip>
-                      </div>
-                      <div class="config-actions">
-                        <n-button
-                          @click="removeConfigItem(index)"
-                          type="error"
-                          quaternary
-                          circle
-                          size="small"
-                        >
-                          <template #icon>
-                            <n-icon :component="Remove" />
-                          </template>
-                        </n-button>
-                      </div>
-                    </div>
-                  </n-form-item>
-                </div>
-
-                <div style="margin-top: 12px; padding-left: 120px">
-                  <n-button
-                    @click="addConfigItem"
-                    dashed
-                    style="width: 100%"
-                    :disabled="formData.configItems.length >= configOptions.length"
-                  >
-                    <template #icon>
-                      <n-icon :component="Add" />
-                    </template>
-                    {{ t("keys.addConfigParam") }}
-                  </n-button>
-                </div>
-              </div>
-
-              <div class="config-section">
-                <h5 class="config-title-with-tooltip">
-                  {{ t("keys.customHeaders") }}
-                  <n-tooltip trigger="hover" placement="top">
-                    <template #trigger>
-                      <n-icon :component="HelpCircleOutline" class="help-icon config-help" />
-                    </template>
-                    <div>
-                      {{ t("keys.headerRulesTooltip1") }}
-                      <br />
-                      {{ t("keys.supportedVariables") }}：
-                      <br />
-                      • ${CLIENT_IP} - {{ t("keys.clientIpVar") }}
-                      <br />
-                      • ${GROUP_NAME} - {{ t("keys.groupNameVar") }}
-                      <br />
-                      • ${API_KEY} - {{ t("keys.apiKeyVar") }}
-                      <br />
-                      • ${TIMESTAMP_MS} - {{ t("keys.timestampMsVar") }}
-                      <br />
-                      • ${TIMESTAMP_S} - {{ t("keys.timestampSVar") }}
-                    </div>
-                  </n-tooltip>
-                </h5>
-
-                <div class="header-rules-items">
-                  <n-form-item
-                    v-for="(headerRule, index) in formData.header_rules"
-                    :key="index"
-                    class="header-rule-row"
-                    :label="`${t('keys.header')} ${index + 1}`"
-                  >
-                    <template #label>
-                      <div class="form-label-with-tooltip">
-                        {{ t("keys.header") }} {{ index + 1 }}
-                        <n-tooltip trigger="hover" placement="top">
-                          <template #trigger>
-                            <n-icon :component="HelpCircleOutline" class="help-icon" />
-                          </template>
-                          {{ t("keys.headerTooltip") }}
-                        </n-tooltip>
-                      </div>
-                    </template>
-                    <div class="header-rule-content">
-                      <div class="header-name">
-                        <n-input
-                          v-model:value="headerRule.key"
-                          :placeholder="t('keys.headerName')"
-                          :status="
-                            !validateHeaderKeyUniqueness(
-                              formData.header_rules,
-                              index,
-                              headerRule.key
-                            )
-                              ? 'error'
-                              : undefined
-                          "
-                        />
-                        <div
-                          v-if="
-                            !validateHeaderKeyUniqueness(
-                              formData.header_rules,
-                              index,
-                              headerRule.key
-                            )
-                          "
-                          class="error-message"
-                        >
-                          {{ t("keys.duplicateHeader") }}
+                  <div class="config-items">
+                    <n-form-item
+                      v-for="(configItem, index) in formData.configItems"
+                      :key="index"
+                      class="config-item-row"
+                      :label="`${t('keys.config')} ${index + 1}`"
+                      :path="`configItems[${index}].key`"
+                      :rule="{
+                        required: true,
+                        message: '',
+                        trigger: ['blur', 'change'],
+                      }"
+                    >
+                      <template #label>
+                        <div class="form-label-with-tooltip">
+                          {{ t("keys.config") }} {{ index + 1 }}
+                          <n-tooltip trigger="hover" placement="top">
+                            <template #trigger>
+                              <n-icon :component="HelpCircleOutline" class="help-icon" />
+                            </template>
+                            {{ t("keys.configTooltip") }}
+                          </n-tooltip>
+                        </div>
+                      </template>
+                      <div class="config-item-content">
+                        <div class="config-select">
+                          <n-select
+                            v-model:value="configItem.key"
+                            :options="
+                              configOptions.map(opt => ({
+                                label: opt.name,
+                                value: opt.key,
+                                disabled:
+                                  formData.configItems
+                                    .map((item: ConfigItem) => item.key)
+                                    ?.includes(opt.key) && opt.key !== configItem.key,
+                              }))
+                            "
+                            :placeholder="t('keys.selectConfigParam')"
+                            @update:value="value => handleConfigKeyChange(index, value)"
+                            clearable
+                          />
+                        </div>
+                        <div class="config-value">
+                          <n-tooltip trigger="hover" placement="top">
+                            <template #trigger>
+                              <n-input-number
+                                v-if="typeof configItem.value === 'number'"
+                                v-model:value="configItem.value"
+                                :placeholder="t('keys.paramValue')"
+                                :precision="0"
+                                style="width: 100%"
+                              />
+                              <n-switch
+                                v-else-if="typeof configItem.value === 'boolean'"
+                                v-model:value="configItem.value"
+                                size="small"
+                              />
+                              <n-input
+                                v-else
+                                v-model:value="configItem.value"
+                                :placeholder="t('keys.paramValue')"
+                              />
+                            </template>
+                            {{
+                              getConfigOption(configItem.key)?.description ||
+                              t("keys.setConfigValue")
+                            }}
+                          </n-tooltip>
+                        </div>
+                        <div class="config-actions">
+                          <n-button
+                            @click="removeConfigItem(index)"
+                            type="error"
+                            quaternary
+                            circle
+                            size="small"
+                          >
+                            <template #icon>
+                              <n-icon :component="Remove" />
+                            </template>
+                          </n-button>
                         </div>
                       </div>
-                      <div class="header-value" v-if="headerRule.action === 'set'">
-                        <n-input
-                          v-model:value="headerRule.value"
-                          :placeholder="t('keys.headerValuePlaceholder')"
-                        />
+                    </n-form-item>
+                  </div>
+
+                  <div style="margin-top: 12px; padding-left: 120px">
+                    <n-button
+                      @click="addConfigItem"
+                      dashed
+                      style="width: 100%"
+                      :disabled="formData.configItems.length >= configOptions.length"
+                    >
+                      <template #icon>
+                        <n-icon :component="Add" />
+                      </template>
+                      {{ t("keys.addConfigParam") }}
+                    </n-button>
+                  </div>
+                </div>
+
+                <div class="config-section">
+                  <h5 class="config-title-with-tooltip">
+                    {{ t("keys.customHeaders") }}
+                    <n-tooltip trigger="hover" placement="top">
+                      <template #trigger>
+                        <n-icon :component="HelpCircleOutline" class="help-icon config-help" />
+                      </template>
+                      <div>
+                        {{ t("keys.headerRulesTooltip1") }}
+                        <br />
+                        {{ t("keys.supportedVariables") }}：
+                        <br />
+                        • ${CLIENT_IP} - {{ t("keys.clientIpVar") }}
+                        <br />
+                        • ${GROUP_NAME} - {{ t("keys.groupNameVar") }}
+                        <br />
+                        • ${API_KEY} - {{ t("keys.apiKeyVar") }}
+                        <br />
+                        • ${TIMESTAMP_MS} - {{ t("keys.timestampMsVar") }}
+                        <br />
+                        • ${TIMESTAMP_S} - {{ t("keys.timestampSVar") }}
                       </div>
-                      <div class="header-value removed-placeholder" v-else>
-                        <span class="removed-text">{{ t("keys.willRemoveFromRequest") }}</span>
+                    </n-tooltip>
+                  </h5>
+
+                  <div class="header-rules-items">
+                    <n-form-item
+                      v-for="(headerRule, index) in formData.header_rules"
+                      :key="index"
+                      class="header-rule-row"
+                      :label="`${t('keys.header')} ${index + 1}`"
+                    >
+                      <template #label>
+                        <div class="form-label-with-tooltip">
+                          {{ t("keys.header") }} {{ index + 1 }}
+                          <n-tooltip trigger="hover" placement="top">
+                            <template #trigger>
+                              <n-icon :component="HelpCircleOutline" class="help-icon" />
+                            </template>
+                            {{ t("keys.headerTooltip") }}
+                          </n-tooltip>
+                        </div>
+                      </template>
+                      <div class="header-rule-content">
+                        <div class="header-name">
+                          <n-input
+                            v-model:value="headerRule.key"
+                            :placeholder="t('keys.headerName')"
+                            :status="
+                              !validateHeaderKeyUniqueness(
+                                formData.header_rules,
+                                index,
+                                headerRule.key
+                              )
+                                ? 'error'
+                                : undefined
+                            "
+                          />
+                          <div
+                            v-if="
+                              !validateHeaderKeyUniqueness(
+                                formData.header_rules,
+                                index,
+                                headerRule.key
+                              )
+                            "
+                            class="error-message"
+                          >
+                            {{ t("keys.duplicateHeader") }}
+                          </div>
+                        </div>
+                        <div class="header-value" v-if="headerRule.action === 'set'">
+                          <n-input
+                            v-model:value="headerRule.value"
+                            :placeholder="t('keys.headerValuePlaceholder')"
+                          />
+                        </div>
+                        <div class="header-value removed-placeholder" v-else>
+                          <span class="removed-text">{{ t("keys.willRemoveFromRequest") }}</span>
+                        </div>
+                        <div class="header-action">
+                          <n-tooltip trigger="hover" placement="top">
+                            <template #trigger>
+                              <n-switch
+                                v-model:value="headerRule.action"
+                                :checked-value="'remove'"
+                                :unchecked-value="'set'"
+                                size="small"
+                              />
+                            </template>
+                            {{ t("keys.removeToggleTooltip") }}
+                          </n-tooltip>
+                        </div>
+                        <div class="header-actions">
+                          <n-button
+                            @click="removeHeaderRule(index)"
+                            type="error"
+                            quaternary
+                            circle
+                            size="small"
+                          >
+                            <template #icon>
+                              <n-icon :component="Remove" />
+                            </template>
+                          </n-button>
+                        </div>
                       </div>
-                      <div class="header-action">
+                    </n-form-item>
+                  </div>
+
+                  <div style="margin-top: 12px; padding-left: 120px">
+                    <n-button @click="addHeaderRule" dashed style="width: 100%">
+                      <template #icon>
+                        <n-icon :component="Add" />
+                      </template>
+                      {{ t("keys.addHeader") }}
+                    </n-button>
+                  </div>
+                </div>
+
+                <!-- 模型重定向配置 -->
+                <div v-if="formData.group_type !== 'aggregate'" class="config-section">
+                  <n-form-item path="model_redirect_strict">
+                    <template #label>
+                      <div class="form-label-with-tooltip">
+                        {{ t("keys.modelRedirectPolicy") }}
                         <n-tooltip trigger="hover" placement="top">
                           <template #trigger>
-                            <n-switch
-                              v-model:value="headerRule.action"
-                              :checked-value="'remove'"
-                              :unchecked-value="'set'"
-                              size="small"
-                            />
+                            <n-icon :component="HelpCircleOutline" class="help-icon config-help" />
                           </template>
-                          {{ t("keys.removeToggleTooltip") }}
+                          {{ t("keys.modelRedirectPolicyTooltip") }}
                         </n-tooltip>
                       </div>
-                      <div class="header-actions">
-                        <n-button
-                          @click="removeHeaderRule(index)"
-                          type="error"
-                          quaternary
-                          circle
-                          size="small"
-                        >
-                          <template #icon>
-                            <n-icon :component="Remove" />
-                          </template>
-                        </n-button>
-                      </div>
+                    </template>
+                    <div style="display: flex; align-items: center; gap: 12px">
+                      <n-switch v-model:value="formData.model_redirect_strict" />
+                      <span style="font-size: 14px; color: #666">
+                        {{
+                          formData.model_redirect_strict
+                            ? t("keys.modelRedirectStrictMode")
+                            : t("keys.modelRedirectLooseMode")
+                        }}
+                      </span>
                     </div>
+                    <template #feedback>
+                      <div style="font-size: 12px; color: #999; margin: 4px 0">
+                        <div v-if="formData.model_redirect_strict" style="color: #f5a623">
+                          ⚠️ {{ t("keys.modelRedirectStrictWarning") }}
+                        </div>
+                        <div v-else style="color: #52c41a">
+                          ✅ {{ t("keys.modelRedirectLooseInfo") }}
+                        </div>
+                      </div>
+                    </template>
+                  </n-form-item>
+
+                  <n-form-item path="model_redirect_rules">
+                    <template #label>
+                      <div class="form-label-with-tooltip">
+                        {{ t("keys.modelRedirectRules") }}
+                        <n-tooltip trigger="hover" placement="top">
+                          <template #trigger>
+                            <n-icon :component="HelpCircleOutline" class="help-icon config-help" />
+                          </template>
+                          {{ t("keys.modelRedirectRulesTooltip") }}
+                        </n-tooltip>
+                      </div>
+                    </template>
+                    <n-input
+                      v-model:value="formData.model_redirect_rules"
+                      type="textarea"
+                      :placeholder="modelRedirectTip"
+                      :rows="4"
+                    />
+                    <template #feedback>
+                      <div style="font-size: 14px; color: #999">
+                        {{ t("keys.modelRedirectRulesDescription") }}
+                      </div>
+                    </template>
                   </n-form-item>
                 </div>
 
-                <div style="margin-top: 12px; padding-left: 120px">
-                  <n-button @click="addHeaderRule" dashed style="width: 100%">
-                    <template #icon>
-                      <n-icon :component="Add" />
+                <div class="config-section">
+                  <n-form-item path="param_overrides">
+                    <template #label>
+                      <div class="form-label-with-tooltip">
+                        {{ t("keys.paramOverrides") }}
+                        <n-tooltip trigger="hover" placement="top">
+                          <template #trigger>
+                            <n-icon :component="HelpCircleOutline" class="help-icon config-help" />
+                          </template>
+                          {{ t("keys.paramOverridesTooltip") }}
+                        </n-tooltip>
+                      </div>
                     </template>
-                    {{ t("keys.addHeader") }}
-                  </n-button>
+                    <n-input
+                      v-model:value="formData.param_overrides"
+                      type="textarea"
+                      placeholder='{"temperature": 0.7}'
+                      :rows="4"
+                    />
+                  </n-form-item>
                 </div>
-              </div>
-
-              <!-- 模型重定向配置 -->
-              <div v-if="formData.group_type !== 'aggregate'" class="config-section">
-                <n-form-item path="model_redirect_strict">
-                  <template #label>
-                    <div class="form-label-with-tooltip">
-                      {{ t("keys.modelRedirectPolicy") }}
-                      <n-tooltip trigger="hover" placement="top">
-                        <template #trigger>
-                          <n-icon :component="HelpCircleOutline" class="help-icon config-help" />
-                        </template>
-                        {{ t("keys.modelRedirectPolicyTooltip") }}
-                      </n-tooltip>
-                    </div>
-                  </template>
-                  <div style="display: flex; align-items: center; gap: 12px">
-                    <n-switch v-model:value="formData.model_redirect_strict" />
-                    <span style="font-size: 14px; color: #666">
-                      {{
-                        formData.model_redirect_strict
-                          ? t("keys.modelRedirectStrictMode")
-                          : t("keys.modelRedirectLooseMode")
-                      }}
-                    </span>
-                  </div>
-                  <template #feedback>
-                    <div style="font-size: 12px; color: #999; margin: 4px 0">
-                      <div v-if="formData.model_redirect_strict" style="color: #f5a623">
-                        ⚠️ {{ t("keys.modelRedirectStrictWarning") }}
-                      </div>
-                      <div v-else style="color: #52c41a">
-                        ✅ {{ t("keys.modelRedirectLooseInfo") }}
-                      </div>
-                    </div>
-                  </template>
-                </n-form-item>
-
-                <n-form-item path="model_redirect_rules">
-                  <template #label>
-                    <div class="form-label-with-tooltip">
-                      {{ t("keys.modelRedirectRules") }}
-                      <n-tooltip trigger="hover" placement="top">
-                        <template #trigger>
-                          <n-icon :component="HelpCircleOutline" class="help-icon config-help" />
-                        </template>
-                        {{ t("keys.modelRedirectRulesTooltip") }}
-                      </n-tooltip>
-                    </div>
-                  </template>
-                  <n-input
-                    v-model:value="formData.model_redirect_rules"
-                    type="textarea"
-                    :placeholder="modelRedirectTip"
-                    :rows="4"
-                  />
-                  <template #feedback>
-                    <div style="font-size: 14px; color: #999">
-                      {{ t("keys.modelRedirectRulesDescription") }}
-                    </div>
-                  </template>
-                </n-form-item>
-              </div>
-
-              <div class="config-section">
-                <n-form-item path="param_overrides">
-                  <template #label>
-                    <div class="form-label-with-tooltip">
-                      {{ t("keys.paramOverrides") }}
-                      <n-tooltip trigger="hover" placement="top">
-                        <template #trigger>
-                          <n-icon :component="HelpCircleOutline" class="help-icon config-help" />
-                        </template>
-                        {{ t("keys.paramOverridesTooltip") }}
-                      </n-tooltip>
-                    </div>
-                  </template>
-                  <n-input
-                    v-model:value="formData.param_overrides"
-                    type="textarea"
-                    placeholder='{"temperature": 0.7}'
-                    :rows="4"
-                  />
-                </n-form-item>
-              </div>
-            </n-collapse-item>
-          </n-collapse>
-        </div>
-      </n-form>
+              </n-collapse-item>
+            </n-collapse>
+          </div>
+        </n-form>
       </div>
 
       <template #action>
         <div class="v3-modal-footer">
-          <div></div>
+          <div />
           <div class="v3-modal-actions">
-            <n-button size="small" @click="handleClose" :disabled="loading">{{ t("common.cancel") }}</n-button>
+            <n-button size="small" @click="handleClose" :disabled="loading">
+              {{ t("common.cancel") }}
+            </n-button>
             <n-button type="primary" size="small" @click="handleSubmit" :loading="loading">
               {{ group ? t("common.update") : t("common.create") }}
             </n-button>
@@ -1616,7 +1674,10 @@ async function handleSubmit() {
   border-radius: var(--v3-radius-sm);
   padding: 6px 10px;
   cursor: pointer;
-  transition: border-color 0.15s, box-shadow 0.15s, transform 0.05s;
+  transition:
+    border-color 0.15s,
+    box-shadow 0.15s,
+    transform 0.05s;
   background: var(--v3-surface);
   display: flex;
   flex-direction: column;
@@ -1691,7 +1752,9 @@ async function handleSubmit() {
   border-radius: var(--v3-radius-sm);
   background: var(--v3-surface);
   font-size: 12px;
-  transition: border-color 0.15s, background 0.15s;
+  transition:
+    border-color 0.15s,
+    background 0.15s;
 }
 
 .model-item:hover {
