@@ -6,13 +6,12 @@ import {
   NButton,
   NCard,
   NIcon,
+  NInput,
   NModal,
   NPopconfirm,
-  NSelect,
   NTag,
   NTooltip,
   useMessage,
-  type SelectOption,
 } from "naive-ui";
 import { computed, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
@@ -88,19 +87,50 @@ async function handleDeleteExisting(row: ModelAliasRow) {
   }
 }
 
-const aliasOptions = computed<SelectOption[]>(() => {
+const newAliasInput = ref("");
+
+// 已存在但还没绑定到当前模型的别名 — 用于"快速复用"chip 列表
+const quickPickOptions = computed<string[]>(() => {
   const seen = new Set<string>();
-  const opts: SelectOption[] = [];
   const existingSet = new Set(existingMappedNames.value.map(a => a.alias));
-  
+  const selectedSet = new Set(selectedAliases.value);
+  const out: string[] = [];
   for (const a of allAliases.value) {
-    if (seen.has(a.alias)) continue;
+    if (seen.has(a.alias)) {
+      continue;
+    }
     seen.add(a.alias);
-    if (existingSet.has(a.alias)) continue;
-    opts.push({ label: a.alias, value: a.alias });
+    if (existingSet.has(a.alias) || selectedSet.has(a.alias)) {
+      continue;
+    }
+    out.push(a.alias);
   }
-  return opts.sort((x, y) => String(x.label).localeCompare(String(y.label)));
+  return out.sort((x, y) => x.localeCompare(y));
 });
+
+function addAliasChip(name: string) {
+  const v = name.trim();
+  if (!v) {
+    return;
+  }
+  if (selectedAliases.value.includes(v)) {
+    return;
+  }
+  if (existingMappedNames.value.some(a => a.alias === v)) {
+    message.warning(t("v5.maAlreadyBound", { alias: v }) || `已绑定:${v}`);
+    return;
+  }
+  selectedAliases.value = [...selectedAliases.value, v];
+  newAliasInput.value = "";
+}
+
+function removeAliasChip(name: string) {
+  selectedAliases.value = selectedAliases.value.filter(a => a !== name);
+}
+
+function onInputEnter() {
+  addAliasChip(newAliasInput.value);
+}
 
 function handleClose() {
   if (loading.value) {
@@ -224,18 +254,65 @@ async function handleSave() {
             {{ t("v5.maAliasesTip") }}
           </n-tooltip>
         </div>
-        <n-select
-          v-model:value="selectedAliases"
-          multiple
-          filterable
-          tag
-          clearable
-          :options="aliasOptions"
-          :loading="allAliasesLoading"
-          :placeholder="t('v5.maPlaceholder')"
-          :menu-props="{ style: { maxHeight: '240px' } }"
-          to="body"
-        />
+
+        <!-- 输入新别名 -->
+        <div class="v5-ma-inputrow">
+          <n-input
+            v-model:value="newAliasInput"
+            :placeholder="t('v5.maInputPlaceholder') || '输入别名,回车或点 + 添加'"
+            @keydown.enter.prevent="onInputEnter"
+          />
+          <n-button
+            type="primary"
+            ghost
+            :disabled="!newAliasInput.trim()"
+            @click="onInputEnter"
+          >
+            +
+          </n-button>
+        </div>
+
+        <!-- 即将创建的 (selectedAliases) chip 行 -->
+        <div v-if="selectedAliases.length" class="v5-ma-pending">
+          <span class="v5-ma-pending__lbl">
+            {{ t("v5.maPendingLbl") || "即将创建" }} ({{ selectedAliases.length }})
+          </span>
+          <div class="v5-ma-chips">
+            <div
+              v-for="a in selectedAliases"
+              :key="a"
+              class="v5-ma-chip v5-ma-chip--pending"
+            >
+              <span class="v5-ma-chip__label">{{ a }}</span>
+              <button
+                class="v5-ma-chip__delete"
+                :title="t('common.delete')"
+                @click="removeAliasChip(a)"
+              >
+                <n-icon :component="CloseOutline" :size="12" />
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 快速复用已有别名 -->
+        <div v-if="quickPickOptions.length" class="v5-ma-quickpick">
+          <span class="v5-ma-quickpick__lbl">
+            {{ t("v5.maQuickPickLbl") || "复用已有" }}
+          </span>
+          <div class="v5-ma-chips">
+            <button
+              v-for="opt in quickPickOptions"
+              :key="opt"
+              class="v5-ma-chip v5-ma-chip--quickpick"
+              @click="addAliasChip(opt)"
+            >
+              <span class="v5-ma-chip__plus">+</span>
+              <span class="v5-ma-chip__label">{{ opt }}</span>
+            </button>
+          </div>
+        </div>
+
         <div class="v5-ma-field__hint">
           {{ t("v5.maAddHint") || "选已有别名 = 把当前模型加入候选池;输入新名回车 = 创建新别名" }}
         </div>
@@ -359,5 +436,64 @@ async function handleSave() {
   background: var(--v3-line);
   margin: 4px 0;
   opacity: 0.5;
+}
+
+/* 添加别名 — chip 风格 */
+.v5-ma-inputrow {
+  display: flex;
+  gap: 6px;
+  align-items: stretch;
+}
+.v5-ma-inputrow :deep(.n-input) {
+  flex: 1;
+}
+.v5-ma-pending {
+  margin-top: 10px;
+  padding: 8px 10px;
+  background: var(--v3-accent-soft);
+  border: 1px dashed var(--v3-accent);
+  border-radius: var(--v3-radius);
+}
+.v5-ma-pending__lbl {
+  display: block;
+  font: 600 10.5px/1 var(--v3-mono);
+  color: var(--v3-accent);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+.v5-ma-chip--pending {
+  background: var(--v3-bg);
+  border-color: var(--v3-accent);
+}
+.v5-ma-quickpick {
+  margin-top: 10px;
+}
+.v5-ma-quickpick__lbl {
+  display: block;
+  font: 500 10.5px/1 var(--v3-mono);
+  color: var(--v3-ink-3);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+.v5-ma-chip--quickpick {
+  cursor: pointer;
+  background: transparent;
+  border-style: dashed;
+  color: var(--v3-ink-2);
+}
+.v5-ma-chip--quickpick:hover {
+  border-color: var(--v3-accent);
+  background: var(--v3-accent-soft);
+  color: var(--v3-accent);
+}
+.v5-ma-chip__plus {
+  font: 700 12px var(--v3-mono);
+  color: var(--v3-ink-4);
+  margin-right: 2px;
+}
+.v5-ma-chip--quickpick:hover .v5-ma-chip__plus {
+  color: var(--v3-accent);
 }
 </style>
