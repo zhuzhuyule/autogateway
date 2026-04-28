@@ -904,6 +904,8 @@ export default {
     removeFromExposed: "Remove from exposed",
     paid: "Paid",
     alias: "Alias",
+    aliasUnexposed: "Inactive",
+    aliasUnexposedTip: "Target group is in 'specified' mode and {model} is not in its exposed list. Routing skips this alias. Add the model in that group's Models tab to restore.",
     smartDetect: "Smart detect",
     smartDetectPlaceholder: "Paste an API key — provider auto-matched…",
     smartDetectMatch: "Detected {provider} ({hint})",

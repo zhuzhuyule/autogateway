@@ -226,6 +226,50 @@ const totalMappings = computed(
   () => rows.value.filter(r => !(r.is_reserved && r.group_id === 0)).length
 );
 
+// === alias 失效判定:目标 group 处于 specified 模式且 real_model 不在 exposed_models 里 ===
+// 与 "enabled=false" 不同 — 这是因为 group 端配置导致 alias 静默失效,
+// 路由层会跳过此 alias (见 router_engine.filterByExposed).
+const groupExposureById = computed<
+  Record<number, { mode: string; exposed: Set<string> }>
+>(() => {
+  const out: Record<number, { mode: string; exposed: Set<string> }> = {};
+  for (const g of groups.value) {
+    if (!g.id) {
+      continue;
+    }
+    const raw = (g as unknown as { exposed_models?: unknown }).exposed_models;
+    let arr: string[] = [];
+    if (Array.isArray(raw)) {
+      arr = raw.filter((m): m is string => typeof m === "string");
+    } else if (typeof raw === "string" && raw.trim()) {
+      try {
+        const j = JSON.parse(raw);
+        if (Array.isArray(j)) {
+          arr = j.filter((m): m is string => typeof m === "string");
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+    out[g.id] = {
+      mode: g.model_routing_mode || "passthrough",
+      exposed: new Set(arr),
+    };
+  }
+  return out;
+});
+
+function aliasIsDeadByExposure(row: ModelAliasRow): boolean {
+  if (row.is_reserved && row.group_id === 0) {
+    return false;
+  }
+  const info = groupExposureById.value[row.group_id];
+  if (!info || info.mode !== "specified") {
+    return false;
+  }
+  return !info.exposed.has(row.real_model);
+}
+
 async function loadAll() {
   loading.value = true;
   try {
@@ -524,8 +568,15 @@ async function saveSettings() {
             v-for="m in tier.models"
             :key="m.id"
             class="v3-alias-chip"
-            :class="{ 'v3-alias-chip--disabled': !m.enabled }"
-            :title="m.real_model"
+            :class="{
+              'v3-alias-chip--disabled': !m.enabled,
+              'v3-alias-chip--unexposed': aliasIsDeadByExposure(m),
+            }"
+            :title="
+              aliasIsDeadByExposure(m)
+                ? t('v3.aliasUnexposedTip', { model: m.real_model })
+                : m.real_model
+            "
           >
             <span
               :class="pavClass(inferProvider(m))"
@@ -537,6 +588,9 @@ async function saveSettings() {
               }}
             </span>
             <span class="v3-alias-chip__name">{{ m.real_model }}</span>
+            <span v-if="aliasIsDeadByExposure(m)" class="v3-alias-chip__deadbadge">
+              {{ t("v3.aliasUnexposed") || "失效" }}
+            </span>
             <div class="v3-alias-chip__actions">
               <button class="v3-alias-chip__btn" @click="openEdit(m)">
                 <n-icon :component="CreateOutline" :size="10" />
@@ -611,8 +665,15 @@ async function saveSettings() {
               v-for="m in grp.members"
               :key="m.id"
               class="v3-alias-chip"
-              :class="{ 'v3-alias-chip--disabled': !m.enabled }"
-              :title="m.real_model"
+              :class="{
+                'v3-alias-chip--disabled': !m.enabled,
+                'v3-alias-chip--unexposed': aliasIsDeadByExposure(m),
+              }"
+              :title="
+                aliasIsDeadByExposure(m)
+                  ? t('v3.aliasUnexposedTip', { model: m.real_model })
+                  : m.real_model
+              "
             >
               <span
                 :class="pavClass(inferProvider(m))"
@@ -624,6 +685,9 @@ async function saveSettings() {
                 }}
               </span>
               <span class="v3-alias-chip__name">{{ m.real_model }}</span>
+              <span v-if="aliasIsDeadByExposure(m)" class="v3-alias-chip__deadbadge">
+                {{ t("v3.aliasUnexposed") || "失效" }}
+              </span>
               <div class="v3-alias-chip__actions">
                 <button class="v3-alias-chip__btn" @click="openEdit(m)">
                   <n-icon :component="CreateOutline" :size="10" />
@@ -1054,6 +1118,21 @@ async function saveSettings() {
   opacity: 0.5;
   filter: grayscale(1);
   border-style: dashed;
+}
+.v3-alias-chip--unexposed {
+  opacity: 0.65;
+  border-style: dashed;
+  border-color: var(--v3-warn, oklch(0.7 0.16 80));
+  background: oklch(from var(--v3-warn, oklch(0.7 0.16 80)) l c h / 0.06);
+}
+.v3-alias-chip__deadbadge {
+  font: 700 9px var(--v3-mono);
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: var(--v3-warn-soft, oklch(0.95 0.05 80));
+  color: var(--v3-warn, oklch(0.55 0.18 70));
+  text-transform: uppercase;
+  flex-shrink: 0;
 }
 .v3-alias-chip__name {
   font: 500 11px var(--v3-mono);

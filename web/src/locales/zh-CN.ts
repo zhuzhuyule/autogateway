@@ -880,6 +880,8 @@ export default {
     removeFromExposed: "从已暴露移除",
     paid: "收费",
     alias: "别名",
+    aliasUnexposed: "失效",
+    aliasUnexposedTip: "目标分组处于「指定」模式且 {model} 不在已暴露列表中,该 alias 路由时会被跳过。前往该分组的「模型」标签页加入此模型即可恢复。",
     smartDetect: "智能识别",
     smartDetectPlaceholder: "粘贴一个 API 密钥，自动匹配 Provider…",
     smartDetectMatch: "检测到 {provider}（{hint}）",
