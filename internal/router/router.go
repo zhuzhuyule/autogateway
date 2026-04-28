@@ -96,14 +96,13 @@ func registerAPIRoutes(
 	api := router.Group("/api")
 	api.Use(i18n.Middleware())
 
-	authConfig := configManager.GetAuthConfig()
-
 	// 公开
 	registerPublicAPIRoutes(api, serverHandler)
 
-	// 认证
+	// 认证 — middleware 通过 SettingsManager 每次请求动态读 auth_key,
+	// 用户在 UI 改完即时生效,无需重启
 	protectedAPI := api.Group("")
-	protectedAPI.Use(middleware.Auth(authConfig))
+	protectedAPI.Use(middleware.Auth(serverHandler.SettingsManager))
 	registerProtectedAPIRoutes(protectedAPI, serverHandler, aliasHandler, routingSettingsHandler, modelCatalogHandler, dedupHandler)
 }
 

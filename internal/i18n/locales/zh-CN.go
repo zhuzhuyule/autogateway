@@ -142,6 +142,8 @@ var MessagesZhCN = map[string]string{
 	"config.app_url_desc":                     "项目的基础 URL，用于拼接分组终端节点地址。系统配置优先于环境变量 APP_URL。",
 	"config.proxy_keys":                       "全局代理密钥",
 	"config.proxy_keys_desc":                  "全局代理密钥，用于访问所有分组的代理端点。多个密钥请用逗号分隔。",
+	"config.auth_key":                         "管理后台密钥 (Auth Key)",
+	"config.auth_key_desc":                    "登录管理后台 / 调用管理 API 用的密钥。首次启动从环境变量 AUTH_KEY 读取后写入数据库,以后此处即为权威来源,改完即时生效无需重启。注意:这也是默认聚合分组(openai/anthropic/gemini)的 proxy_key,改了会影响这些聚合分组的访问凭证。",
 	"config.log_retention_days":               "日志保留时长（天）",
 	"config.log_retention_days_desc":          "请求日志在数据库中的保留天数，0为不清理日志。",
 	"config.log_write_interval":               "日志延迟写入周期（分钟）",

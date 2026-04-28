@@ -142,6 +142,8 @@ var MessagesJaJP = map[string]string{
 	"config.app_url_desc":                     "アプリケーションのベースURL。グループエンドポイントアドレスの構築に使用されます。システム設定が環境変数APP_URLより優先されます。",
 	"config.proxy_keys":                       "グローバルプロキシキー",
 	"config.proxy_keys_desc":                  "すべてのグループプロキシエンドポイントにアクセスするためのグローバルプロキシキー。複数のキーはカンマで区切ります。",
+	"config.auth_key":                         "管理画面 Auth Key",
+	"config.auth_key_desc":                    "管理画面ログイン / 管理 API 呼び出し用キー。初回起動時に環境変数 AUTH_KEY からDBへ取り込まれ、以降はこちらが正となる。変更は即時反映、再起動不要。注意:既定の集約グループ(openai/anthropic/gemini)のproxy_keyでもあるため、変更するとそれらのアクセス資格情報にも影響する。",
 	"config.log_retention_days":               "ログ保存期間（日）",
 	"config.log_retention_days_desc":          "データベースにリクエストログを保持する日数、0でログを永久保存。",
 	"config.log_write_interval":               "ログ書き込み間隔（分）",

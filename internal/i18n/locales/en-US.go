@@ -142,6 +142,8 @@ var MessagesEnUS = map[string]string{
 	"config.app_url_desc":                     "Base URL of the application, used for constructing group endpoint addresses. System config takes precedence over APP_URL environment variable.",
 	"config.proxy_keys":                       "Global Proxy Keys",
 	"config.proxy_keys_desc":                  "Global proxy keys for accessing all group proxy endpoints. Separate multiple keys with commas.",
+	"config.auth_key":                         "Admin Auth Key",
+	"config.auth_key_desc":                    "Key used to log in to the admin UI and call the admin API. On first boot it's seeded from env AUTH_KEY into DB; afterwards this field is authoritative and changes take effect immediately without restart. Note: this is also the proxy_key for the default aggregate groups (openai/anthropic/gemini), changing it will affect their access credentials.",
 	"config.log_retention_days":               "Log Retention Days",
 	"config.log_retention_days_desc":          "Number of days to retain request logs in database, 0 to keep logs forever.",
 	"config.log_write_interval":               "Log Write Interval (minutes)",

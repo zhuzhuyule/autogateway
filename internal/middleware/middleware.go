@@ -115,8 +115,16 @@ func CORS(config types.CORSConfig) gin.HandlerFunc {
 	}
 }
 
-// Auth creates an authentication middleware
-func Auth(authConfig types.AuthConfig) gin.HandlerFunc {
+// AuthKeyResolver returns the currently effective auth key.
+// Implemented by config.SystemSettingsManager + bootstrap fallback.
+type AuthKeyResolver interface {
+	GetEffectiveAuthKey() string
+}
+
+// Auth creates an authentication middleware reading the live key on each
+// request, so user-driven updates via the Settings UI take effect without
+// restarting the server.
+func Auth(resolver AuthKeyResolver) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		path := c.Request.URL.Path
 
@@ -126,8 +134,10 @@ func Auth(authConfig types.AuthConfig) gin.HandlerFunc {
 		}
 
 		key := extractAuthKey(c)
+		expected := resolver.GetEffectiveAuthKey()
 
-		isValid := key != "" && subtle.ConstantTimeCompare([]byte(key), []byte(authConfig.Key)) == 1
+		isValid := key != "" && expected != "" &&
+			subtle.ConstantTimeCompare([]byte(key), []byte(expected)) == 1
 
 		if !isValid {
 			response.Error(c, app_errors.ErrUnauthorized)

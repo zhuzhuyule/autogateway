@@ -135,6 +135,12 @@ func (sm *SystemSettingsManager) EnsureSettingsInitialized(authConfig types.Auth
 				value = authConfig.Key
 			}
 
+			if meta.Key == "auth_key" {
+				// 首次启动:用 env AUTH_KEY 作为 bootstrap 写入 DB,
+				// 之后用户可在 UI 改,改完即时生效;env 仅在 DB 空时回落。
+				value = authConfig.Key
+			}
+
 			setting := models.SystemSetting{
 				SettingKey:   meta.Key,
 				SettingValue: value,
@@ -158,6 +164,23 @@ func (sm *SystemSettingsManager) GetSettings() types.SystemSettings {
 		return utils.DefaultSystemSettings()
 	}
 	return sm.syncer.Get()
+}
+
+// bootstrapAuthKey 是从 env AUTH_KEY 读到的初始值,DB 为空时回落用。
+var bootstrapAuthKey string
+
+// SetBootstrapAuthKey 在 app 启动时由 main 调用,把 env AUTH_KEY 缓存,
+// 供 GetEffectiveAuthKey 在 DB 没值时兜底。
+func SetBootstrapAuthKey(k string) {
+	bootstrapAuthKey = k
+}
+
+// GetEffectiveAuthKey 返回有效的 auth key:DB 优先,env 兜底。
+func (sm *SystemSettingsManager) GetEffectiveAuthKey() string {
+	if k := sm.GetSettings().AuthKey; k != "" {
+		return k
+	}
+	return bootstrapAuthKey
 }
 
 // GetAppUrl returns the effective App URL.

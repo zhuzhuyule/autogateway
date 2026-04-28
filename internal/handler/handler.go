@@ -96,9 +96,10 @@ func (s *Server) Login(c *gin.Context) {
 		return
 	}
 
-	authConfig := s.config.GetAuthConfig()
+	expected := s.SettingsManager.GetEffectiveAuthKey()
 
-	isValid := subtle.ConstantTimeCompare([]byte(req.AuthKey), []byte(authConfig.Key)) == 1
+	isValid := expected != "" &&
+		subtle.ConstantTimeCompare([]byte(req.AuthKey), []byte(expected)) == 1
 
 	if isValid {
 		c.JSON(http.StatusOK, LoginResponse{

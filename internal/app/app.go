@@ -87,7 +87,11 @@ func (a *App) Start() error {
 		return fmt.Errorf("failed to initialize i18n: %w", err)
 	}
 	logrus.Info("i18n initialized successfully.")
-	
+
+	// 把 env AUTH_KEY 缓存为 bootstrap (master / slave 都需要,
+	// DB 里 auth_key 为空时由它兜底)
+	config.SetBootstrapAuthKey(a.configManager.GetAuthConfig().Key)
+
 	// Master 节点执行初始化
 	if a.configManager.IsMaster() {
 		logrus.Info("Starting as Master Node.")

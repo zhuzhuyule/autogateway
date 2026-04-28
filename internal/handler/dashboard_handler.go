@@ -341,12 +341,12 @@ func (s *Server) TopModels(c *gin.Context) {
 func (s *Server) getSecurityWarnings(c *gin.Context) []models.SecurityWarning {
 	var warnings []models.SecurityWarning
 
-	// 获取AUTH_KEY和ENCRYPTION_KEY
-	authConfig := s.config.GetAuthConfig()
+	// 获取生效的 AUTH_KEY (DB > env bootstrap) 和 ENCRYPTION_KEY
+	authKey := s.SettingsManager.GetEffectiveAuthKey()
 	encryptionKey := s.config.GetEncryptionKey()
 
 	// 检查AUTH_KEY
-	if authConfig.Key == "" {
+	if authKey == "" {
 		warnings = append(warnings, models.SecurityWarning{
 			Type:       "AUTH_KEY",
 			Message:    i18n.Message(c, "dashboard.auth_key_missing"),
@@ -354,7 +354,7 @@ func (s *Server) getSecurityWarnings(c *gin.Context) []models.SecurityWarning {
 			Suggestion: i18n.Message(c, "dashboard.auth_key_required"),
 		})
 	} else {
-		authWarnings := checkPasswordSecurity(c, authConfig.Key, "AUTH_KEY")
+		authWarnings := checkPasswordSecurity(c, authKey, "AUTH_KEY")
 		warnings = append(warnings, authWarnings...)
 	}
 
