@@ -1562,9 +1562,12 @@ async function handleSubmit() {
                     <n-input
                       v-model:value="formData.param_overrides"
                       type="textarea"
-                      placeholder='{"temperature": 0.7}'
+                      placeholder='{"temperature": 0.7}  ·  {"*": {"temperature": 0.2}, "gpt-5": {"reasoning_effort": "high"}}'
                       :rows="4"
                     />
+                    <div class="param-overrides-hint">
+                      {{ t("keys.paramOverridesPerModelHint") }}
+                    </div>
                   </n-form-item>
                 </div>
               </n-collapse-item>
@@ -2275,5 +2278,11 @@ async function handleSubmit() {
   .header-actions {
     justify-content: flex-end;
   }
+}
+
+.param-overrides-hint {
+  margin-top: 6px;
+  font: 500 11px/1.5 var(--v3-sans);
+  color: var(--v3-ink-3);
 }
 </style>
