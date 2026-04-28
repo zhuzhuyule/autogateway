@@ -440,26 +440,53 @@ export const FREE_PROVIDERS: FreeProvider[] = [
   {
     id: "xfyun",
     name: "讯飞星辰",
-    freeTier: "含永久免费模型（Qwen3.5-2B 等）",
-    description: "科大讯飞 MaaS 平台，65+ 模型，Key 格式 APIKey:APISecret",
+    freeTier: "永久免费 (Qwen3.5-2B / Qwen3-1.7B / Hunyuan-MT-7B)",
+    description: "科大讯飞 MaaS,65+ 模型,Key 格式 APIKey:APISecret",
     signupUrl: "https://maas.xfyun.cn",
     docsUrl: "https://maas.xfyun.cn/modelService",
     channelType: "openai",
     baseUrl: "https://maas-api.cn-huabei-1.xf-yun.com/v2",
+    // 数据源:maas.xfyun.cn/api/v1/gpt-finetune/model/base/list-v2 实际枚举
+    // 过滤:price.inferencePrice 的 inTokensPrice 与 outTokensPrice 都为 0
+    // 仅保留可走 chat/completions 的文本生成类
     testModel: "xop35qwen2b",
-    models: ["xop35qwen2b", "test_ent"],
+    models: ["xop35qwen2b", "test_ent", "xophunyuan7bmt"],
     paidModels: [
-      "xop3qwen32b",
-      "xop3qwen30b",
-      "xop3qwen8b",
+      // 多模态
+      "xopqwen36v35b",
+      "xopqwen35397b",
+      "xopkimik25",
+      "xopqwen35v35b",
+      // 旗舰文本
+      "xopglm51",
+      "xopglm5",
+      "xopglm47blth2",
+      "xopkimik2blth",
+      "xopkimik2blins",
+      "xopdeepseekv32",
       "xdeepseekv3",
       "xdeepseekr1",
+      "xminimaxm25",
+      // Qwen3 系列
+      "xop3qwen235b2507",
+      "xop3qwen235b",
+      "xop3qwen32b",
+      "xop3qwen30b2507",
+      "xop3qwen30b",
+      "xop3qwen14b",
+      "xop3qwen8b",
+      "xop3qwen4b",
+      "xop3qwen0b6",
+      "xop3qwencodernext",
+      "xop3qwen80bnext",
+      // Flash + Distill
+      "xopglmv47flash",
       "xdeepseekr1qwen32b",
+      "xdeepseekr1qwen14b",
       "xdeepseekr1qwen7b",
-      "xopglm47blth2",
-      "xopkimik25",
-      "xopglm5",
-      "xopdeepseekv32",
+      "xdeepseekr1llama8b",
+      // QwQ
+      "xopqwenqwq32b",
     ],
     recommendedGroupName: "xfyun",
     recommendedDisplayName: "讯飞星辰",
@@ -864,11 +891,11 @@ export const FREE_MODELS: FreeModel[] = [
     notes: "Agentic 旗舰,内测 10M/2h",
   },
 
-  // 讯飞星辰（免费模型 price=0）
-  { providerId: "xfyun", modelId: "xop35qwen2b", tier: "fast", notes: "Qwen3.5-2B 免费" },
-  { providerId: "xfyun", modelId: "test_ent", tier: "fast", notes: "Qwen3-1.7B 免费" },
-  { providerId: "xfyun", modelId: "xop3qwen8b", tier: "balanced" },
-  { providerId: "xfyun", modelId: "xdeepseekr1", tier: "max", notes: "推理增强" },
+  // 讯飞星辰 — 仅含 inferencePrice in/out 都为 0 且属于"文本生成"类
+  // (源:list-v2 接口枚举,2026-04 复核;OCR/embedding/SD/rerank/MT 走单独端点不在此列)
+  { providerId: "xfyun", modelId: "xop35qwen2b", tier: "fast", notes: "Qwen3.5-2B 永久免费" },
+  { providerId: "xfyun", modelId: "test_ent", tier: "fast", notes: "Qwen3-1.7B 永久免费" },
+  { providerId: "xfyun", modelId: "xophunyuan7bmt", tier: "fast", notes: "Hunyuan-MT-7B 永久免费" },
 
   // Gitee AI (永久免费 text-generation,源自 /api/pay/.../services?type=serverless)
   { providerId: "gitee-ai", modelId: "internlm3-8b-instruct", tier: "fast", notes: "InternLM3-8B · 永久免费" },
