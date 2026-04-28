@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -99,9 +100,12 @@ func runOne(ctx context.Context, base, channel, path string, headers map[string]
 	if err != nil {
 		return outcome{nil, err}
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusNotFound {
-		return outcome{nil, fmt.Errorf("404")}
+	defer func() {
+		io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+	}()
+	if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusBadRequest {
+		return outcome{nil, fmt.Errorf("%d", resp.StatusCode)}
 	}
 	prefix := "/v1"
 	if strings.HasPrefix(path, "/v1beta") {

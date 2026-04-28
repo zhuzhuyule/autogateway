@@ -91,3 +91,26 @@ func TestProbeRejectsNonHTTP(t *testing.T) {
 		t.Fatalf("expected scheme rejection, got nil")
 	}
 }
+
+func TestProbeAnthropicReturns400ForPlainProbe(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/models" && r.Header.Get("anthropic-version") != "" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		if r.URL.Path == "/v1/models" {
+			w.WriteHeader(http.StatusBadRequest) // simulates real api.anthropic.com
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	got, err := ProbeUpstream(context.Background(), srv.URL)
+	if err != nil {
+		t.Fatalf("ProbeUpstream returned error: %v", err)
+	}
+	if got.ChannelType != "anthropic" {
+		t.Errorf("expected anthropic, got %q — Anthropic returns 400 not 404 on plain /v1/models", got.ChannelType)
+	}
+}
