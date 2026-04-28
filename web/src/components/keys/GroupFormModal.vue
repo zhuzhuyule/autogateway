@@ -42,6 +42,8 @@ import {
 } from "naive-ui";
 import { computed, reactive, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
+import UrlProbeBadge from "@/components/keys/UrlProbeBadge.vue";
+import type { ProbeResult } from "@/api/upstream";
 
 interface Props {
   show: boolean;
@@ -417,6 +419,14 @@ function getOldDefaultUpstream(channelType: string): string {
       return "https://api.anthropic.com";
     default:
       return "";
+  }
+}
+
+// 处理 URL 探测结果
+function onUrlDetected(res: ProbeResult) {
+  // Only auto-fill channel_type if user hasn't deviated from the default openai.
+  if (formData.channel_type === "openai" && res.channel_type !== "openai") {
+    formData.channel_type = res.channel_type;
   }
 }
 
@@ -1188,6 +1198,11 @@ async function handleSubmit() {
                     @input="
                       () => !props.group && index === 0 && (userModifiedFields.upstream = true)
                     "
+                  />
+                  <UrlProbeBadge
+                    v-if="index === 0"
+                    :url="upstream.url"
+                    @detected="onUrlDetected"
                   />
                 </div>
                 <div class="upstream-weight">
