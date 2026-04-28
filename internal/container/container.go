@@ -112,6 +112,12 @@ func BuildContainer() (*dig.Container, error) {
 	if err := container.Provide(services.NewAliasService); err != nil {
 		return nil, err
 	}
+	if err := container.Provide(services.NewAliasSuggestionService); err != nil {
+		return nil, err
+	}
+	if err := container.Provide(handler.NewAliasSuggestionHandler); err != nil {
+		return nil, err
+	}
 	if err := container.Provide(func(db *gorm.DB) *router_engine.Selector {
 		return router_engine.NewSelector(db)
 	}); err != nil {

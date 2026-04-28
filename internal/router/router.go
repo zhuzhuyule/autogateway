@@ -46,6 +46,7 @@ func NewRouter(
 	groupManager *services.GroupManager,
 	selector *router_engine.Selector,
 	aliasHandler *handler.AliasHandler,
+	aliasSuggestionHandler *handler.AliasSuggestionHandler,
 	routingSettingsHandler *handler.RoutingSettingsHandler,
 	modelCatalogHandler *handler.ModelCatalogHandler,
 	dedupHandler *handler.DedupHandler,
@@ -72,7 +73,7 @@ func NewRouter(
 
 	// 注册路由
 	registerSystemRoutes(router, serverHandler)
-	registerAPIRoutes(router, serverHandler, configManager, aliasHandler, routingSettingsHandler, modelCatalogHandler, dedupHandler, upstreamProbeHandler)
+	registerAPIRoutes(router, serverHandler, configManager, aliasHandler, aliasSuggestionHandler, routingSettingsHandler, modelCatalogHandler, dedupHandler, upstreamProbeHandler)
 	registerProxyRoutes(router, proxyServer, groupManager, serverHandler, selector)
 	registerFrontendRoutes(router, buildFS, indexPage)
 
@@ -90,6 +91,7 @@ func registerAPIRoutes(
 	serverHandler *handler.Server,
 	configManager types.ConfigManager,
 	aliasHandler *handler.AliasHandler,
+	aliasSuggestionHandler *handler.AliasSuggestionHandler,
 	routingSettingsHandler *handler.RoutingSettingsHandler,
 	modelCatalogHandler *handler.ModelCatalogHandler,
 	dedupHandler *handler.DedupHandler,
@@ -105,7 +107,7 @@ func registerAPIRoutes(
 	// 用户在 UI 改完即时生效,无需重启
 	protectedAPI := api.Group("")
 	protectedAPI.Use(middleware.Auth(serverHandler.SettingsManager))
-	registerProtectedAPIRoutes(protectedAPI, serverHandler, aliasHandler, routingSettingsHandler, modelCatalogHandler, dedupHandler, upstreamProbeHandler)
+	registerProtectedAPIRoutes(protectedAPI, serverHandler, aliasHandler, aliasSuggestionHandler, routingSettingsHandler, modelCatalogHandler, dedupHandler, upstreamProbeHandler)
 }
 
 // registerPublicAPIRoutes 公开API路由
@@ -119,6 +121,7 @@ func registerProtectedAPIRoutes(
 	api *gin.RouterGroup,
 	serverHandler *handler.Server,
 	aliasHandler *handler.AliasHandler,
+	aliasSuggestionHandler *handler.AliasSuggestionHandler,
 	routingSettingsHandler *handler.RoutingSettingsHandler,
 	modelCatalogHandler *handler.ModelCatalogHandler,
 	dedupHandler *handler.DedupHandler,
@@ -130,6 +133,7 @@ func registerProtectedAPIRoutes(
 	aliases := api.Group("/aliases")
 	{
 		aliases.GET("", aliasHandler.List)
+		aliases.GET("/suggestions", aliasSuggestionHandler.Suggest)
 		aliases.GET("/:alias", aliasHandler.GetByAlias)
 		aliases.POST("", aliasHandler.Create)
 		aliases.PUT("/:id", aliasHandler.Update)
