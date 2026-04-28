@@ -66,9 +66,9 @@ func Middleware(s *Selector, resolver AliasResolver) gin.HandlerFunc {
 			return
 		}
 		model := strings.TrimSpace(probe.Model)
+		// 没传 model 字段 → 默认走 auto 智能路由 (按 token 估算选 tier)
 		if model == "" {
-			c.Next()
-			return
+			model = "auto"
 		}
 
 		var picked *Candidate
@@ -119,6 +119,15 @@ func Middleware(s *Selector, resolver AliasResolver) gin.HandlerFunc {
 		c.Params = setParam(c.Params, "group_name", groupName)
 		c.Set("router_engine.candidate", picked)
 
+		// 如果原 model 与 picked.RealModel 不一致(alias 解析 / auto 智能路由),
+		// 改写 body 让上游收到真实模型名,避免 400。
+		if picked.RealModel != "" && picked.RealModel != model {
+			if rewritten, ok := rewriteBodyModel(bodyBytes, picked.RealModel); ok {
+				c.Request.Body = io.NopCloser(bytes.NewReader(rewritten))
+				c.Request.ContentLength = int64(len(rewritten))
+			}
+		}
+
 		logrus.WithFields(logrus.Fields{
 			"requested_model": model,
 			"target_group":    groupName,
@@ -127,6 +136,21 @@ func Middleware(s *Selector, resolver AliasResolver) gin.HandlerFunc {
 			"weight":          picked.Weight,
 		}).Debug("router_engine: routed request")
 	}
+}
+
+// rewriteBodyModel 把 JSON body 里的 "model" 字段改成 newModel。
+// 没有 model 字段就插一个;返回 (新 body, 是否成功)。
+func rewriteBodyModel(bodyBytes []byte, newModel string) ([]byte, bool) {
+	var data map[string]any
+	if err := json.Unmarshal(bodyBytes, &data); err != nil {
+		return nil, false
+	}
+	data["model"] = newModel
+	out, err := json.Marshal(data)
+	if err != nil {
+		return nil, false
+	}
+	return out, true
 }
 
 // modelIsExposed reports whether `model` appears in the JSON-encoded
