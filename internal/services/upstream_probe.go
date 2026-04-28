@@ -1,0 +1,122 @@
+package services
+
+import (
+	"context"
+	"fmt"
+	"net/http"
+	"net/url"
+	"strings"
+	"sync"
+	"time"
+)
+
+// ProbeResult is what /api/upstream/probe returns.
+type ProbeResult struct {
+	ChannelType   string `json:"channel_type"`   // openai | anthropic | gemini
+	VersionPrefix string `json:"version_prefix"` // /v1 or /v1beta
+	NormalizedURL string `json:"normalized_url"` // user-facing canonical base URL
+	StatusCode    int    `json:"status_code"`    // upstream status (often 401/403, that's OK)
+	LatencyMs     int64  `json:"latency_ms"`
+}
+
+var probeClient = &http.Client{Timeout: 3 * time.Second}
+
+// ProbeUpstream fans out three HEAD-equivalent GETs to the OpenAI, Anthropic
+// and Gemini model-list endpoints and returns the first that responds with a
+// non-network error. 401 / 403 count as "endpoint exists" — we just have no
+// auth credentials. We deliberately do NOT require a successful 2xx because
+// that would make probing unauthenticated upstreams impossible.
+func ProbeUpstream(ctx context.Context, rawURL string) (*ProbeResult, error) {
+	u, err := url.Parse(strings.TrimRight(rawURL, "/"))
+	if err != nil {
+		return nil, fmt.Errorf("invalid url: %w", err)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return nil, fmt.Errorf("only http/https probing is allowed, got %q", u.Scheme)
+	}
+	base := u.String()
+
+	type attempt struct {
+		channel string
+		path    string
+		header  map[string]string
+	}
+	attempts := []attempt{
+		{"anthropic", "/v1/models", map[string]string{"anthropic-version": "2023-06-01"}},
+		{"gemini", "/v1beta/models", nil},
+		{"openai", "/v1/models", nil},
+	}
+
+	results := make(chan outcome, len(attempts))
+	var wg sync.WaitGroup
+	probeCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+
+	for _, a := range attempts {
+		a := a
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			results <- runOne(probeCtx, base, a.channel, a.path, a.header)
+		}()
+	}
+	go func() { wg.Wait(); close(results) }()
+
+	hits := make(map[string]*ProbeResult)
+	for r := range results {
+		if r.err != nil || r.res == nil {
+			continue
+		}
+		hits[r.res.ChannelType] = r.res
+	}
+	// anthropic and openai share /v1/models; only prefer anthropic when the
+	// plain openai probe (no header) did NOT succeed — the anthropic-version
+	// header is the disambiguator.
+	if hits["openai"] != nil {
+		delete(hits, "anthropic")
+	}
+	// Pick highest-ranked remaining hit: anthropic > gemini > openai.
+	rank := []string{"anthropic", "gemini", "openai"}
+	for _, ch := range rank {
+		if hits[ch] != nil {
+			return hits[ch], nil
+		}
+	}
+	return nil, fmt.Errorf("no known upstream protocol responded at %s", base)
+}
+
+func runOne(ctx context.Context, base, channel, path string, headers map[string]string) outcome {
+	endpoint := base + path
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return outcome{nil, err}
+	}
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+	start := time.Now()
+	resp, err := probeClient.Do(req)
+	if err != nil {
+		return outcome{nil, err}
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return outcome{nil, fmt.Errorf("404")}
+	}
+	prefix := "/v1"
+	if strings.HasPrefix(path, "/v1beta") {
+		prefix = "/v1beta"
+	}
+	return outcome{&ProbeResult{
+		ChannelType:   channel,
+		VersionPrefix: prefix,
+		NormalizedURL: base,
+		StatusCode:    resp.StatusCode,
+		LatencyMs:     time.Since(start).Milliseconds(),
+	}, nil}
+}
+
+type outcome struct {
+	res *ProbeResult
+	err error
+}
