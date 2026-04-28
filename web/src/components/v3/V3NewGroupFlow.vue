@@ -320,6 +320,11 @@ async function ensureGroupExists(): Promise<Group> {
     model_routing_mode: "specified",
     exposed_models: bootstrapExposedModels(p, testModel),
   };
+  // 上游无 /v1/models 端点的 provider (e.g. LongCat) — 直接把静态清单
+  // 写入 available_models,免去之后 refresh 时 404。
+  if (p.staticModels) {
+    submit.available_models = [...p.models, ...(p.paidModels ?? [])];
+  }
   return await keysApi.createGroup(submit);
 }
 

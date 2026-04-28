@@ -103,6 +103,7 @@ type GroupCreateParams struct {
 	SubGroups           []SubGroupInput
 	ModelRoutingMode    string   // "passthrough" | "specified", 空字符串走默认
 	ExposedModels       []string // specified 模式下的白名单
+	AvailableModels     []string // 静态模型清单 (LongCat 等无 /models 端点的 provider 用)
 }
 
 // GroupUpdateParams captures updatable fields for a group.
@@ -251,6 +252,15 @@ func (s *GroupService) CreateGroup(ctx context.Context, params GroupCreateParams
 		exposedModelsJSON = buf
 	}
 
+	var availableModelsJSON datatypes.JSON
+	if len(params.AvailableModels) > 0 {
+		buf, err := json.Marshal(params.AvailableModels)
+		if err != nil {
+			return nil, fmt.Errorf("marshal available_models: %w", err)
+		}
+		availableModelsJSON = buf
+	}
+
 	group := models.Group{
 		Name:                name,
 		DisplayName:         strings.TrimSpace(params.DisplayName),
@@ -269,6 +279,11 @@ func (s *GroupService) CreateGroup(ctx context.Context, params GroupCreateParams
 		ProxyKeys:           strings.TrimSpace(params.ProxyKeys),
 		ModelRoutingMode:    routingMode,
 		ExposedModels:       exposedModelsJSON,
+		AvailableModels:     availableModelsJSON,
+	}
+	if availableModelsJSON != nil {
+		now := time.Now()
+		group.ModelsRefreshedAt = &now
 	}
 
 	tx := s.db.WithContext(ctx).Begin()

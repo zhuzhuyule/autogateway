@@ -65,6 +65,9 @@ type GroupCreateRequest struct {
 	ProxyKeys           string              `json:"proxy_keys"`
 	ModelRoutingMode    string              `json:"model_routing_mode"`
 	ExposedModels       []string            `json:"exposed_models"`
+	// AvailableModels 给那些上游没有 /v1/models 端点的 provider 用
+	// (e.g. LongCat) — 建组时直接把静态清单灌入,避免后续 refresh 拉空。
+	AvailableModels []string `json:"available_models"`
 }
 
 // CreateGroup handles the creation of a new group.
@@ -93,6 +96,7 @@ func (s *Server) CreateGroup(c *gin.Context) {
 		ProxyKeys:           req.ProxyKeys,
 		ModelRoutingMode:    req.ModelRoutingMode,
 		ExposedModels:       req.ExposedModels,
+		AvailableModels:     req.AvailableModels,
 	}
 
 	group, err := s.GroupService.CreateGroup(c.Request.Context(), params)

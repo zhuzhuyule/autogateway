@@ -415,7 +415,17 @@ const groupModels = computed<string[]>(() => {
     return Array.from(set).sort();
   }
   const raw = (props.group as unknown as { available_models?: unknown })?.available_models;
-  return parseAvailableModels(raw);
+  const cached = parseAvailableModels(raw);
+  if (cached.length) {
+    return cached;
+  }
+  // Fallback:无 /v1/models 端点的 provider (e.g. LongCat),老分组 cache 为空时
+  // 用 provider 静态清单兜底,避免空 UI。
+  const p = matchedProvider.value;
+  if (p?.staticModels) {
+    return [...p.models, ...(p.paidModels ?? [])];
+  }
+  return cached;
 });
 
 // Aggregate-only stats

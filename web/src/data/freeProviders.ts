@@ -46,6 +46,12 @@ export interface FreeProvider {
   /** 其他亮点,短标签数组,e.g. ["多模态","推理增强"] */
   highlights?: string[];
   /**
+   * true = 上游没有 /v1/models 端点(或不可信),模型清单只能靠手动维护
+   * (e.g. LongCat)。建组时直接把 models + paidModels 写入 available_models,
+   * 后端不再尝试拉取上游列表 — 刷新按钮也被前端禁用。
+   */
+  staticModels?: boolean;
+  /**
    * 从上游 /models 返回的单条模型 meta 判断是否免费;
    * - true  = 明确免费
    * - false = 明确付费
@@ -435,6 +441,7 @@ export const FREE_PROVIDERS: FreeProvider[] = [
     recommendedDisplayName: "美团 LongCat",
     upstreamHosts: ["api.longcat.chat"],
     badge: "high-quota",
+    staticModels: true,
     verifiedAt: "2026-04",
   },
   {
