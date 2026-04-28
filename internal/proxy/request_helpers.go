@@ -23,11 +23,47 @@ func (ps *ProxyServer) applyParamOverrides(bodyBytes []byte, group *models.Group
 		return bodyBytes, nil
 	}
 
-	for key, value := range group.ParamOverrides {
-		requestData[key] = value
+	if isNestedOverrides(group.ParamOverrides) {
+		modelName, _ := requestData["model"].(string)
+		applyNested(requestData, group.ParamOverrides, modelName)
+	} else {
+		for key, value := range group.ParamOverrides {
+			requestData[key] = value
+		}
 	}
 
 	return json.Marshal(requestData)
+}
+
+// isNestedOverrides reports whether every value in the override map is itself
+// a JSON object — that's the marker for the {"*": {...}, "model-id": {...}}
+// shape. Any non-object value collapses us back to the legacy flat shape.
+func isNestedOverrides(o map[string]any) bool {
+	if len(o) == 0 {
+		return false
+	}
+	for _, v := range o {
+		if _, ok := v.(map[string]any); !ok {
+			return false
+		}
+	}
+	return true
+}
+
+func applyNested(requestData, overrides map[string]any, modelName string) {
+	if star, ok := overrides["*"].(map[string]any); ok {
+		for k, v := range star {
+			requestData[k] = v
+		}
+	}
+	if modelName == "" {
+		return
+	}
+	if specific, ok := overrides[modelName].(map[string]any); ok {
+		for k, v := range specific {
+			requestData[k] = v
+		}
+	}
 }
 
 // logUpstreamError provides a centralized way to log errors from upstream interactions.
