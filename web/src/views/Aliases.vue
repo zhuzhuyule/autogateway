@@ -12,6 +12,8 @@ import { getGroupDisplayName } from "@/utils/display";
 import { V3_PROVIDER_DIR, pavClass } from "@/data/v3Catalog";
 import {
   AddOutline,
+  CheckmarkCircle,
+  CloseOutline,
   CreateOutline,
   CubeOutline,
   FlashOutline,
@@ -36,7 +38,7 @@ import {
   useDialog,
   useMessage,
 } from "naive-ui";
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 
 const { t } = useI18n();
@@ -110,24 +112,84 @@ const filteredPickerModels = computed(() => {
   return arr.sort();
 });
 
-async function pickModel(modelId: string) {
-  if (!pickerTargetAlias.value || !pickerActiveGroupId.value) {
+// 暂存区:点 + 加入,确认时一次性批量创建
+interface PendingPick {
+  groupId: number;
+  groupName: string;
+  modelId: string;
+}
+const pendingPicks = ref<PendingPick[]>([]);
+const pickerSubmitting = ref(false);
+
+const pendingKeySet = computed(
+  () => new Set(pendingPicks.value.map(p => `${p.groupId}:${p.modelId}`))
+);
+
+function isModelPending(modelId: string): boolean {
+  if (!pickerActiveGroupId.value) {
+    return false;
+  }
+  return pendingKeySet.value.has(`${pickerActiveGroupId.value}:${modelId}`);
+}
+
+function togglePendingPick(modelId: string) {
+  if (!pickerActiveGroupId.value) {
     return;
   }
-  try {
-    await aliasesApi.create({
-      alias: pickerTargetAlias.value,
-      group_id: pickerActiveGroupId.value,
-      real_model: modelId,
-      weight: DEFAULT_WEIGHT,
-      priority: DEFAULT_PRIORITY,
-      enabled: true,
-    });
+  const groupId = pickerActiveGroupId.value;
+  const groupName =
+    groupNameById.value[groupId] ||
+    groups.value.find(g => g.id === groupId)?.name ||
+    "";
+  const key = `${groupId}:${modelId}`;
+  const idx = pendingPicks.value.findIndex(p => `${p.groupId}:${p.modelId}` === key);
+  if (idx >= 0) {
+    pendingPicks.value.splice(idx, 1);
+  } else {
+    pendingPicks.value.push({ groupId, groupName, modelId });
+  }
+}
+
+function removePending(p: PendingPick) {
+  const key = `${p.groupId}:${p.modelId}`;
+  pendingPicks.value = pendingPicks.value.filter(x => `${x.groupId}:${x.modelId}` !== key);
+}
+
+watch(pickerOpen, open => {
+  if (open) {
+    pendingPicks.value = [];
+  }
+});
+
+async function commitPendingPicks() {
+  if (!pickerTargetAlias.value || !pendingPicks.value.length) {
+    return;
+  }
+  pickerSubmitting.value = true;
+  let ok = 0;
+  let fail = 0;
+  for (const p of pendingPicks.value) {
+    try {
+      await aliasesApi.create({
+        alias: pickerTargetAlias.value,
+        group_id: p.groupId,
+        real_model: p.modelId,
+        weight: DEFAULT_WEIGHT,
+        priority: DEFAULT_PRIORITY,
+        enabled: true,
+      });
+      ok += 1;
+    } catch {
+      fail += 1;
+    }
+  }
+  pickerSubmitting.value = false;
+  if (ok > 0) {
+    message.success(t("v5.maCreated", { ok, fail }));
     pickerOpen.value = false;
     await loadAll();
-    message.success(t("common.operationSuccess"));
-  } catch {
-    message.error(t("common.requestFailed"));
+  } else if (fail > 0) {
+    message.error(t("v5.maAllFailed"));
   }
 }
 
@@ -737,17 +799,47 @@ function saveSettingsThrottled() {
       </div>
     </n-spin>
 
-    <!-- Two-Pane Model Picker Dialog -->
+    <!-- Two-Pane Model Picker Dialog (批量选择) -->
     <n-modal
       v-model:show="pickerOpen"
       preset="card"
       style="width: 840px"
       :title="t('v3.aliasAddMember')"
     >
+      <!-- 已选暂存区 -->
+      <div class="v3-picker-pending">
+        <div class="v3-picker-pending__head">
+          <span class="v3-picker-pending__lbl">
+            {{ t("v3.aliasPendingTitle") || "已选" }} ({{ pendingPicks.length }})
+          </span>
+          <span v-if="!pendingPicks.length" class="v3-picker-pending__hint">
+            {{ t("v3.aliasPendingHint") || "点击下方模型 + 加入,可跨分组多选,最后一并确认" }}
+          </span>
+        </div>
+        <div v-if="pendingPicks.length" class="v3-picker-pending__list">
+          <div
+            v-for="p in pendingPicks"
+            :key="`${p.groupId}:${p.modelId}`"
+            class="v3-picker-pending__chip"
+          >
+            <span class="v3-picker-pending__chip-grp">{{ p.groupName }}</span>
+            <span class="v3-picker-pending__chip-sep">·</span>
+            <span class="v3-picker-pending__chip-mod">{{ p.modelId }}</span>
+            <button
+              class="v3-picker-pending__chip-x"
+              :title="t('common.delete')"
+              @click="removePending(p)"
+            >
+              <n-icon :component="CloseOutline" :size="12" />
+            </button>
+          </div>
+        </div>
+      </div>
+
       <div
         style="
           display: flex;
-          height: 500px;
+          height: 460px;
           gap: 1px;
           background: var(--v3-line);
           border: 1px solid var(--v3-line);
@@ -762,6 +854,7 @@ function saveSettingsThrottled() {
             background: var(--v3-surface-2);
             display: flex;
             flex-direction: column;
+            min-height: 0;
           "
         >
           <div
@@ -771,11 +864,12 @@ function saveSettingsThrottled() {
               color: var(--v3-ink-3);
               text-transform: uppercase;
               border-bottom: 1px solid var(--v3-line);
+              flex-shrink: 0;
             "
           >
             {{ t("keys.groupManagement") }}
           </div>
-          <div class="scroll" style="flex: 1">
+          <div class="scroll" style="flex: 1; overflow-y: auto; min-height: 0">
             <div
               v-for="g in groups"
               :key="g.id"
@@ -791,8 +885,16 @@ function saveSettingsThrottled() {
           </div>
         </div>
         <!-- Right: Models -->
-        <div style="flex: 1; background: var(--v3-surface); display: flex; flex-direction: column">
-          <div style="padding: 12px; border-bottom: 1px solid var(--v3-line)">
+        <div
+          style="
+            flex: 1;
+            background: var(--v3-surface);
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+          "
+        >
+          <div style="padding: 12px; border-bottom: 1px solid var(--v3-line); flex-shrink: 0">
             <n-input
               v-model:value="pickerSearch"
               :placeholder="t('v3.filterModels')"
@@ -802,7 +904,7 @@ function saveSettingsThrottled() {
               <template #prefix><n-icon :component="PulseOutline" /></template>
             </n-input>
           </div>
-          <div class="scroll" style="flex: 1; padding: 12px">
+          <div class="scroll" style="flex: 1; overflow-y: auto; padding: 12px; min-height: 0">
             <div
               v-if="!filteredPickerModels.length"
               style="padding: 60px; text-align: center; color: var(--v3-ink-4)"
@@ -810,6 +912,7 @@ function saveSettingsThrottled() {
               {{ t("modelcatalog.noData") }}
             </div>
             <div
+              v-else
               style="
                 display: grid;
                 grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
@@ -820,15 +923,33 @@ function saveSettingsThrottled() {
                 v-for="model in filteredPickerModels"
                 :key="model"
                 class="v3-picker-model-btn"
-                @click="pickModel(model)"
+                :class="{ 'v3-picker-model-btn--picked': isModelPending(model) }"
+                @click="togglePendingPick(model)"
               >
                 <span class="v3-picker-model-btn__id">{{ model }}</span>
-                <n-icon :component="AddOutline" class="v3-picker-model-btn__add" />
+                <n-icon
+                  :component="isModelPending(model) ? CheckmarkCircle : AddOutline"
+                  class="v3-picker-model-btn__add"
+                />
               </button>
             </div>
           </div>
         </div>
       </div>
+
+      <template #footer>
+        <div style="display: flex; justify-content: flex-end; gap: 8px">
+          <n-button @click="pickerOpen = false">{{ t("common.cancel") }}</n-button>
+          <n-button
+            type="primary"
+            :loading="pickerSubmitting"
+            :disabled="!pendingPicks.length"
+            @click="commitPendingPicks"
+          >
+            {{ t("v3.aliasPendingConfirm", { n: pendingPicks.length }) || `确认添加 ${pendingPicks.length} 条` }}
+          </n-button>
+        </div>
+      </template>
     </n-modal>
 
     <!-- New Alias Name Modal -->
@@ -1237,6 +1358,84 @@ function saveSettingsThrottled() {
   color: var(--v3-ink-4);
   opacity: 0.5;
 }
+.v3-picker-model-btn--picked {
+  border-color: var(--v3-ok);
+  background: var(--v3-ok-soft);
+}
+.v3-picker-model-btn--picked .v3-picker-model-btn__id {
+  color: var(--v3-ok);
+}
+.v3-picker-model-btn--picked .v3-picker-model-btn__add {
+  color: var(--v3-ok);
+  opacity: 1;
+}
+
+/* Pending picks 暂存区 */
+.v3-picker-pending {
+  margin-bottom: 10px;
+  padding: 10px 12px;
+  background: var(--v3-accent-soft);
+  border: 1px dashed var(--v3-accent);
+  border-radius: 6px;
+}
+.v3-picker-pending__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.v3-picker-pending__lbl {
+  font: 700 11px/1 var(--v3-mono);
+  color: var(--v3-accent);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.v3-picker-pending__hint {
+  font: 400 11.5px var(--v3-sans);
+  color: var(--v3-ink-3);
+}
+.v3-picker-pending__list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-height: 80px;
+  overflow-y: auto;
+}
+.v3-picker-pending__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px 3px 10px;
+  background: var(--v3-bg);
+  border: 1px solid var(--v3-accent);
+  border-radius: 999px;
+  font: 500 11px var(--v3-mono);
+}
+.v3-picker-pending__chip-grp {
+  color: var(--v3-ink-3);
+}
+.v3-picker-pending__chip-sep {
+  color: var(--v3-ink-4);
+}
+.v3-picker-pending__chip-mod {
+  color: var(--v3-ink);
+}
+.v3-picker-pending__chip-x {
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  padding: 2px;
+  border-radius: 3px;
+  color: var(--v3-ink-4);
+  display: inline-flex;
+  align-items: center;
+  margin-left: 2px;
+}
+.v3-picker-pending__chip-x:hover {
+  color: var(--v3-danger);
+  background: var(--v3-danger-soft);
+}
+
 .v3-picker-model-btn:hover .v3-picker-model-btn__add {
   color: var(--v3-info);
   opacity: 1;
