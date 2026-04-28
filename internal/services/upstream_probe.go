@@ -43,7 +43,7 @@ func ProbeUpstream(ctx context.Context, rawURL string) (*ProbeResult, error) {
 		header  map[string]string
 	}
 	attempts := []attempt{
-		{"anthropic", "/v1/models", map[string]string{"anthropic-version": "2023-06-01"}},
+		{"anthropic", "/v1/messages", map[string]string{"anthropic-version": "2023-06-01"}},
 		{"gemini", "/v1beta/models", nil},
 		{"openai", "/v1/models", nil},
 	}
@@ -69,12 +69,6 @@ func ProbeUpstream(ctx context.Context, rawURL string) (*ProbeResult, error) {
 			continue
 		}
 		hits[r.res.ChannelType] = r.res
-	}
-	// anthropic and openai share /v1/models; only prefer anthropic when the
-	// plain openai probe (no header) did NOT succeed — the anthropic-version
-	// header is the disambiguator.
-	if hits["openai"] != nil {
-		delete(hits, "anthropic")
 	}
 	// Pick highest-ranked remaining hit: anthropic > gemini > openai.
 	rank := []string{"anthropic", "gemini", "openai"}

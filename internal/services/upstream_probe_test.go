@@ -34,7 +34,7 @@ func TestProbeOpenAIStyle(t *testing.T) {
 
 func TestProbeAnthropicStyle(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/v1/models" && r.Header.Get("anthropic-version") != "" {
+		if r.URL.Path == "/v1/messages" && r.Header.Get("anthropic-version") != "" {
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
@@ -92,17 +92,11 @@ func TestProbeRejectsNonHTTP(t *testing.T) {
 	}
 }
 
-func TestProbeAnthropicReturns400ForPlainProbe(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/v1/models" && r.Header.Get("anthropic-version") != "" {
-			w.WriteHeader(http.StatusUnauthorized)
-			return
-		}
-		if r.URL.Path == "/v1/models" {
-			w.WriteHeader(http.StatusBadRequest) // simulates real api.anthropic.com
-			return
-		}
-		w.WriteHeader(http.StatusNotFound)
+func TestProbeRealAnthropicShape(t *testing.T) {
+	// Real api.anthropic.com returns 401 to /v1/models AND /v1/messages.
+	// /v1/messages is the anthropic-exclusive disambiguator.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
 	}))
 	defer srv.Close()
 
@@ -111,6 +105,6 @@ func TestProbeAnthropicReturns400ForPlainProbe(t *testing.T) {
 		t.Fatalf("ProbeUpstream returned error: %v", err)
 	}
 	if got.ChannelType != "anthropic" {
-		t.Errorf("expected anthropic, got %q — Anthropic returns 400 not 404 on plain /v1/models", got.ChannelType)
+		t.Errorf("expected anthropic (since /v1/messages exists), got %q", got.ChannelType)
 	}
 }
