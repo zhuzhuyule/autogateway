@@ -913,6 +913,7 @@ export default {
     aliasPendingTitle: "已选",
     aliasPendingHint: "点击下方模型 + 加入,可跨分组多选,最后一并确认",
     aliasPendingConfirm: "确认添加 {n} 条",
+    aliasAlreadyBound: "已绑定到此别名",
     aliasAddIncomplete: "别名、分组和模型名都不能为空。",
     aliasNameLabel: "别名",
     aliasNamePlaceholder: "例如 gpt-4 / smart-coder",

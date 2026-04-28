@@ -10,6 +10,7 @@ import { keysApi } from "@/api/keys";
 import type { Group } from "@/types/models";
 import { getGroupDisplayName } from "@/utils/display";
 import { V3_PROVIDER_DIR, pavClass } from "@/data/v3Catalog";
+import { findProviderByUpstreams, isFree } from "@/data/freeProviders";
 import {
   AddOutline,
   CheckmarkCircle,
@@ -80,7 +81,30 @@ function openPicker(alias: string) {
   }
 }
 
-const filteredPickerModels = computed(() => {
+function parseModelArray(raw: unknown): string[] {
+  if (Array.isArray(raw)) {
+    return raw.filter((m): m is string => typeof m === "string");
+  }
+  if (typeof raw === "string" && raw.trim()) {
+    try {
+      const j = JSON.parse(raw);
+      if (Array.isArray(j)) {
+        return j.filter((m): m is string => typeof m === "string");
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+  return [];
+}
+
+interface PickerModelView {
+  id: string;
+  isFree: boolean;
+  alreadyBound: boolean;
+}
+
+const filteredPickerModels = computed<PickerModelView[]>(() => {
   if (!pickerActiveGroupId.value) {
     return [];
   }
@@ -89,27 +113,47 @@ const filteredPickerModels = computed(() => {
     return [];
   }
 
-  const raw = (g as unknown as { available_models?: unknown }).available_models;
-  let arr: string[] = [];
-  if (Array.isArray(raw)) {
-    arr = raw.filter((m): m is string => typeof m === "string");
-  } else if (typeof raw === "string" && raw.trim()) {
-    try {
-      const j = JSON.parse(raw);
-      if (Array.isArray(j)) {
-        arr = j.filter((m): m is string => typeof m === "string");
+  // 1. 与 group 的 routing mode 同步:specified 用 exposed_models,
+  //    passthrough 用 available_models — 与"模型"标签页里看到的一致
+  const mode =
+    ((g as unknown as { model_routing_mode?: string }).model_routing_mode || "passthrough");
+  let source: string[] =
+    mode === "specified"
+      ? parseModelArray((g as unknown as { exposed_models?: unknown }).exposed_models)
+      : parseModelArray((g as unknown as { available_models?: unknown }).available_models);
+  // specified 模式下若 exposed 为空,降级用 available 兜底,避免空列表
+  if (mode === "specified" && source.length === 0) {
+    source = parseModelArray((g as unknown as { available_models?: unknown }).available_models);
+  }
+
+  // 2. provider 上下文 — 用于免费检测
+  const providerId = findProviderByUpstreams(g.upstreams || [])?.id;
+
+  // 3. 已为当前 alias 在该 group 绑定的 real_model 集合
+  const aliasName = pickerTargetAlias.value;
+  const boundSet = new Set(
+    rows.value
+      .filter(r => r.alias === aliasName && r.group_id === g.id)
+      .map(r => r.real_model)
+  );
+
+  // 4. 搜索过滤
+  const q = pickerSearch.value.toLowerCase().trim();
+  const filtered = q ? source.filter(m => m.toLowerCase().includes(q)) : source;
+
+  // 5. 增广 + 排序:免费优先,字母序
+  return filtered
+    .map(id => ({
+      id,
+      isFree: isFree(providerId, id) === true,
+      alreadyBound: boundSet.has(id),
+    }))
+    .sort((a, b) => {
+      if (a.isFree !== b.isFree) {
+        return a.isFree ? -1 : 1;
       }
-    } catch {
-      /* ignore */
-    }
-  }
-
-  const query = pickerSearch.value.toLowerCase().trim();
-  if (query) {
-    arr = arr.filter(m => m.toLowerCase().includes(query));
-  }
-
-  return arr.sort();
+      return a.id.localeCompare(b.id);
+    });
 });
 
 // 暂存区:点 + 加入,确认时一次性批量创建
@@ -920,17 +964,38 @@ function saveSettingsThrottled() {
               "
             >
               <button
-                v-for="model in filteredPickerModels"
-                :key="model"
+                v-for="m in filteredPickerModels"
+                :key="m.id"
                 class="v3-picker-model-btn"
-                :class="{ 'v3-picker-model-btn--picked': isModelPending(model) }"
-                @click="togglePendingPick(model)"
+                :class="{
+                  'v3-picker-model-btn--picked': isModelPending(m.id),
+                  'v3-picker-model-btn--bound': m.alreadyBound,
+                }"
+                :disabled="m.alreadyBound"
+                :title="
+                  m.alreadyBound
+                    ? t('v3.aliasAlreadyBound') || '已绑定到此别名'
+                    : m.id
+                "
+                @click="!m.alreadyBound && togglePendingPick(m.id)"
               >
-                <span class="v3-picker-model-btn__id">{{ model }}</span>
+                <span
+                  v-if="m.isFree"
+                  class="v3-picker-model-btn__free"
+                  :title="t('modelcatalog.freeTag')"
+                >🆓</span>
+                <span class="v3-picker-model-btn__id">{{ m.id }}</span>
                 <n-icon
-                  :component="isModelPending(model) ? CheckmarkCircle : AddOutline"
+                  v-if="m.alreadyBound"
+                  :component="LockClosedOutline"
                   class="v3-picker-model-btn__add"
                 />
+                <n-icon
+                  v-else-if="isModelPending(m.id)"
+                  :component="CheckmarkCircle"
+                  class="v3-picker-model-btn__add"
+                />
+                <n-icon v-else :component="AddOutline" class="v3-picker-model-btn__add" />
               </button>
             </div>
           </div>
@@ -1368,6 +1433,31 @@ function saveSettingsThrottled() {
 .v3-picker-model-btn--picked .v3-picker-model-btn__add {
   color: var(--v3-ok);
   opacity: 1;
+}
+.v3-picker-model-btn--bound {
+  cursor: not-allowed;
+  opacity: 0.55;
+  border-style: dashed;
+  background: var(--v3-surface);
+}
+.v3-picker-model-btn--bound:hover {
+  border-color: var(--v3-line);
+  box-shadow: none;
+}
+.v3-picker-model-btn--bound .v3-picker-model-btn__id {
+  color: var(--v3-ink-3);
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+  text-decoration-color: var(--v3-ink-4);
+}
+.v3-picker-model-btn--bound .v3-picker-model-btn__add {
+  color: var(--v3-ink-4);
+}
+.v3-picker-model-btn__free {
+  font-size: 13px;
+  line-height: 1;
+  flex-shrink: 0;
+  margin-right: 6px;
 }
 
 /* Pending picks 暂存区 */

@@ -937,6 +937,7 @@ export default {
     aliasPendingTitle: "Selected",
     aliasPendingHint: "Click + on models below to stage them; multi-select across groups, then confirm all at once",
     aliasPendingConfirm: "Confirm {n}",
+    aliasAlreadyBound: "Already bound to this alias",
     aliasAddIncomplete: "Alias, group, and model are all required.",
     aliasNameLabel: "Alias",
     aliasNamePlaceholder: "e.g. gpt-4 / smart-coder",
