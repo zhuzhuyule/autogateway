@@ -4,16 +4,7 @@ import type { Group } from "@/types/models";
 import { appState } from "@/utils/app-state";
 import { getGroupDisplayName } from "@/utils/display";
 import { CopyOutline, DocumentTextOutline } from "@vicons/ionicons5";
-import {
-  NButton,
-  NCard,
-  NIcon,
-  NModal,
-  NRadio,
-  NRadioGroup,
-  NSpace,
-  useMessage,
-} from "naive-ui";
+import { NButton, NCard, NIcon, NModal, NRadio, NRadioGroup, NSpace, useMessage } from "naive-ui";
 import { computed, ref, watchEffect } from "vue";
 import { useI18n } from "vue-i18n";
 
@@ -107,7 +98,9 @@ function handleCancel() {
   <n-modal :show="modalVisible" @update:show="handleCancel" class="v3-modal">
     <n-card
       class="v3-modal-card"
-      :title="t('keys.copyGroupTitle', { groupName: sourceGroup ? getGroupDisplayName(sourceGroup) : '' })"
+      :title="
+        t('keys.copyGroupTitle', { groupName: sourceGroup ? getGroupDisplayName(sourceGroup) : '' })
+      "
       :bordered="false"
       size="huge"
       role="dialog"
@@ -153,9 +146,11 @@ function handleCancel() {
 
       <template #action>
         <div class="v3-modal-footer">
-          <div></div>
+          <div />
           <div class="v3-modal-actions">
-            <n-button size="small" @click="handleCancel" :disabled="loading">{{ t("common.cancel") }}</n-button>
+            <n-button size="small" @click="handleCancel" :disabled="loading">
+              {{ t("common.cancel") }}
+            </n-button>
             <n-button type="primary" size="small" @click="handleCopy" :loading="loading">
               <template #icon>
                 <n-icon :component="CopyOutline" />
@@ -201,20 +196,20 @@ function handleCancel() {
   gap: 12px;
   padding: 12px 14px;
   background: var(--v3-ok-soft);
-  border: 1px solid oklch(0.78 0.10 145);
+  border: 1px solid oklch(0.78 0.1 145);
   border-radius: var(--v3-radius);
 }
 
 .v3-copy-preview-label {
   font: 500 11px/1 var(--v3-sans);
-  color: oklch(0.40 0.13 145);
+  color: oklch(0.4 0.13 145);
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
 
 .v3-copy-preview-value {
   font: 500 12px/1 var(--v3-mono);
-  color: oklch(0.40 0.13 145);
+  color: oklch(0.4 0.13 145);
   background: oklch(1 0 0 / 0.5);
   padding: 3px 8px;
   border-radius: 4px;

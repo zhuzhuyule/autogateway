@@ -37,7 +37,9 @@ async function fetchSuggestions() {
     const r = await fetch("/api/dedup/suggestions", {
       headers: { Authorization: authHeader.value },
     });
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    if (!r.ok) {
+      throw new Error(`HTTP ${r.status}`);
+    }
     suggestions.value = await r.json();
   } catch {
     fetchError.value = true;
@@ -78,7 +80,9 @@ async function createAggregate() {
         source_groups: selected.value.source_groups,
       }),
     });
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    if (!r.ok) {
+      throw new Error(`HTTP ${r.status}`);
+    }
     message.success(t("common.operationSuccess"));
     closeConfirm();
     await fetchSuggestions();
@@ -109,11 +113,7 @@ async function createAggregate() {
     <div
       v-if="fetchError"
       class="v3-empty-hint"
-      style="
-        background: var(--v3-danger-soft);
-        color: var(--v3-danger);
-        margin-bottom: 12px;
-      "
+      style="background: var(--v3-danger-soft); color: var(--v3-danger); margin-bottom: 12px"
     >
       {{ t("dedup.loadFailed") || "Failed to load suggestions" }}
     </div>
@@ -136,7 +136,7 @@ async function createAggregate() {
               <th>{{ t("dedup.modelName") || "Model" }}</th>
               <th>{{ t("dedup.sourceGroups") || "Source groups" }}</th>
               <th>{{ t("dedup.suggestedName") || "Suggested aggregate" }}</th>
-              <th></th>
+              <th />
             </tr>
           </thead>
           <tbody>
@@ -171,11 +171,7 @@ async function createAggregate() {
                 </div>
               </td>
               <td
-                style="
-                  font: 500 12px var(--v3-mono);
-                  color: var(--v3-ink);
-                  word-break: break-all;
-                "
+                style="font: 500 12px var(--v3-mono); color: var(--v3-ink); word-break: break-all"
               >
                 {{ row.suggested_aggregate_name }}
               </td>
@@ -190,12 +186,7 @@ async function createAggregate() {
         </table>
         <div
           v-else-if="!loading"
-          style="
-            padding: 32px 16px;
-            text-align: center;
-            color: var(--v3-ink-3);
-            font-size: 12.5px;
-          "
+          style="padding: 32px 16px; text-align: center; color: var(--v3-ink-3); font-size: 12.5px"
         >
           {{ t("dedup.noSuggestions") || "No dedup suggestions right now." }}
         </div>
@@ -204,18 +195,13 @@ async function createAggregate() {
 
     <!-- Confirmation modal -->
     <n-modal v-model:show="showConfirm" :mask-closable="false">
-      <div
-        class="v3-card"
-        style="width: 480px; max-width: calc(100vw - 32px); padding: 0"
-      >
+      <div class="v3-card" style="width: 480px; max-width: calc(100vw - 32px); padding: 0">
         <div class="v3-card__head">
           <div>
             <div class="v3-card__title">
               {{ t("dedup.createAggregateTitle") || "Create aggregate" }}
             </div>
-            <div class="v3-card__sub">
-              {{ selected?.model_name }} → unified group
-            </div>
+            <div class="v3-card__sub">{{ selected?.model_name }} → unified group</div>
           </div>
           <button
             class="v3-btn v3-btn--ghost v3-btn--icon"
@@ -259,11 +245,7 @@ async function createAggregate() {
           <button class="v3-btn" @click="closeConfirm">
             {{ t("common.cancel") || "Cancel" }}
           </button>
-          <button
-            class="v3-btn v3-btn--accent"
-            :disabled="submitting"
-            @click="createAggregate"
-          >
+          <button class="v3-btn v3-btn--accent" :disabled="submitting" @click="createAggregate">
             <n-icon :component="CheckmarkCircle" :size="12" />
             {{ submitting ? "Saving…" : t("common.confirm") || "Confirm" }}
           </button>

@@ -49,7 +49,9 @@ function initForm() {
 }
 
 async function handleSubmit() {
-  if (isSaving.value) return;
+  if (isSaving.value) {
+    return;
+  }
   try {
     await formRef.value.validate();
     isSaving.value = true;
@@ -68,18 +70,18 @@ function generateValidationRules(item: Setting): FormItemRule[] {
       message: t("settings.pleaseInput", { field: item.name }),
       trigger: ["input", "blur"],
     };
-    if (item.type === "int") rule.type = "number";
+    if (item.type === "int") {
+      rule.type = "number";
+    }
     rules.push(rule);
   }
   if (item.type === "int" && item.min_value !== undefined && item.min_value !== null) {
     rules.push({
       validator: (_rule: FormItemRule, value: number) => {
-        if (value === null || value === undefined) return true;
-        if (
-          item.min_value !== undefined &&
-          item.min_value !== null &&
-          value < item.min_value
-        ) {
+        if (value === null || value === undefined) {
+          return true;
+        }
+        if (item.min_value !== undefined && item.min_value !== null && value < item.min_value) {
           return new Error(t("settings.minValueError", { value: item.min_value }));
         }
         return true;
@@ -103,11 +105,7 @@ function generateValidationRules(item: Setting): FormItemRule[] {
 
     <n-form ref="formRef" :model="form" label-placement="top">
       <div class="v3-settings-grid">
-        <div
-          v-for="category in settingList"
-          :key="category.category_name"
-          class="v3-card"
-        >
+        <div v-for="category in settingList" :key="category.category_name" class="v3-card">
           <div class="v3-card__head">
             <div class="v3-card__title">{{ category.category_name }}</div>
           </div>
@@ -127,10 +125,7 @@ function generateValidationRules(item: Setting): FormItemRule[] {
                 "
               >
                 <div>
-                  <div
-                    class="v3-set-row__lbl"
-                    style="display: flex; align-items: center; gap: 6px"
-                  >
+                  <div class="v3-set-row__lbl" style="display: flex; align-items: center; gap: 6px">
                     {{ item.name }}
                     <n-tooltip trigger="hover" placement="top">
                       <template #trigger>
@@ -175,9 +170,7 @@ function generateValidationRules(item: Setting): FormItemRule[] {
                   v-if="item.type === 'int'"
                   v-model:value="form[item.key] as number"
                   :min="
-                    item.min_value !== undefined && item.min_value >= 0
-                      ? item.min_value
-                      : undefined
+                    item.min_value !== undefined && item.min_value >= 0 ? item.min_value : undefined
                   "
                   :placeholder="t('settings.inputNumber') || 'Number…'"
                   clearable
@@ -220,7 +213,11 @@ function generateValidationRules(item: Setting): FormItemRule[] {
         @click="handleSubmit"
       >
         <n-icon :component="Save" :size="13" />
-        {{ isSaving ? t("settings.saving") || "Saving…" : t("settings.saveSettings") || "Save settings" }}
+        {{
+          isSaving
+            ? t("settings.saving") || "Saving…"
+            : t("settings.saveSettings") || "Save settings"
+        }}
       </button>
     </div>
   </div>

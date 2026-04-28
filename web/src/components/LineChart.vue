@@ -95,7 +95,9 @@ const yTicks = computed(() => {
     for (let value = Math.floor(min); value <= top; value += step) {
       ticks.push(value);
     }
-    if (ticks[ticks.length - 1] !== top) ticks.push(top);
+    if (ticks[ticks.length - 1] !== top) {
+      ticks.push(top);
+    }
     return ticks;
   }
 

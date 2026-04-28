@@ -59,13 +59,17 @@ async function refreshAndSelect(id?: number) {
   await loadGroups();
   if (id != null) {
     const target = groups.value.find(g => g.id === id);
-    if (target) selectGroup(target);
+    if (target) {
+      selectGroup(target);
+    }
   }
 }
 
 function handleSubGroupSelect(groupId: number) {
   const target = groups.value.find(g => g.id === groupId);
-  if (target) selectGroup(target);
+  if (target) {
+    selectGroup(target);
+  }
 }
 </script>
 
@@ -101,12 +105,7 @@ function handleSubGroupSelect(groupId: number) {
 
       <div v-else class="v3-card" style="display: grid; place-items: center">
         <div
-          style="
-            padding: 60px 20px;
-            text-align: center;
-            color: var(--v3-ink-3);
-            font-size: 13px;
-          "
+          style="padding: 60px 20px; text-align: center; color: var(--v3-ink-3); font-size: 13px"
         >
           {{ t("keys.selectGroupToContinue") || "Select or create a group to start." }}
         </div>

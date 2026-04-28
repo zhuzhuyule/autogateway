@@ -105,9 +105,7 @@ const filteredGroups = computed(() => {
   return [...sys, ...rest];
 });
 
-const systemGroupCount = computed(
-  () => filteredGroups.value.filter(g => g.is_system).length,
-);
+const systemGroupCount = computed(() => filteredGroups.value.filter(g => g.is_system).length);
 
 // 监听选中项 ID 的变化，并自动滚动到该项
 watch(
@@ -425,7 +423,12 @@ function handleDragEnd() {
                   <n-tag v-if="group.is_system" size="tiny" type="success" round>
                     {{ t("keys.systemDefault") }}
                   </n-tag>
-                  <n-tag v-else-if="group.group_type === 'aggregate'" size="tiny" type="warning" round>
+                  <n-tag
+                    v-else-if="group.group_type === 'aggregate'"
+                    size="tiny"
+                    type="warning"
+                    round
+                  >
                     {{ t("keys.aggregateGroup") }}
                   </n-tag>
                   <span v-if="group.group_type !== 'aggregate'" class="group-id">
@@ -576,7 +579,7 @@ function handleDragEnd() {
 .group-item.system-group {
   border-style: solid;
   border-color: rgba(24, 160, 88, 0.35);
-  background: linear-gradient(135deg, rgba(24, 160, 88, 0.04) 0%, rgba(24, 160, 88, 0.10) 100%);
+  background: linear-gradient(135deg, rgba(24, 160, 88, 0.04) 0%, rgba(24, 160, 88, 0.1) 100%);
   position: relative;
   cursor: pointer;
 }

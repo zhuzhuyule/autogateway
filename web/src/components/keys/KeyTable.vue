@@ -93,7 +93,7 @@ let testingMsg: MessageReactive | null = null;
 const isDeling = ref(false);
 
 const matchedProvider = computed(() =>
-  findProviderByUpstreams(props.selectedGroup?.upstreams || []),
+  findProviderByUpstreams(props.selectedGroup?.upstreams || [])
 );
 const hasNoKeys = computed(() => total.value === 0);
 const isRestoring = ref(false);
@@ -937,7 +937,9 @@ function resetPage() {
   background: var(--primary-color-suppl, rgba(24, 160, 88, 0.1));
   border: 1px solid transparent;
   text-decoration: none;
-  transition: border-color 0.15s, background 0.15s;
+  transition:
+    border-color 0.15s,
+    background 0.15s;
 }
 
 .provider-quick-link:hover {

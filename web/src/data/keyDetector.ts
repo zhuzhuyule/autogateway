@@ -136,7 +136,9 @@ const PROVIDER_NAMES: Record<string, string> = {
 /** Detect provider from a single key string. Returns null if unrecognised. */
 export function detectKey(key: string): KeyDetection | null {
   const k = key.trim();
-  if (k.length < 8) return null;
+  if (k.length < 8) {
+    return null;
+  }
   for (const rule of RULES) {
     if (rule.test(k)) {
       return {
@@ -155,24 +157,40 @@ export function detectKey(key: string): KeyDetection | null {
  * Returns the provider matched by the most keys, or null if nothing recognised.
  */
 export function detectFromText(text: string): KeyDetection | null {
-  if (!text.trim()) return null;
-  const lines = text.split(/[\n,]/).map(s => s.trim()).filter(Boolean);
-  if (!lines.length) return null;
+  if (!text.trim()) {
+    return null;
+  }
+  const lines = text
+    .split(/[\n,]/)
+    .map(s => s.trim())
+    .filter(Boolean);
+  if (!lines.length) {
+    return null;
+  }
 
   const tally = new Map<string, { det: KeyDetection; count: number }>();
   for (const line of lines) {
     const d = detectKey(line);
-    if (!d) continue;
+    if (!d) {
+      continue;
+    }
     const entry = tally.get(d.providerId);
-    if (entry) entry.count++;
-    else tally.set(d.providerId, { det: d, count: 1 });
+    if (entry) {
+      entry.count++;
+    } else {
+      tally.set(d.providerId, { det: d, count: 1 });
+    }
   }
 
-  if (!tally.size) return null;
+  if (!tally.size) {
+    return null;
+  }
 
   let best: { det: KeyDetection; count: number } | null = null;
   for (const v of tally.values()) {
-    if (!best || v.count > best.count) best = v;
+    if (!best || v.count > best.count) {
+      best = v;
+    }
   }
   return best?.det ?? null;
 }

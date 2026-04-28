@@ -99,10 +99,16 @@ async function handleSubmit() {
 
       <template #action>
         <div class="v3-modal-footer">
-          <div></div>
+          <div />
           <div class="v3-modal-actions">
             <n-button size="small" @click="handleClose">{{ t("common.cancel") }}</n-button>
-            <n-button type="error" size="small" @click="handleSubmit" :loading="loading" :disabled="!keysText">
+            <n-button
+              type="error"
+              size="small"
+              @click="handleSubmit"
+              :loading="loading"
+              :disabled="!keysText"
+            >
               {{ t("common.delete") }}
             </n-button>
           </div>
@@ -144,7 +150,7 @@ async function handleSubmit() {
   gap: 10px;
   padding: 12px 14px;
   background: var(--v3-danger-soft);
-  border: 1px solid oklch(0.82 0.10 25);
+  border: 1px solid oklch(0.82 0.1 25);
   border-radius: var(--v3-radius);
   font: 500 12px/1.4 var(--v3-sans);
   color: oklch(0.42 0.16 25);

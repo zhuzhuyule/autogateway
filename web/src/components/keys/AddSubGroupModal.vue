@@ -187,7 +187,11 @@ const canAddMore = computed(() => {
           </div>
 
           <div class="v3-sub-group-list">
-            <div v-for="(item, index) in formData.sub_groups" :key="index" class="v3-sub-group-item">
+            <div
+              v-for="(item, index) in formData.sub_groups"
+              :key="index"
+              class="v3-sub-group-item"
+            >
               <span class="v3-sub-group-index">{{ index + 1 }}</span>
 
               <n-form-item
@@ -247,7 +251,7 @@ const canAddMore = computed(() => {
 
       <template #action>
         <div class="v3-modal-footer">
-          <div></div>
+          <div />
           <div class="v3-modal-actions">
             <n-button size="small" @click="handleClose">{{ t("common.cancel") }}</n-button>
             <n-button type="primary" size="small" @click="handleSubmit" :loading="loading">

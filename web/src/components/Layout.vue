@@ -32,7 +32,7 @@ const message = useMessage();
 const isMenuOpen = ref(false);
 const isRailCollapsed = ref(localStorage.getItem("railCollapsed") === "true");
 
-watch(isRailCollapsed, (val) => {
+watch(isRailCollapsed, val => {
   localStorage.setItem("railCollapsed", String(val));
 });
 
@@ -61,7 +61,9 @@ onMounted(async () => {
 });
 
 const endpoint = computed(() => {
-  if (typeof window === "undefined") {return "";}
+  if (typeof window === "undefined") {
+    return "";
+  }
   return `${window.location.protocol}//${window.location.host}`;
 });
 

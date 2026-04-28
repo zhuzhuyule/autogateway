@@ -2,12 +2,7 @@
 import { keysApi } from "@/api/keys";
 import type { Group } from "@/types/models";
 import { getGroupDisplayName } from "@/utils/display";
-import {
-  AddOutline,
-  LinkOutline,
-  LockClosedOutline,
-  SearchOutline,
-} from "@vicons/ionicons5";
+import { AddOutline, LinkOutline, LockClosedOutline, SearchOutline } from "@vicons/ionicons5";
 import { NIcon } from "naive-ui";
 import { computed, reactive, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
@@ -54,26 +49,41 @@ const itemRefs = new Map<number, HTMLElement>();
 const filtered = computed(() => {
   const q = search.value.trim().toLowerCase();
   return localOrder.value.filter(
-    g =>
-      !q ||
-      g.name.toLowerCase().includes(q) ||
-      (g.display_name || "").toLowerCase().includes(q)
+    g => !q || g.name.toLowerCase().includes(q) || (g.display_name || "").toLowerCase().includes(q)
   );
 });
-const sysGroups = computed(() => filtered.value.filter(g => g.is_system));
+const sysGroups = computed(() => {
+  const arr = filtered.value.filter(g => g.is_system);
+  return arr.sort((a, b) => {
+    const aOpen = a.name.toLowerCase().includes("openai") ? 0 : 1;
+    const bOpen = b.name.toLowerCase().includes("openai") ? 0 : 1;
+    return aOpen - bOpen;
+  });
+});
 const userGroups = computed(() => filtered.value.filter(g => !g.is_system));
 const hasSearch = computed(() => search.value.trim().length > 0);
 const canDrag = computed(() => !hasSearch.value && !savingOrder.value);
 
 function shortFor(g: Group): string {
   const src = g.display_name || g.name || "?";
-  return src.replace(/[^A-Za-z0-9]/g, "").slice(0, 2).toUpperCase() || "??";
+  return (
+    src
+      .replace(/[^A-Za-z0-9]/g, "")
+      .slice(0, 2)
+      .toUpperCase() || "??"
+  );
 }
 
 function avatarClass(g: Group): string {
-  if (g.channel_type === "anthropic") return "v3-pav-anthropic";
-  if (g.channel_type === "gemini") return "v3-pav-google";
-  if (g.is_system) return "v3-pav-default";
+  if (g.channel_type === "anthropic") {
+    return "v3-pav-anthropic";
+  }
+  if (g.channel_type === "gemini") {
+    return "v3-pav-google";
+  }
+  if (g.is_system) {
+    return "v3-pav-default";
+  }
   const lower = g.name.toLowerCase();
   for (const key of [
     "groq",
@@ -87,7 +97,9 @@ function avatarClass(g: Group): string {
     "github",
     "anthropic",
   ]) {
-    if (lower.includes(key)) return `v3-pav-${key}`;
+    if (lower.includes(key)) {
+      return `v3-pav-${key}`;
+    }
   }
   return "v3-pav-default";
 }
@@ -110,7 +122,9 @@ const FAVICON_DOMAIN_MAP: Record<string, string> = {
 };
 
 function extractHost(url?: string): string | null {
-  if (!url) return null;
+  if (!url) {
+    return null;
+  }
   try {
     return new URL(url).hostname;
   } catch {
@@ -138,25 +152,33 @@ function faviconFor(g: Group): string {
 
 const faviconErr = reactive<Record<string, boolean>>({});
 function onFaviconErr(g: Group) {
-  if (g.id != null) faviconErr[String(g.id)] = true;
+  if (g.id != null) {
+    faviconErr[String(g.id)] = true;
+  }
 }
 function isFaviconBroken(g: Group): boolean {
   return g.id != null && faviconErr[String(g.id)] === true;
 }
 
 function subTextFor(g: Group): string {
-  if (g.group_type === "aggregate") return t("v3.aggregate") || "aggregate";
+  if (g.group_type === "aggregate") {
+    return t("v3.aggregate") || "aggregate";
+  }
   return g.channel_type;
 }
 
 function handleCreated(g: Group) {
   showCreate.value = false;
   showAggregate.value = false;
-  if (g?.id) emit("refresh-and-select", g.id);
+  if (g?.id) {
+    emit("refresh-and-select", g.id);
+  }
 }
 
 function setItemRef(el: Element | null, id?: number) {
-  if (id == null) return;
+  if (id == null) {
+    return;
+  }
   if (el instanceof HTMLElement) {
     itemRefs.set(id, el);
   } else {
@@ -179,21 +201,23 @@ function onDragStart(ev: DragEvent, g: Group) {
 
 function resolvePos(ev: DragEvent, id: number): "before" | "after" {
   const el = itemRefs.get(id);
-  if (!el) return "after";
+  if (!el) {
+    return "after";
+  }
   const rect = el.getBoundingClientRect();
   return ev.clientY < rect.top + rect.height / 2 ? "before" : "after";
 }
 
 function onDragOver(ev: DragEvent, g: Group) {
-  if (!canDrag.value || draggingId.value == null || g.is_system || g.id == null) return;
+  if (!canDrag.value || draggingId.value == null || g.is_system || g.id == null) {
+    return;
+  }
   ev.preventDefault();
-  if (ev.dataTransfer) ev.dataTransfer.dropEffect = "move";
+  if (ev.dataTransfer) {
+    ev.dataTransfer.dropEffect = "move";
+  }
   const pos = resolvePos(ev, g.id);
-  if (
-    !dropTarget.value ||
-    dropTarget.value.id !== g.id ||
-    dropTarget.value.pos !== pos
-  ) {
+  if (!dropTarget.value || dropTarget.value.id !== g.id || dropTarget.value.pos !== pos) {
     dropTarget.value = { id: g.id, pos };
   }
 }
@@ -218,15 +242,27 @@ async function onDrop(ev: DragEvent, target: Group) {
   const previous = localOrder.value.map(g => ({ ...g }));
   const srcIdx = localOrder.value.findIndex(g => g.id === sourceId);
   const tgtIdx = localOrder.value.findIndex(g => g.id === target.id);
-  if (srcIdx < 0 || tgtIdx < 0) return;
+  if (srcIdx < 0 || tgtIdx < 0) {
+    return;
+  }
   const arr = [...localOrder.value];
   const [moved] = arr.splice(srcIdx, 1);
   let insert = tgtIdx;
-  if (srcIdx < tgtIdx) insert -= 1;
-  if (dt.pos === "after") insert += 1;
-  if (insert < 0) insert = 0;
-  if (insert > arr.length) insert = arr.length;
-  if (insert === srcIdx) return;
+  if (srcIdx < tgtIdx) {
+    insert -= 1;
+  }
+  if (dt.pos === "after") {
+    insert += 1;
+  }
+  if (insert < 0) {
+    insert = 0;
+  }
+  if (insert > arr.length) {
+    insert = arr.length;
+  }
+  if (insert === srcIdx) {
+    return;
+  }
   arr.splice(insert, 0, moved);
   localOrder.value = arr;
 
@@ -292,14 +328,15 @@ function onDragEnd() {
             </span>
           </span>
           <div style="min-width: 0">
-            <div class="v3-gl__row-name">{{ getGroupDisplayName(g) }}</div>
+            <div class="v3-gl__row-name">
+              {{ getGroupDisplayName(g) }}
+              <span v-if="g.group_type === 'aggregate'" class="v3-gl__row-tag">
+                {{ t("v5.aggregateChip") }}
+              </span>
+            </div>
             <div class="v3-gl__row-sub">{{ subTextFor(g) }}</div>
           </div>
-          <n-icon
-            :component="LockClosedOutline"
-            :size="12"
-            style="color: var(--v3-ink-3)"
-          />
+          <n-icon :component="LockClosedOutline" :size="12" style="color: var(--v3-ink-3)" />
         </div>
       </template>
 
@@ -341,7 +378,12 @@ function onDragEnd() {
           </span>
         </span>
         <div style="min-width: 0">
-          <div class="v3-gl__row-name">{{ getGroupDisplayName(g) }}</div>
+          <div class="v3-gl__row-name">
+            {{ getGroupDisplayName(g) }}
+            <span v-if="g.group_type === 'aggregate'" class="v3-gl__row-tag">
+              {{ t("v5.aggregateChip") }}
+            </span>
+          </div>
           <div class="v3-gl__row-sub">{{ subTextFor(g) }}</div>
         </div>
         <span v-if="g.key_count != null" class="v3-gl__row-count tnum">
@@ -350,23 +392,14 @@ function onDragEnd() {
       </div>
       <div
         v-if="!userGroups.length && !loading"
-        style="
-          padding: 16px 12px;
-          font-size: 11.5px;
-          color: var(--v3-ink-3);
-          text-align: center;
-        "
+        style="padding: 16px 12px; font-size: 11.5px; color: var(--v3-ink-3); text-align: center"
       >
         {{ t("keys.noGroups") || "No custom groups yet" }}
       </div>
     </div>
 
     <div class="v3-gl__foot" style="display: flex; flex-direction: column; gap: 8px">
-      <button
-        class="v3-btn v3-btn--accent"
-        style="width: 100%"
-        @click="showCreate = true"
-      >
+      <button class="v3-btn v3-btn--accent" style="width: 100%" @click="showCreate = true">
         <n-icon :component="AddOutline" :size="12" />
         {{ t("keys.createGroup") || "New group" }}
       </button>
@@ -381,11 +414,7 @@ function onDragEnd() {
       :existing-group-names="groups.map(g => g.name)"
       @success="handleCreated"
     />
-    <aggregate-group-modal
-      v-model:show="showAggregate"
-      :groups="groups"
-      @success="handleCreated"
-    />
+    <aggregate-group-modal v-model:show="showAggregate" :groups="groups" @success="handleCreated" />
   </aside>
 </template>
 
@@ -393,6 +422,21 @@ function onDragEnd() {
 .v3-gl__row {
   position: relative;
   cursor: pointer;
+}
+.v3-gl__row-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.v3-gl__row-tag {
+  font: 700 9px var(--v3-mono);
+  background: var(--v3-accent-soft);
+  color: var(--v3-accent);
+  padding: 1px 4px;
+  border-radius: 3px;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  line-height: 1;
 }
 .v3-gl__row--dragging {
   opacity: 0.45;

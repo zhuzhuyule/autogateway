@@ -31,9 +31,13 @@ const inputMode = ref<"text" | "file">("text");
 const fileList = ref<UploadFileInfo[]>([]);
 
 const keyHint = computed(() => {
-  if (inputMode.value !== "text" || !keysText.value.trim()) return null;
+  if (inputMode.value !== "text" || !keysText.value.trim()) {
+    return null;
+  }
   const d = detectFromText(keysText.value);
-  if (!d) return null;
+  if (!d) {
+    return null;
+  }
   const p = getProviderById(d.providerId);
   return { ...d, providerDisplayName: p?.name ?? d.providerName };
 });
@@ -169,9 +173,16 @@ function isSubmitDisabled() {
           />
           <div v-if="keyHint" class="v3-key-hint">
             <span class="v3-key-hint__badge" :class="keyHint.confidence === 'high' ? 'ok' : 'warn'">
-              {{ keyHint.confidence === 'high' ? '✓' : '?' }}
+              {{ keyHint.confidence === "high" ? "✓" : "?" }}
             </span>
-            <span>{{ t('v3.smartDetectMatch', { provider: keyHint.providerDisplayName, hint: keyHint.hint }) }}</span>
+            <span>
+              {{
+                t("v3.smartDetectMatch", {
+                  provider: keyHint.providerDisplayName,
+                  hint: keyHint.hint,
+                })
+              }}
+            </span>
           </div>
         </div>
 
@@ -200,7 +211,13 @@ function isSubmitDisabled() {
           </n-button>
           <div class="v3-modal-actions">
             <n-button size="small" @click="handleClose">{{ t("common.cancel") }}</n-button>
-            <n-button type="primary" size="small" @click="handleSubmit" :loading="loading" :disabled="isSubmitDisabled()">
+            <n-button
+              type="primary"
+              size="small"
+              @click="handleSubmit"
+              :loading="loading"
+              :disabled="isSubmitDisabled()"
+            >
               {{ t("common.add") }}
             </n-button>
           </div>
@@ -350,8 +367,14 @@ function isSubmitDisabled() {
   padding: 1px 4px;
   border-radius: 3px;
 }
-.v3-key-hint__badge.ok { background: var(--v3-ok-soft); color: var(--v3-ok); }
-.v3-key-hint__badge.warn { background: oklch(0.96 0.05 80); color: oklch(0.5 0.15 80); }
+.v3-key-hint__badge.ok {
+  background: var(--v3-ok-soft);
+  color: var(--v3-ok);
+}
+.v3-key-hint__badge.warn {
+  background: oklch(0.96 0.05 80);
+  color: oklch(0.5 0.15 80);
+}
 
 .v3-modal-footer {
   display: flex;

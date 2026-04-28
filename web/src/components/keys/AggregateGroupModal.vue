@@ -241,7 +241,7 @@ async function handleSubmit() {
 
       <template #action>
         <div class="v3-modal-footer">
-          <div></div>
+          <div />
           <div class="v3-modal-actions">
             <n-button size="small" @click="handleClose">{{ t("common.cancel") }}</n-button>
             <n-button type="primary" size="small" @click="handleSubmit" :loading="loading">

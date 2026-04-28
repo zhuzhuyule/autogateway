@@ -38,16 +38,10 @@ const handleLogin = async () => {
 
     <div class="v3-login-stage">
       <div class="v3-login-brand">
-        <div class="v3-chrome__logo" style="width: 40px; height: 40px; font-size: 18px">
-          A
-        </div>
+        <div class="v3-chrome__logo" style="width: 40px; height: 40px; font-size: 18px">A</div>
         <div>
           <div
-            style="
-              font: 600 18px/1.2 var(--v3-sans);
-              letter-spacing: -0.01em;
-              color: var(--v3-ink);
-            "
+            style="font: 600 18px/1.2 var(--v3-sans); letter-spacing: -0.01em; color: var(--v3-ink)"
           >
             AutoGateway
           </div>

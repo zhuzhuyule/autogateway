@@ -87,14 +87,9 @@ async function loadLogs() {
       group_name: groupFilter.value || undefined,
       model: modelFilter.value || undefined,
       error_contains: errorFilter.value || undefined,
-      is_success:
-        successFilter.value === ""
-          ? undefined
-          : successFilter.value === "true",
+      is_success: successFilter.value === "" ? undefined : successFilter.value === "true",
       request_type:
-        requestTypeFilter.value === ""
-          ? undefined
-          : (requestTypeFilter.value as "retry" | "final"),
+        requestTypeFilter.value === "" ? undefined : (requestTypeFilter.value as "retry" | "final"),
     };
     const r = await logApi.getLogs(params);
     if (r.code === 0 && r.data) {
@@ -111,28 +106,38 @@ async function loadLogs() {
   } finally {
     loading.value = false;
   }
-  void filters; // keep tsc happy
+  void filters.value; // keep tsc happy
 }
 
 onMounted(() => loadLogs());
 
 function statusClass(code: number): string {
-  if (code >= 500) return "v3-log-status v3-log-status--5xx";
-  if (code >= 400) return "v3-log-status v3-log-status--4xx";
-  if (code >= 300) return "v3-log-status v3-log-status--3xx";
+  if (code >= 500) {
+    return "v3-log-status v3-log-status--5xx";
+  }
+  if (code >= 400) {
+    return "v3-log-status v3-log-status--4xx";
+  }
+  if (code >= 300) {
+    return "v3-log-status v3-log-status--3xx";
+  }
   return "v3-log-status v3-log-status--2xx";
 }
 
 function fmtTime(ts: string): string {
-  if (!ts) return "—";
-  return new Date(ts)
-    .toLocaleString("zh-CN", { hour12: false })
-    .replace(/\//g, "-");
+  if (!ts) {
+    return "—";
+  }
+  return new Date(ts).toLocaleString("zh-CN", { hour12: false }).replace(/\//g, "-");
 }
 
 function fmtMs(ms: number): string {
-  if (ms == null) return "—";
-  if (ms > 1000) return `${(ms / 1000).toFixed(2)}s`;
+  if (ms == null) {
+    return "—";
+  }
+  if (ms > 1000) {
+    return `${(ms / 1000).toFixed(2)}s`;
+  }
   return `${ms}ms`;
 }
 
@@ -155,8 +160,11 @@ function closeDetail() {
 
 async function copyText(text: string) {
   const ok = await copyToClipboard(text);
-  if (ok) message.success(t("logs.copiedToClipboard", { type: "" }) || "Copied");
-  else message.error("Copy failed");
+  if (ok) {
+    message.success(t("logs.copiedToClipboard", { type: "" }) || "Copied");
+  } else {
+    message.error("Copy failed");
+  }
 }
 
 function exportLogs() {
@@ -166,9 +174,7 @@ function exportLogs() {
     error_contains: errorFilter.value || undefined,
     is_success: successFilter.value === "" ? undefined : successFilter.value === "true",
     request_type:
-      requestTypeFilter.value === ""
-        ? undefined
-        : (requestTypeFilter.value as "retry" | "final"),
+      requestTypeFilter.value === "" ? undefined : (requestTypeFilter.value as "retry" | "final"),
   });
 }
 </script>
@@ -232,7 +238,7 @@ function exportLogs() {
         <div>{{ t("logs.requestType") || "Type" }}</div>
         <div>{{ t("logs.duration") || "ms" }}</div>
         <div>{{ t("logs.path") || "Path · model · group" }}</div>
-        <div></div>
+        <div />
       </div>
       <div
         v-for="l in logs"
@@ -273,10 +279,7 @@ function exportLogs() {
             :title="l.is_key_visible ? 'Hide key' : 'Show key'"
             @click.stop="l.is_key_visible = !l.is_key_visible"
           >
-            <n-icon
-              :component="l.is_key_visible ? EyeOffOutline : EyeOutline"
-              :size="11"
-            />
+            <n-icon :component="l.is_key_visible ? EyeOffOutline : EyeOutline" :size="11" />
           </button>
           <button
             v-if="l.key_value"
@@ -290,12 +293,7 @@ function exportLogs() {
       </div>
       <div
         v-if="!logs.length && !loading"
-        style="
-          padding: 28px 16px;
-          text-align: center;
-          color: var(--v3-ink-3);
-          font-size: 12.5px;
-        "
+        style="padding: 28px 16px; text-align: center; color: var(--v3-ink-3); font-size: 12.5px"
       >
         {{ t("logs.noLogs") || "No logs match your filters." }}
       </div>
@@ -341,10 +339,7 @@ function exportLogs() {
               {{ detailLog?.request_path }}
             </div>
           </div>
-          <button
-            class="v3-btn v3-btn--ghost v3-btn--icon"
-            @click="closeDetail"
-          >
+          <button class="v3-btn v3-btn--ghost v3-btn--icon" @click="closeDetail">
             <n-icon :component="CloseOutline" :size="13" />
           </button>
         </div>

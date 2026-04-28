@@ -113,7 +113,10 @@ const handleDismissPermanently = () => {
 
 // 打开安全配置文档
 const openSecurityDocs = () => {
-  window.open("https://github.com/zhuzhuyule/autogateway#configuration/configuration/security", "_blank");
+  window.open(
+    "https://github.com/zhuzhuyule/autogateway#configuration/configuration/security",
+    "_blank"
+  );
 };
 </script>
 

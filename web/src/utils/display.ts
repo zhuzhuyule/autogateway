@@ -35,16 +35,46 @@ export function formatDisplayName(name: string): string {
  * @returns The display name for the group.
  */
 export function getGroupDisplayName(item: Group | SubGroupInfo): string {
-  const raw = "group" in item && item.group
-    ? (item.group as Group)
-    : item as Group;
+  const raw = "group" in item && item.group ? (item.group as Group) : (item as Group);
+
+  // 1. Handle system defaults with high priority for clean mapping
   if (raw.is_system && raw.name.startsWith("default-")) {
-    const type = raw.name.replace("default-", "");
-    if (type === "openai") return "OpenAI";
-    if (type === "gemini") return "Gemini";
-    if (type === "anthropic") return "Anthropic";
+    const type = raw.name.replace("default-", "").toLowerCase();
+    if (type === "openai") {
+      return "OpenAI";
+    }
+    if (type === "gemini") {
+      return "Gemini";
+    }
+    if (type === "anthropic") {
+      return "Anthropic";
+    }
   }
-  return raw.display_name || formatDisplayName(raw.name);
+
+  // 2. Aggressively clean up display_name or name
+  let name = raw.display_name || raw.name || "";
+
+  // Strip common noisy prefixes/suffixes often found in system-generated names
+  name = name
+    .replace(/^Default\s*·\s*/i, "")
+    .replace(/聚合$/g, "")
+    .replace(/兼容$/g, "")
+    .replace(/\s*兼容聚合$/g, "")
+    .trim();
+
+  // If we end up with a known system slug, capitalize it properly
+  const lower = name.toLowerCase();
+  if (lower === "openai") {
+    return "OpenAI";
+  }
+  if (lower === "gemini") {
+    return "Gemini";
+  }
+  if (lower === "anthropic") {
+    return "Anthropic";
+  }
+
+  return name || formatDisplayName(raw.name);
 }
 
 /**

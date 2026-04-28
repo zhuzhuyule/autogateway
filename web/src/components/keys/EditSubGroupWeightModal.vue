@@ -112,11 +112,7 @@ async function handleSubmit() {
       return;
     }
 
-    await keysApi.updateSubGroupWeight(
-      props.aggregateGroup.id,
-      subGroupId,
-      formData.weight
-    );
+    await keysApi.updateSubGroupWeight(props.aggregateGroup.id, subGroupId, formData.weight);
 
     emit("success");
     handleClose();
@@ -158,15 +154,23 @@ function adjustWeight(delta: number) {
           </div>
           <div class="v3-sub-group-meta">
             <span class="v3-meta-item">
-              {{ t("keys.groupId") }}: <strong>{{ subGroup?.group.id }}</strong>
+              {{ t("keys.groupId") }}:
+              <strong>{{ subGroup?.group.id }}</strong>
             </span>
             <span class="v3-meta-item">
-              {{ t("keys.currentWeight") }}: <strong>{{ subGroup?.weight }}</strong>
+              {{ t("keys.currentWeight") }}:
+              <strong>{{ subGroup?.weight }}</strong>
             </span>
           </div>
         </div>
 
-        <n-form ref="formRef" :model="formData" :rules="rules" label-placement="left" label-width="100px">
+        <n-form
+          ref="formRef"
+          :model="formData"
+          :rules="rules"
+          label-placement="left"
+          label-width="100px"
+        >
           <n-form-item :label="t('keys.newWeight')" path="weight" class="v3-weight-form-item">
             <div class="v3-weight-input-row">
               <n-input-number
@@ -178,10 +182,38 @@ function adjustWeight(delta: number) {
                 class="v3-weight-input"
               />
               <div class="v3-quick-adjust">
-                <n-button size="tiny" @click="adjustWeight(-10)" :disabled="formData.weight <= 0" class="v3-adjust-btn">-10</n-button>
-                <n-button size="tiny" @click="adjustWeight(-1)" :disabled="formData.weight <= 0" class="v3-adjust-btn">-1</n-button>
-                <n-button size="tiny" @click="adjustWeight(1)" :disabled="formData.weight >= 1000" class="v3-adjust-btn">+1</n-button>
-                <n-button size="tiny" @click="adjustWeight(10)" :disabled="formData.weight >= 1000" class="v3-adjust-btn">+10</n-button>
+                <n-button
+                  size="tiny"
+                  @click="adjustWeight(-10)"
+                  :disabled="formData.weight <= 0"
+                  class="v3-adjust-btn"
+                >
+                  -10
+                </n-button>
+                <n-button
+                  size="tiny"
+                  @click="adjustWeight(-1)"
+                  :disabled="formData.weight <= 0"
+                  class="v3-adjust-btn"
+                >
+                  -1
+                </n-button>
+                <n-button
+                  size="tiny"
+                  @click="adjustWeight(1)"
+                  :disabled="formData.weight >= 1000"
+                  class="v3-adjust-btn"
+                >
+                  +1
+                </n-button>
+                <n-button
+                  size="tiny"
+                  @click="adjustWeight(10)"
+                  :disabled="formData.weight >= 1000"
+                  class="v3-adjust-btn"
+                >
+                  +10
+                </n-button>
               </div>
             </div>
           </n-form-item>
@@ -193,7 +225,7 @@ function adjustWeight(delta: number) {
             <span class="v3-preview-value">{{ previewPercentage }}%</span>
           </div>
           <div class="v3-preview-bar">
-            <div class="v3-preview-fill" :style="{ width: `${previewPercentage}%` }"></div>
+            <div class="v3-preview-fill" :style="{ width: `${previewPercentage}%` }" />
           </div>
           <div class="v3-preview-note">{{ t("keys.weightPreviewNote") }}</div>
         </div>
@@ -201,7 +233,7 @@ function adjustWeight(delta: number) {
 
       <template #action>
         <div class="v3-modal-footer">
-          <div></div>
+          <div />
           <div class="v3-modal-actions">
             <n-button size="small" @click="handleClose">{{ t("common.cancel") }}</n-button>
             <n-button type="primary" size="small" @click="handleSubmit" :loading="loading">
