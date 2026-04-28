@@ -49,6 +49,7 @@ func NewRouter(
 	routingSettingsHandler *handler.RoutingSettingsHandler,
 	modelCatalogHandler *handler.ModelCatalogHandler,
 	dedupHandler *handler.DedupHandler,
+	upstreamProbeHandler *handler.UpstreamProbeHandler,
 	buildFS embed.FS,
 	indexPage []byte,
 ) *gin.Engine {
@@ -71,7 +72,7 @@ func NewRouter(
 
 	// 注册路由
 	registerSystemRoutes(router, serverHandler)
-	registerAPIRoutes(router, serverHandler, configManager, aliasHandler, routingSettingsHandler, modelCatalogHandler, dedupHandler)
+	registerAPIRoutes(router, serverHandler, configManager, aliasHandler, routingSettingsHandler, modelCatalogHandler, dedupHandler, upstreamProbeHandler)
 	registerProxyRoutes(router, proxyServer, groupManager, serverHandler, selector)
 	registerFrontendRoutes(router, buildFS, indexPage)
 
@@ -92,6 +93,7 @@ func registerAPIRoutes(
 	routingSettingsHandler *handler.RoutingSettingsHandler,
 	modelCatalogHandler *handler.ModelCatalogHandler,
 	dedupHandler *handler.DedupHandler,
+	upstreamProbeHandler *handler.UpstreamProbeHandler,
 ) {
 	api := router.Group("/api")
 	api.Use(i18n.Middleware())
@@ -103,7 +105,7 @@ func registerAPIRoutes(
 	// 用户在 UI 改完即时生效,无需重启
 	protectedAPI := api.Group("")
 	protectedAPI.Use(middleware.Auth(serverHandler.SettingsManager))
-	registerProtectedAPIRoutes(protectedAPI, serverHandler, aliasHandler, routingSettingsHandler, modelCatalogHandler, dedupHandler)
+	registerProtectedAPIRoutes(protectedAPI, serverHandler, aliasHandler, routingSettingsHandler, modelCatalogHandler, dedupHandler, upstreamProbeHandler)
 }
 
 // registerPublicAPIRoutes 公开API路由
@@ -120,6 +122,7 @@ func registerProtectedAPIRoutes(
 	routingSettingsHandler *handler.RoutingSettingsHandler,
 	modelCatalogHandler *handler.ModelCatalogHandler,
 	dedupHandler *handler.DedupHandler,
+	upstreamProbeHandler *handler.UpstreamProbeHandler,
 ) {
 	api.GET("/channel-types", serverHandler.CommonHandler.GetChannelTypes)
 
@@ -147,6 +150,8 @@ func registerProtectedAPIRoutes(
 		dedup.GET("/suggestions", dedupHandler.GetSuggestions)
 		dedup.POST("/create", dedupHandler.CreateAggregate)
 	}
+
+	api.GET("/upstream/probe", upstreamProbeHandler.Probe)
 
 	groups := api.Group("/groups")
 	{
