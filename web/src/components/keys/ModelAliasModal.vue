@@ -7,7 +7,9 @@ import {
   NCard,
   NIcon,
   NModal,
+  NPopconfirm,
   NSelect,
+  NTag,
   NTooltip,
   useMessage,
   type SelectOption,
@@ -70,24 +72,31 @@ async function loadAliases() {
 }
 
 const existingMappedNames = computed(() => {
-  return new Set(
-    allAliases.value
-      .filter(a => a.group_id === props.group?.id && a.real_model === props.modelId)
-      .map(a => a.alias)
-  );
+  return allAliases.value
+    .filter(a => a.group_id === props.group?.id && a.real_model === props.modelId)
+    .sort((a, b) => a.alias.localeCompare(b.alias));
 });
+
+async function handleDeleteExisting(row: ModelAliasRow) {
+  try {
+    await aliasesApi.remove(row.id);
+    await loadAliases();
+    emit("success");
+    message.success(t("common.operationSuccess"));
+  } catch {
+    message.error(t("common.requestFailed"));
+  }
+}
 
 const aliasOptions = computed<SelectOption[]>(() => {
   const seen = new Set<string>();
   const opts: SelectOption[] = [];
+  const existingSet = new Set(existingMappedNames.value.map(a => a.alias));
+  
   for (const a of allAliases.value) {
-    if (seen.has(a.alias)) {
-      continue;
-    }
+    if (seen.has(a.alias)) continue;
     seen.add(a.alias);
-    if (existingMappedNames.value.has(a.alias)) {
-      continue;
-    }
+    if (existingSet.has(a.alias)) continue;
     opts.push({ label: a.alias, value: a.alias });
   }
   return opts.sort((x, y) => String(x.label).localeCompare(String(y.label)));
@@ -151,7 +160,7 @@ async function handleSave() {
       size="huge"
       role="dialog"
       aria-modal="true"
-      style="max-width: 480px"
+      style="max-width: 480px; max-height: 80vh"
     >
       <template #header-extra>
         <n-button quaternary circle size="small" @click="handleClose">
@@ -168,9 +177,46 @@ async function handleSave() {
         </div>
       </div>
 
+      <!-- Existing Aliases Section -->
+      <div v-if="existingMappedNames.length" class="v5-ma-field">
+        <div class="v5-ma-field__lbl">
+          {{ t("v5.maExistingTitle") || "已绑定别名" }} ({{ existingMappedNames.length }})
+        </div>
+        <div class="v5-ma-chips">
+          <div v-for="a in existingMappedNames" :key="a.id" class="v5-ma-chip">
+            <span class="v5-ma-chip__label">{{ a.alias }}</span>
+            <n-tag v-if="a.weight !== 100" size="tiny" :bordered="false" type="info">
+              w {{ a.weight }}
+            </n-tag>
+            <n-tag
+              v-if="!a.enabled"
+              size="tiny"
+              :bordered="false"
+              type="warning"
+            >
+              {{ t("common.disable") || "disabled" }}
+            </n-tag>
+            <n-popconfirm
+              :positive-text="t('common.confirm') || 'OK'"
+              :negative-text="t('common.cancel') || 'Cancel'"
+              @positive-click="handleDeleteExisting(a)"
+            >
+              <template #trigger>
+                <button class="v5-ma-chip__delete" :title="t('common.delete')">
+                  <n-icon :component="CloseOutline" :size="12" />
+                </button>
+              </template>
+              {{ t("v5.maDeleteConfirm", { alias: a.alias }) || `确认删除别名 ${a.alias}?` }}
+            </n-popconfirm>
+          </div>
+        </div>
+      </div>
+
+      <div v-if="existingMappedNames.length" class="v5-ma-divider"></div>
+
       <div class="v5-ma-field">
         <div class="v5-ma-field__lbl">
-          {{ t("v5.maAliases") }}
+          {{ t("v5.maAddTitle") || "添加别名" }}
           <n-tooltip>
             <template #trigger>
               <span class="v5-helpicon"><n-icon :component="HelpCircleOutline" :size="11" /></span>
@@ -187,7 +233,12 @@ async function handleSave() {
           :options="aliasOptions"
           :loading="allAliasesLoading"
           :placeholder="t('v5.maPlaceholder')"
+          :menu-props="{ style: { maxHeight: '240px' } }"
+          to="body"
         />
+        <div class="v5-ma-field__hint">
+          {{ t("v5.maAddHint") || "选已有别名 = 把当前模型加入候选池;输入新名回车 = 创建新别名" }}
+        </div>
       </div>
 
       <template #footer>
@@ -212,6 +263,13 @@ async function handleSave() {
   display: flex;
   flex-direction: column;
   gap: 14px;
+  max-height: calc(80vh - 140px);
+  overflow-y: auto;
+}
+.v5-ma-field__hint {
+  font: 400 11px/1.5 var(--v3-sans);
+  color: var(--v3-ink-3);
+  margin-top: 6px;
 }
 
 .v5-ma-target {
@@ -248,11 +306,58 @@ async function handleSave() {
   color: var(--v3-ink-3);
 }
 .v5-ma-field__lbl {
-  font: 500 12.5px/1.3 var(--v3-sans);
-  color: var(--v3-ink);
-  margin-bottom: 6px;
+  font: 500 12px/1.3 var(--v3-sans);
+  color: var(--v3-ink-3);
+  margin-bottom: 8px;
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.v5-ma-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.v5-ma-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--v3-surface-2);
+  border: 1px solid var(--v3-line);
+  padding: 4px 10px;
+  border-radius: 6px;
+  transition: all 120ms;
+}
+.v5-ma-chip:hover {
+  border-color: var(--v3-danger-soft);
+  background: var(--v3-danger-soft);
+}
+.v5-ma-chip__label {
+  font: 600 12px var(--v3-mono);
+  color: var(--v3-ink);
+}
+.v5-ma-chip__delete {
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  padding: 2px;
+  border-radius: 4px;
+  color: var(--v3-ink-4);
+  display: flex;
+  align-items: center;
+  transition: color 120ms;
+}
+.v5-ma-chip__delete:hover {
+  color: var(--v3-danger);
+}
+
+.v5-ma-divider {
+  height: 1px;
+  background: var(--v3-line);
+  margin: 4px 0;
+  opacity: 0.5;
 }
 </style>
