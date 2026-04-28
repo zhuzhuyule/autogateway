@@ -414,18 +414,22 @@ export const FREE_PROVIDERS: FreeProvider[] = [
   {
     id: "longcat",
     name: "美团 LongCat",
-    freeTier: "500K tokens/day · Flash-Lite 5000万 tokens/day",
-    description: "美团旗下长文本模型，256K上下文，OpenAI 兼容",
+    freeTier: "Flash-Lite 50M · 其余共享 500K tokens/day",
+    description: "美团长文本模型,Chat/Thinking/Lite/Omni 多档,OpenAI+Anthropic 兼容",
     signupUrl: "https://longcat.chat/platform",
     docsUrl: "https://longcat.chat/platform/docs/zh/",
     channelType: "openai",
     baseUrl: "https://api.longcat.chat/openai",
-    testModel: "longcat-flash-lite",
+    // 模型 ID 是 PascalCase (官方文档 longcat.chat/platform/docs/zh/)
+    testModel: "LongCat-Flash-Lite",
     models: [
-      "longcat-flash-lite",
-      "longcat-flash-chat",
-      "longcat-flash-thinking",
-      "longcat-2.0-preview",
+      "LongCat-Flash-Lite",
+      "LongCat-Flash-Chat",
+      "LongCat-Flash-Thinking",
+      "LongCat-Flash-Thinking-2601",
+      "LongCat-Flash-Omni-2603",
+      "LongCat-Flash-Chat-2602-Exp",
+      "LongCat-2.0-Preview",
     ],
     recommendedGroupName: "longcat",
     recommendedDisplayName: "美团 LongCat",
@@ -816,24 +820,48 @@ export const FREE_MODELS: FreeModel[] = [
     notes: "代码专用",
   },
 
-  // 美团 LongCat
+  // 美团 LongCat (PascalCase IDs, 官方文档校对)
   {
     providerId: "longcat",
-    modelId: "longcat-flash-lite",
+    modelId: "LongCat-Flash-Lite",
     tier: "fast",
-    notes: "5000万 tokens/day 免费",
+    notes: "5000万 tokens/day 独立免费",
   },
   {
     providerId: "longcat",
-    modelId: "longcat-flash-chat",
+    modelId: "LongCat-Flash-Chat",
     tier: "balanced",
-    notes: "500K tokens/day",
+    notes: "高性能通用对话",
   },
   {
     providerId: "longcat",
-    modelId: "longcat-flash-thinking",
+    modelId: "LongCat-Flash-Thinking",
     tier: "max",
-    notes: "推理模型,500K tokens/day",
+    notes: "深度思考(已升级到 -2601)",
+  },
+  {
+    providerId: "longcat",
+    modelId: "LongCat-Flash-Thinking-2601",
+    tier: "max",
+    notes: "深度思考升级版",
+  },
+  {
+    providerId: "longcat",
+    modelId: "LongCat-Flash-Omni-2603",
+    tier: "max",
+    notes: "多模态,仅 OpenAI 格式",
+  },
+  {
+    providerId: "longcat",
+    modelId: "LongCat-Flash-Chat-2602-Exp",
+    tier: "balanced",
+    notes: "实验版,仅 OpenAI 格式",
+  },
+  {
+    providerId: "longcat",
+    modelId: "LongCat-2.0-Preview",
+    tier: "max",
+    notes: "Agentic 旗舰,内测 10M/2h",
   },
 
   // 讯飞星辰（免费模型 price=0）
