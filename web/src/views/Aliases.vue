@@ -377,9 +377,11 @@ const presetList = [
 async function applyPreset(p: (typeof presetList)[0]) {
   settings.value.SimpleThreshold = p.simple;
   settings.value.ComplexThreshold = p.complex;
-  await saveSettings();
+  await saveSettings(true); // 预设是显式动作,弹 toast
 }
-async function saveSettings() {
+
+// 静默保存:slider 拖动 / 点轨道 / 键盘调整都用此函数,无 toast 干扰
+async function saveSettings(notify = false) {
   if (settings.value.SimpleThreshold >= settings.value.ComplexThreshold) {
     settings.value.ComplexThreshold = settings.value.SimpleThreshold + 100;
   }
@@ -390,10 +392,24 @@ async function saveSettings() {
       complex_threshold: settings.value.ComplexThreshold,
     });
     settings.value = (r as unknown as { data: RoutingSettings }).data;
-    message.success(t("common.operationSuccess"));
+    if (notify) {
+      message.success(t("common.operationSuccess"));
+    }
   } catch {
     message.error(t("common.requestFailed"));
   }
+}
+
+// 节流:连续拖动时只保存最后一次
+let saveTimer: ReturnType<typeof setTimeout> | null = null;
+function saveSettingsThrottled() {
+  if (saveTimer) {
+    clearTimeout(saveTimer);
+  }
+  saveTimer = setTimeout(() => {
+    saveSettings();
+    saveTimer = null;
+  }, 400);
 }
 </script>
 
@@ -533,8 +549,9 @@ async function saveSettings() {
             :min="1"
             :max="SLIDER_MAX"
             :step="100"
-            @change="saveSettings"
             class="v3-slider-overlay"
+            @update:value="saveSettingsThrottled"
+            @dragend="saveSettings"
           />
           <div class="v3-slider-legend" style="left: 0">0</div>
           <div class="v3-slider-legend" style="right: 0">{{ SLIDER_MAX / 1000 }}K</div>
