@@ -63,6 +63,8 @@ type GroupCreateRequest struct {
 	Config              map[string]any      `json:"config"`
 	HeaderRules         []models.HeaderRule `json:"header_rules"`
 	ProxyKeys           string              `json:"proxy_keys"`
+	ModelRoutingMode    string              `json:"model_routing_mode"`
+	ExposedModels       []string            `json:"exposed_models"`
 }
 
 // CreateGroup handles the creation of a new group.
@@ -89,6 +91,8 @@ func (s *Server) CreateGroup(c *gin.Context) {
 		Config:              req.Config,
 		HeaderRules:         req.HeaderRules,
 		ProxyKeys:           req.ProxyKeys,
+		ModelRoutingMode:    req.ModelRoutingMode,
+		ExposedModels:       req.ExposedModels,
 	}
 
 	group, err := s.GroupService.CreateGroup(c.Request.Context(), params)
@@ -149,6 +153,8 @@ type GroupUpdateRequest struct {
 	Config              map[string]any      `json:"config"`
 	HeaderRules         []models.HeaderRule `json:"header_rules"`
 	ProxyKeys           *string             `json:"proxy_keys,omitempty"`
+	ModelRoutingMode    *string             `json:"model_routing_mode,omitempty"`
+	ExposedModels       *[]string           `json:"exposed_models,omitempty"`
 }
 
 type GroupReorderItemRequest struct {
@@ -209,6 +215,8 @@ func (s *Server) UpdateGroup(c *gin.Context) {
 		ModelRedirectStrict: req.ModelRedirectStrict,
 		Config:              req.Config,
 		ProxyKeys:           req.ProxyKeys,
+		ModelRoutingMode:    req.ModelRoutingMode,
+		ExposedModels:       req.ExposedModels,
 	}
 
 	if req.Upstreams != nil {
@@ -285,6 +293,8 @@ type GroupResponse struct {
 	SystemRole          string              `json:"system_role"`
 	AvailableModels     datatypes.JSON      `json:"available_models,omitempty"`
 	ModelsRefreshedAt   *time.Time          `json:"models_refreshed_at,omitempty"`
+	ModelRoutingMode    string              `json:"model_routing_mode"`
+	ExposedModels       datatypes.JSON      `json:"exposed_models,omitempty"`
 	KeyCount            int64               `json:"key_count"`
 	CreatedAt           time.Time           `json:"created_at"`
 	UpdatedAt           time.Time           `json:"updated_at"`
@@ -348,6 +358,8 @@ func (s *Server) newGroupResponse(group *models.Group) *GroupResponse {
 		SystemRole:          group.SystemRole,
 		AvailableModels:     group.AvailableModels,
 		ModelsRefreshedAt:   group.ModelsRefreshedAt,
+		ModelRoutingMode:    group.ModelRoutingMode,
+		ExposedModels:       group.ExposedModels,
 		KeyCount:            group.KeyCount,
 		CreatedAt:           group.CreatedAt,
 		UpdatedAt:           group.UpdatedAt,

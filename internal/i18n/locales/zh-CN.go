@@ -82,6 +82,10 @@ var MessagesZhCN = map[string]string{
 	"validation.reorder_duplicate_group": "排序项中存在重复分组ID: {{.id}}",
 	"validation.reorder_group_not_found": "排序项包含不存在的分组",
 
+	// Group routing
+	"group.invalid_routing_mode": "无效的模型路由模式: {{.mode}} (仅支持 passthrough / specified)",
+	"group.model_not_exposed":    "模型 {{.model}} 未在该分组的暴露列表中",
+
 	// Task related
 	"task.validation_started": "密钥验证任务已开始",
 	"task.import_started":     "密钥导入任务已开始",

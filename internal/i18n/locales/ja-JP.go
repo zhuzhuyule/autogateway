@@ -82,6 +82,10 @@ var MessagesJaJP = map[string]string{
 	"validation.reorder_duplicate_group": "並び替え項目に重複したグループIDがあります: {{.id}}",
 	"validation.reorder_group_not_found": "並び替え項目に存在しないグループが含まれています",
 
+	// Group routing
+	"group.invalid_routing_mode": "無効なモデルルーティングモード: {{.mode}} (passthrough / specified のみ)",
+	"group.model_not_exposed":    "モデル {{.model}} はこのグループの公開リストにありません",
+
 	// Task related
 	"task.validation_started": "キー検証タスクが開始されました",
 	"task.import_started":     "キーインポートタスクが開始されました",

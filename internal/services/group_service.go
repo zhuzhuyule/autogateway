@@ -101,6 +101,8 @@ type GroupCreateParams struct {
 	HeaderRules         []models.HeaderRule
 	ProxyKeys           string
 	SubGroups           []SubGroupInput
+	ModelRoutingMode    string   // "passthrough" | "specified", 空字符串走默认
+	ExposedModels       []string // specified 模式下的白名单
 }
 
 // GroupUpdateParams captures updatable fields for a group.
@@ -123,6 +125,8 @@ type GroupUpdateParams struct {
 	HeaderRules         *[]models.HeaderRule
 	ProxyKeys           *string
 	SubGroups           *[]SubGroupInput
+	ModelRoutingMode    *string
+	ExposedModels       *[]string
 }
 
 // GroupReorderItem captures a group ID and target sort value.
@@ -231,6 +235,22 @@ func (s *GroupService) CreateGroup(ctx context.Context, params GroupCreateParams
 		return nil, NewI18nError(app_errors.ErrValidation, "validation.invalid_model_redirect", map[string]any{"error": err.Error()})
 	}
 
+	routingMode := strings.TrimSpace(params.ModelRoutingMode)
+	if routingMode == "" {
+		routingMode = "passthrough"
+	}
+	if routingMode != "passthrough" && routingMode != "specified" {
+		return nil, NewI18nError(app_errors.ErrValidation, "group.invalid_routing_mode", map[string]any{"mode": routingMode})
+	}
+	var exposedModelsJSON datatypes.JSON
+	if params.ExposedModels != nil {
+		buf, err := json.Marshal(params.ExposedModels)
+		if err != nil {
+			return nil, fmt.Errorf("marshal exposed_models: %w", err)
+		}
+		exposedModelsJSON = buf
+	}
+
 	group := models.Group{
 		Name:                name,
 		DisplayName:         strings.TrimSpace(params.DisplayName),
@@ -247,6 +267,8 @@ func (s *GroupService) CreateGroup(ctx context.Context, params GroupCreateParams
 		Config:              cleanedConfig,
 		HeaderRules:         headerRulesJSON,
 		ProxyKeys:           strings.TrimSpace(params.ProxyKeys),
+		ModelRoutingMode:    routingMode,
+		ExposedModels:       exposedModelsJSON,
 	}
 
 	tx := s.db.WithContext(ctx).Begin()
@@ -597,6 +619,22 @@ func (s *GroupService) UpdateGroup(ctx context.Context, id uint, params GroupUpd
 
 	if params.ModelRedirectStrict != nil {
 		group.ModelRedirectStrict = *params.ModelRedirectStrict
+	}
+
+	if params.ModelRoutingMode != nil {
+		mode := strings.TrimSpace(*params.ModelRoutingMode)
+		if mode != "passthrough" && mode != "specified" {
+			return nil, NewI18nError(app_errors.ErrValidation, "group.invalid_routing_mode", map[string]any{"mode": mode})
+		}
+		group.ModelRoutingMode = mode
+	}
+
+	if params.ExposedModels != nil {
+		buf, err := json.Marshal(*params.ExposedModels)
+		if err != nil {
+			return nil, fmt.Errorf("marshal exposed_models: %w", err)
+		}
+		group.ExposedModels = buf
 	}
 
 	if params.ValidationEndpoint != nil {

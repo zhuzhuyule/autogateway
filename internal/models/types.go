@@ -126,8 +126,16 @@ type Group struct {
 	LastValidatedAt     *time.Time           `json:"last_validated_at"`
 	AvailableModels     datatypes.JSON       `gorm:"type:json" json:"available_models"` // 由上游 /v1/models 缓存的真实模型列表
 	ModelsRefreshedAt   *time.Time           `json:"models_refreshed_at"`
-	CreatedAt           time.Time            `json:"created_at"`
-	UpdatedAt           time.Time            `json:"updated_at"`
+	// ModelRoutingMode controls model routing strictness:
+	//   "passthrough" — 所有上游模型直通 (默认, 兼容老分组)
+	//   "specified"   — 只允许 ExposedModels 列出的模型, 否则 405
+	// alias 路由始终先于此检查, 但 alias.real_model 不在 ExposedModels 时 alias 静默失效.
+	ModelRoutingMode string `gorm:"type:varchar(20);not null;default:'passthrough'" json:"model_routing_mode"`
+	// ExposedModels — specified 模式下允许调用的模型白名单 (string[] JSON).
+	// passthrough 模式下忽略.
+	ExposedModels datatypes.JSON `gorm:"type:json" json:"exposed_models"`
+	CreatedAt     time.Time      `json:"created_at"`
+	UpdatedAt     time.Time      `json:"updated_at"`
 
 	// For cache
 	ProxyKeysMap     map[string]struct{} `gorm:"-" json:"-"`

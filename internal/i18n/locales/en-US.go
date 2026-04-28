@@ -82,6 +82,10 @@ var MessagesEnUS = map[string]string{
 	"validation.reorder_duplicate_group": "Duplicate group ID in reorder items: {{.id}}",
 	"validation.reorder_group_not_found": "Reorder items contain non-existent group",
 
+	// Group routing
+	"group.invalid_routing_mode": "Invalid model routing mode: {{.mode}} (only passthrough / specified)",
+	"group.model_not_exposed":    "Model {{.model}} is not in the exposed list of this group",
+
 	// Task related
 	"task.validation_started": "Key validation task started",
 	"task.import_started":     "Key import task started",

@@ -79,6 +79,10 @@ export interface Group {
   param_overrides: Record<string, unknown>;
   model_redirect_rules: Record<string, string>;
   model_redirect_strict: boolean;
+  /** 模型路由模式: 'passthrough' (默认,所有上游模型直通) | 'specified' (仅 exposed_models 白名单) */
+  model_routing_mode?: "passthrough" | "specified";
+  /** specified 模式下的模型白名单;passthrough 模式忽略 */
+  exposed_models?: string[];
   header_rules?: HeaderRule[];
   proxy_keys: string;
   group_type?: GroupType;
