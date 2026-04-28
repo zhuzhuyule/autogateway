@@ -4,17 +4,22 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"net/http"
 	"strings"
 	"unicode/utf8"
+
+	"autogateway/internal/models"
 
 	"github.com/gin-gonic/gin"
 	"github.com/sirupsen/logrus"
 )
 
-// AliasResolver is the interface routes use to look up a group name by id.
+// AliasResolver is the interface routes use to look up a group name by id
+// and (when checking exposed_models) the original group by name.
 // Implemented by services.GroupManager.
 type AliasResolver interface {
 	GetGroupNameByID(id uint) (string, bool)
+	GetGroupByName(name string) (*models.Group, error)
 }
 
 // Middleware swaps the request's group name based on the alias / auto /
@@ -79,8 +84,21 @@ func Middleware(s *Selector, resolver AliasResolver) gin.HandlerFunc {
 			}
 		}
 		if err != nil || picked == nil {
-			// No match — leave the request alone so existing routing
-			// (group/proxy_keys) handles it.
+			// alias / exact-name 都没命中,看原 group 是否处于 specified 模式;
+			// 若是且 model 不在 exposed_models 中,直接 405,避免穿透到上游再失败.
+			if originalGroup, _ := resolver.GetGroupByName(c.Param("group_name")); originalGroup != nil {
+				if originalGroup.ModelRoutingMode == "specified" &&
+					!modelIsExposed(originalGroup.ExposedModels, model) {
+					c.AbortWithStatusJSON(http.StatusMethodNotAllowed, gin.H{
+						"error": gin.H{
+							"code":    "model_not_exposed",
+							"message": "model " + model + " is not in the exposed list of group " + originalGroup.Name,
+						},
+					})
+					return
+				}
+			}
+			// 否则保持原行为:让请求穿透,由上游处理.
 			return
 		}
 
@@ -99,6 +117,17 @@ func Middleware(s *Selector, resolver AliasResolver) gin.HandlerFunc {
 			"weight":          picked.Weight,
 		}).Debug("router_engine: routed request")
 	}
+}
+
+// modelIsExposed reports whether `model` appears in the JSON-encoded
+// exposed_models array. Empty / null exposed_models means no model is
+// exposed under specified mode (intentional: forces user to pick).
+func modelIsExposed(exposed []byte, model string) bool {
+	if len(exposed) == 0 || model == "" {
+		return false
+	}
+	q := `"` + model + `"`
+	return bytes.Contains(exposed, []byte(q))
 }
 
 func isChatCompletionsPath(p string) bool {

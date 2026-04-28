@@ -96,6 +96,11 @@ func (s *Selector) GetSettings() Settings {
 }
 
 // PickByAlias returns the SWRR-selected (group, real_model) for an alias.
+//
+// Candidates are filtered against each candidate group's exposed_models when
+// that group is in "specified" routing mode, so an alias whose target lives
+// in a non-exposed model silently falls through (per design — alias 兜底
+// 但仍受 exposed_models 准入).
 func (s *Selector) PickByAlias(ctx context.Context, alias string) (*Candidate, error) {
 	cands, err := s.loadCandidates(ctx, alias)
 	if err != nil {
@@ -103,6 +108,10 @@ func (s *Selector) PickByAlias(ctx context.Context, alias string) (*Candidate, e
 	}
 	if len(cands) == 0 {
 		return nil, fmt.Errorf("no candidates for alias %q", alias)
+	}
+	cands = s.filterByExposed(ctx, cands)
+	if len(cands) == 0 {
+		return nil, fmt.Errorf("alias %q has no exposed candidates", alias)
 	}
 	alive := s.filterCooldown(cands)
 	if len(alive) == 0 {
@@ -115,6 +124,10 @@ func (s *Selector) PickByAlias(ctx context.Context, alias string) (*Candidate, e
 
 // PickByExactName falls back when the user's model name is not aliased.
 // Walks Group.AvailableModels JSON across all groups for a literal match.
+//
+// In specified mode, candidates are further filtered by the group's
+// exposed_models (an upstream model that the admin hasn't exposed must not
+// be reachable cross-group via this fallback).
 func (s *Selector) PickByExactName(ctx context.Context, model string) (*Candidate, error) {
 	type row struct {
 		GroupID         uint
@@ -142,6 +155,10 @@ func (s *Selector) PickByExactName(ctx context.Context, model string) (*Candidat
 	}
 	if len(cands) == 0 {
 		return nil, fmt.Errorf("no group exposes model %q", model)
+	}
+	cands = s.filterByExposed(ctx, cands)
+	if len(cands) == 0 {
+		return nil, fmt.Errorf("model %q has no exposed group", model)
 	}
 	alive := s.filterCooldown(cands)
 	if len(alive) == 0 {
@@ -199,6 +216,60 @@ func (s *Selector) loadCandidates(ctx context.Context, alias string) ([]Candidat
 		})
 	}
 	return out, nil
+}
+
+// filterByExposed removes candidates whose group is in "specified" routing
+// mode and whose RealModel is NOT in that group's exposed_models JSON.
+// passthrough mode (or missing/empty mode) lets all candidates through.
+//
+// One DB roundtrip looks up mode + exposed_models for the unique group IDs.
+// On query error we fall back to passing candidates through (fail open),
+// since gating routing by exposure is meant to be a UX guardrail not a
+// security boundary — proxy_keys / auth still gate access.
+func (s *Selector) filterByExposed(ctx context.Context, cands []Candidate) []Candidate {
+	if len(cands) == 0 {
+		return cands
+	}
+	idSet := make(map[uint]struct{}, len(cands))
+	for _, c := range cands {
+		idSet[c.GroupID] = struct{}{}
+	}
+	ids := make([]uint, 0, len(idSet))
+	for id := range idSet {
+		ids = append(ids, id)
+	}
+	type row struct {
+		ID                uint
+		ModelRoutingMode  string
+		ExposedModels     string
+	}
+	var rows []row
+	if err := s.db.WithContext(ctx).
+		Table("groups").
+		Select("id, model_routing_mode, exposed_models").
+		Where("id IN ?", ids).
+		Scan(&rows).Error; err != nil {
+		return cands
+	}
+	info := make(map[uint]row, len(rows))
+	for _, r := range rows {
+		info[r.ID] = r
+	}
+	out := make([]Candidate, 0, len(cands))
+	for _, c := range cands {
+		r, ok := info[c.GroupID]
+		if !ok {
+			continue
+		}
+		if r.ModelRoutingMode != "specified" {
+			out = append(out, c)
+			continue
+		}
+		if jsonContainsString(r.ExposedModels, c.RealModel) {
+			out = append(out, c)
+		}
+	}
+	return out
 }
 
 func (s *Selector) filterCooldown(cands []Candidate) []Candidate {
