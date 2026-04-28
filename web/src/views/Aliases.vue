@@ -17,7 +17,6 @@ import {
   BanOutline,
   CheckmarkCircle,
   CloseOutline,
-  CreateOutline,
   CubeOutline,
   FlashOutline,
   HelpCircleOutline,
@@ -742,9 +741,10 @@ function saveSettingsThrottled() {
         </div>
 
         <div class="v3-tier__body">
-          <div
+          <button
             v-for="m in tier.models"
             :key="m.id"
+            type="button"
             class="v3-alias-chip"
             :class="{
               'v3-alias-chip--disabled': !m.enabled,
@@ -755,6 +755,7 @@ function saveSettingsThrottled() {
                 ? t('v3.aliasUnexposedTip', { model: m.real_model })
                 : m.real_model
             "
+            @click="openEdit(m)"
           >
             <span
               :class="pavClass(inferProvider(m))"
@@ -769,16 +770,7 @@ function saveSettingsThrottled() {
             <span v-if="aliasIsDeadByExposure(m)" class="v3-alias-chip__deadbadge">
               {{ t("v3.aliasUnexposed") || "失效" }}
             </span>
-            <div class="v3-alias-chip__actions">
-              <button class="v3-alias-chip__btn" @click="openEdit(m)">
-                <n-icon :component="CreateOutline" :size="10" />
-              </button>
-            </div>
-            <span
-              class="v3-alias-chip__dot"
-              :class="{ 'v3-alias-chip__dot--active': m.enabled }"
-            />
-          </div>
+          </button>
           <div v-if="!tier.models.length" class="v3-tier__empty-hint">
             {{ t("v3.noMappings") }}
           </div>
@@ -839,9 +831,10 @@ function saveSettingsThrottled() {
           </div>
 
           <div class="v3-tier__body">
-            <div
+            <button
               v-for="m in grp.members"
               :key="m.id"
+              type="button"
               class="v3-alias-chip"
               :class="{
                 'v3-alias-chip--disabled': !m.enabled,
@@ -852,6 +845,7 @@ function saveSettingsThrottled() {
                   ? t('v3.aliasUnexposedTip', { model: m.real_model })
                   : m.real_model
               "
+              @click="openEdit(m)"
             >
               <span
                 :class="pavClass(inferProvider(m))"
@@ -866,16 +860,7 @@ function saveSettingsThrottled() {
               <span v-if="aliasIsDeadByExposure(m)" class="v3-alias-chip__deadbadge">
                 {{ t("v3.aliasUnexposed") || "失效" }}
               </span>
-              <div class="v3-alias-chip__actions">
-                <button class="v3-alias-chip__btn" @click="openEdit(m)">
-                  <n-icon :component="CreateOutline" :size="10" />
-                </button>
-              </div>
-              <span
-                class="v3-alias-chip__dot"
-                :class="{ 'v3-alias-chip__dot--active': m.enabled }"
-              />
-            </div>
+            </button>
             <div v-if="!grp.members.length" class="v3-tier__empty-hint">
               {{ t("v3.noMappings") }}
             </div>
@@ -1379,6 +1364,17 @@ function saveSettingsThrottled() {
   transition: all 120ms;
   position: relative;
   flex-shrink: 0;
+  cursor: pointer;
+  font-family: inherit;
+  color: inherit;
+}
+.v3-alias-chip:hover {
+  border-color: var(--v3-accent);
+  background: var(--v3-surface-3, var(--v3-surface-2));
+}
+.v3-alias-chip:focus-visible {
+  outline: 2px solid var(--v3-accent);
+  outline-offset: 1px;
 }
 .v3-alias-chip--disabled {
   opacity: 0.5;
@@ -1404,40 +1400,6 @@ function saveSettingsThrottled() {
   font: 500 11px var(--v3-mono);
   color: var(--v3-ink-2);
   white-space: nowrap;
-}
-.v3-alias-chip__dot {
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: var(--v3-ink-4);
-  flex-shrink: 0;
-}
-.v3-alias-chip__dot--active {
-  background: var(--v3-ok);
-}
-.v3-alias-chip:hover .v3-alias-chip__dot {
-  display: none;
-}
-.v3-alias-chip__actions {
-  display: none;
-  align-items: center;
-}
-.v3-alias-chip:hover .v3-alias-chip__actions {
-  display: flex;
-}
-.v3-alias-chip__btn {
-  background: transparent;
-  border: 0;
-  cursor: pointer;
-  padding: 2px;
-  border-radius: 4px;
-  color: var(--v3-ink-3);
-  display: flex;
-  align-items: center;
-}
-.v3-alias-chip__btn:hover {
-  background: var(--v3-surface-3);
-  color: var(--v3-ink);
 }
 
 /* Custom Picker Styles */
