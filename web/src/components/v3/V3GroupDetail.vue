@@ -500,7 +500,14 @@ function isFreeModel(modelId: string): boolean {
   return isFree(matchedProvider.value?.id, modelId) === true;
 }
 
-const modelCount = computed(() => groupModels.value.length);
+// tab 角标:specified 模式展示白名单数量(强调已暴露这件事);
+// passthrough / 聚合分组展示上游全量数。
+const modelCount = computed(() => {
+  if (!isAggregate.value && routingMode.value === "specified") {
+    return exposedModels.value.length;
+  }
+  return groupModels.value.length;
+});
 
 // === Filters & Persistence ===
 const modelSearch = ref("");
