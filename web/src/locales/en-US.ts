@@ -366,7 +366,7 @@ export default {
     descriptionTooltip:
       "Detailed description of the group to help team members understand its purpose and features. Supports multi-line text",
     upstreamTooltip:
-      "Complete URL of the API server. Multiple upstreams enable load balancing and failover for high availability",
+      "Complete URL of the API server. Multiple upstreams enable load balancing and failover for high availability. Trailing /v1 / /v1beta version segments are auto-detected — include them or not, both work.",
     weightTooltip:
       "Load balancing weight configuration. Weight determines traffic distribution ratio - higher values receive more traffic. Weight 0 disables the upstream (no requests). Example: Weight 2:1 means the first receives ~67% of traffic",
     addUpstream: "Add Upstream",

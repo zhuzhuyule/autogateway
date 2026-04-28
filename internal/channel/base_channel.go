@@ -10,12 +10,16 @@ import (
 	"net/http"
 	"net/url"
 	"reflect"
+	"regexp"
 	"strings"
 	"sync"
 
 	"github.com/sirupsen/logrus"
 	"gorm.io/datatypes"
 )
+
+// versionSegmentRe 匹配单个路径段是 v1 / v2 / v1beta / v1beta1 等 API 版本号。
+var versionSegmentRe = regexp.MustCompile(`^v\d+(?:beta\d*)?$`)
 
 // UpstreamInfo holds the information for a single upstream server, including its weight.
 type UpstreamInfo struct {
@@ -76,6 +80,11 @@ func (b *BaseChannel) getUpstreamURL() *url.URL {
 }
 
 // BuildUpstreamURL constructs the target URL for the upstream service.
+//
+// 智能去重 API 版本段:如果 baseURL 末段是 /vN (e.g. /v1, /v1beta) 且 request
+// 路径开头也带相同段,合并以避免出现 /v1/v1/chat/completions。这样无论用户
+// 把 baseUrl 写成 https://api.example.com 还是 https://api.example.com/v1,
+// 都能正确路由,降低配置出错率。
 func (b *BaseChannel) BuildUpstreamURL(originalURL *url.URL, groupName string) (string, error) {
 	base := b.getUpstreamURL()
 	if base == nil {
@@ -87,11 +96,42 @@ func (b *BaseChannel) BuildUpstreamURL(originalURL *url.URL, groupName string) (
 	requestPath := originalURL.Path
 	requestPath = strings.TrimPrefix(requestPath, proxyPrefix)
 
-	finalURL.Path = strings.TrimRight(finalURL.Path, "/") + requestPath
+	basePath := strings.TrimRight(finalURL.Path, "/")
+	requestPath = dedupeVersionSegment(basePath, requestPath)
+	finalURL.Path = basePath + requestPath
 
 	finalURL.RawQuery = originalURL.RawQuery
 
 	return finalURL.String(), nil
+}
+
+// dedupeVersionSegment 在 baseURL 末段是 /vN 而 request 开头也是同一段时,
+// 把 request 那段去掉,避免双 /v1。
+//   - base="/v1"      req="/v1/chat/completions" → "/chat/completions"
+//   - base="/v1"      req="/chat/completions"    → "/chat/completions" (不变)
+//   - base="/openai"  req="/v1/chat/completions" → "/v1/chat/completions" (不变)
+//   - base=""         req="/v1/chat/completions" → "/v1/chat/completions" (不变)
+//   - base="/v1beta"  req="/v1beta/models"       → "/models"
+func dedupeVersionSegment(basePath, requestPath string) string {
+	if basePath == "" || requestPath == "" {
+		return requestPath
+	}
+	segs := strings.Split(strings.TrimPrefix(basePath, "/"), "/")
+	if len(segs) == 0 {
+		return requestPath
+	}
+	lastSeg := segs[len(segs)-1]
+	if !versionSegmentRe.MatchString(lastSeg) {
+		return requestPath
+	}
+	expected := "/" + lastSeg
+	if requestPath == expected {
+		return ""
+	}
+	if strings.HasPrefix(requestPath, expected+"/") {
+		return strings.TrimPrefix(requestPath, expected)
+	}
+	return requestPath
 }
 
 // IsConfigStale checks if the channel's configuration is stale compared to the provided group.

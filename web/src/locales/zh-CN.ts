@@ -354,7 +354,7 @@ export default {
     proxyKeysCopied: "代理密钥已复制到剪贴板",
     multiKeysPlaceholder: "多个密钥请用英文逗号 , 分隔",
     descriptionTooltip: "分组的详细说明，帮助团队成员了解该分组的用途和特点。支持多行文本",
-    upstreamTooltip: "API服务器的完整URL地址。多个上游可以实现负载均衡和故障转移，提高服务可用性",
+    upstreamTooltip: "API服务器的完整URL地址。多个上游可以实现负载均衡和故障转移，提高服务可用性。末尾 /v1 / /v1beta 等版本段会被自动识别,带不带都行。",
     weightTooltip:
       "负载均衡权重配置。权重决定流量分配比例，数值越大获得的流量越多。权重为0时禁用该上游（不接收任何请求）。示例：权重2:1表示前者获得约67%的流量",
     addUpstream: "添加上游地址",
