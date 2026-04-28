@@ -404,6 +404,7 @@ async function loadAll() {
 }
 
 const suggestions = ref<AliasSuggestion[]>([]);
+const suggestionsDismissed = ref(false);
 async function loadSuggestions() {
   try {
     const r = await aliasesApi.suggestions();
@@ -417,9 +418,13 @@ function onClickSuggestion(s: AliasSuggestion) {
   openPicker(s.model);
 }
 
-onMounted(async () => {
-  await loadAll();
-  await loadSuggestions();
+function dismissSuggestions() {
+  suggestionsDismissed.value = true;
+}
+
+onMounted(() => {
+  // 并行触发，banner 出现 race-free，无需阻塞主列表
+  Promise.all([loadAll(), loadSuggestions()]);
 });
 
 // === Tier board distribution ===
@@ -576,9 +581,16 @@ function saveSettingsThrottled() {
       </span>
     </h1>
 
-    <div v-if="suggestions.length" class="v5-suggest-banner">
-      <div class="v5-suggest-banner__title">
-        {{ t("v5.suggestionsTitle") || "Detected unknown models in recent requests" }}
+    <div v-if="suggestions.length && !suggestionsDismissed" class="v5-suggest-banner">
+      <div class="v5-suggest-banner__head">
+        <div class="v5-suggest-banner__title">{{ t("v5.suggestionsTitle") }}</div>
+        <button
+          class="v5-suggest-banner__close"
+          :title="t('v5.suggestionsDismiss')"
+          @click="dismissSuggestions"
+        >
+          <n-icon :component="CloseOutline" :size="13" />
+        </button>
       </div>
       <div class="v5-suggest-banner__list">
         <button
@@ -1625,10 +1637,30 @@ function saveSettingsThrottled() {
   border: 1px solid var(--v3-rule);
   border-radius: var(--v3-radius);
 }
+.v5-suggest-banner__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
 .v5-suggest-banner__title {
   font: 500 12px/1.4 var(--v3-sans);
   color: var(--v3-ink-2);
-  margin-bottom: 8px;
+}
+.v5-suggest-banner__close {
+  border: none;
+  background: transparent;
+  color: var(--v3-ink-3);
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+}
+.v5-suggest-banner__close:hover {
+  background: var(--v3-surface-3, var(--v3-bg));
+  color: var(--v3-ink);
 }
 .v5-suggest-banner__list {
   display: flex;

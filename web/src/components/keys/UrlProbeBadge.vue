@@ -25,10 +25,7 @@ watch(
     timer = window.setTimeout(async () => {
       try {
         const res = await upstreamApi.probe(next);
-        // The http interceptor returns response.data (the full envelope {code, message, data}).
-        // Callers across the codebase access .data to get the actual payload.
-        const envelope = res as unknown as { data?: ProbeResult };
-        const payload = envelope.data ?? (res as unknown as ProbeResult);
+        const payload = (res as unknown as { data: ProbeResult }).data;
         state.value = "ok";
         detail.value = payload;
         emit("detected", payload);

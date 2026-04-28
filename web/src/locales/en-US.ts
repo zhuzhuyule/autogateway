@@ -402,6 +402,8 @@ export default {
       "Define the API request parameters to be overridden using JSON format. These parameters will be merged with the original parameters when sending the request.",
     paramOverridesPerModelHint:
       'Flat shape applies to all models. Use {"*": {…}, "model-id": {…}} for per-model overrides ("*" is the fallback, exact model id wins).',
+    suggestionsTitle: "Detected unknown models in recent requests — click to alias",
+    suggestionsDismiss: "Hide for this session",
     modelRedirectPolicy: "Unconfigured Model Policy",
     modelRedirectPolicyTooltip:
       "Choose how to handle requests for models not configured in redirect rules",

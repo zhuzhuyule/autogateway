@@ -42,7 +42,7 @@ func (s *AliasSuggestionService) Suggest(ctx context.Context, lookback time.Dura
 	if err := s.db.WithContext(ctx).
 		Model(&models.RequestLog{}).
 		Select("model, COUNT(*) as count, MAX(timestamp) as last_seen").
-		Where("status_code IN (404, 405) AND model <> '' AND timestamp >= ?", since).
+		Where("status_code IN (404, 405) AND is_success = ? AND model <> '' AND timestamp >= ?", false, since).
 		Group("model").
 		Order("count DESC").
 		Limit(20).

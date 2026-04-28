@@ -400,6 +400,8 @@ export default {
       "JSON形式を使用して、上書きするAPIリクエストパラメータを定義します。これらのパラメータは、リクエスト送信時に元のパラメータにマージされます。",
     paramOverridesPerModelHint:
       'フラット形式は全モデルに適用されます。モデルごとの上書きには {"*": {…}, "model-id": {…}} を使用してください（"*" がフォールバック、モデル精確名が優先）。',
+    suggestionsTitle: "最近のリクエストで未知のモデルを検出 — クリックでエイリアスを作成",
+    suggestionsDismiss: "このセッション中は非表示",
     modelRedirectPolicy: "未設定モデルポリシー",
     modelRedirectPolicyTooltip:
       "リダイレクトルールで設定されていないモデルのリクエストをどう処理するか選択",

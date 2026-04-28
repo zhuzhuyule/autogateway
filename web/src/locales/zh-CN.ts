@@ -386,6 +386,8 @@ export default {
       "使用JSON格式定义要覆盖的API请求参数。这些参数会在发送请求时合并到原始参数中",
     paramOverridesPerModelHint:
       '扁平结构对所有模型生效。也可用 {"*": {…}, "model-id": {…}} 实现按模型差异化覆盖（"*" 是兜底，模型精确名优先）',
+    suggestionsTitle: "近期请求中检测到未识别模型 — 点击为其建立别名",
+    suggestionsDismiss: "本次会话不再提示",
     modelRedirectPolicy: "未配置模型策略",
     modelRedirectPolicyTooltip: "选择如何处理未在重定向规则中配置的模型请求",
     modelRedirectStrictMode: "严格模式：拒绝未配置的模型请求（返回404）",
