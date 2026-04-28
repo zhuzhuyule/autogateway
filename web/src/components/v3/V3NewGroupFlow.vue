@@ -1,7 +1,12 @@
 <script setup lang="ts">
 import { keysApi } from "@/api/keys";
 import { detectFromText, type KeyDetection } from "@/data/keyDetector";
-import { FREE_PROVIDERS, FREE_MODELS, type FreeProvider } from "@/data/freeProviders";
+import {
+  FREE_PROVIDERS,
+  FREE_MODELS,
+  bootstrapExposedModels,
+  type FreeProvider,
+} from "@/data/freeProviders";
 import type { Group } from "@/types/models";
 import {
   CheckmarkOutline,
@@ -295,13 +300,14 @@ async function ensureGroupExists(): Promise<Group> {
     throw new Error("no provider picked");
   }
   const p = picked.value;
+  const testModel = selectedModel.value || p.testModel;
   const submit: Partial<Group> = {
     name: groupName.value || p.recommendedGroupName,
     display_name: p.recommendedDisplayName,
     description: p.description,
     channel_type: p.channelType,
     upstreams: [{ url: p.baseUrl, weight: 1 }],
-    test_model: selectedModel.value || p.testModel,
+    test_model: testModel,
     sort: 0,
     validation_endpoint: "",
     param_overrides: {},
@@ -310,6 +316,9 @@ async function ensureGroupExists(): Promise<Group> {
     config: {},
     header_rules: [],
     proxy_keys: "",
+    // 默认 specified + 自动暴露已知免费模型 (含用户选的 testModel)
+    model_routing_mode: "specified",
+    exposed_models: bootstrapExposedModels(p, testModel),
   };
   return await keysApi.createGroup(submit);
 }

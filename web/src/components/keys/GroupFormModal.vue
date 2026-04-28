@@ -5,6 +5,7 @@ import { settingsApi } from "@/api/settings";
 import ProxyKeysInput from "@/components/common/ProxyKeysInput.vue";
 import {
   FREE_PROVIDERS,
+  bootstrapExposedModels,
   findFreeModel,
   findProviderByUpstreams,
   isFree,
@@ -768,11 +769,20 @@ async function handleSubmit() {
 
     let res: Group;
     if (props.group?.id) {
-      // 编辑模式
+      // 编辑模式 — 不动 model_routing_mode / exposed_models, 由专门的 UI 控制
       res = await keysApi.updateGroup(props.group.id, submitData);
     } else {
-      // 新建模式
-      res = await keysApi.createGroup(submitData);
+      // 新建模式 — 默认 specified + 自动暴露 (已知 provider 取免费集,
+      // 未知 provider 仅暴露用户填的 testModel)
+      const provider = findProviderByUpstreams(submitData.upstreams) as
+        | FreeProvider
+        | undefined;
+      const newGroupData = {
+        ...submitData,
+        model_routing_mode: "specified" as const,
+        exposed_models: bootstrapExposedModels(provider, submitData.test_model),
+      };
+      res = await keysApi.createGroup(newGroupData);
     }
 
     emit("success", res);

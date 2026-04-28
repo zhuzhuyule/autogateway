@@ -935,3 +935,35 @@ export function isFree(
 
   return null;
 }
+
+/**
+ * 建组时计算 exposed_models 初始集 (specified 模式下生效).
+ * 取已知 provider 的免费模型并集 + 用户选定的 testModel,做去重.
+ *
+ * - 已知 provider:FREE_MODELS 命中的 + provider.models 里 isFree() 为 true 的
+ * - 用户选定的 testModel:总是包含 (避免"建好了但调不通")
+ * - 未知 provider (provider 为 undefined):仅 [testModel]
+ */
+export function bootstrapExposedModels(
+  provider: FreeProvider | undefined,
+  selectedTestModel?: string
+): string[] {
+  const set = new Set<string>();
+  if (provider) {
+    for (const m of FREE_MODELS) {
+      if (m.providerId === provider.id) {
+        set.add(m.modelId);
+      }
+    }
+    // provider.models 里靠启发式判定为免费的 (e.g. openrouter/auto, *:free)
+    for (const m of provider.models) {
+      if (isFree(provider.id, m) === true) {
+        set.add(m);
+      }
+    }
+  }
+  if (selectedTestModel) {
+    set.add(selectedTestModel);
+  }
+  return Array.from(set);
+}
