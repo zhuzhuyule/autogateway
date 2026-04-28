@@ -991,7 +991,8 @@ export default {
     aggChildren: "サブグループ",
     aggKeys: "有効キー",
     aggregateChip: "集約",
-    hintAggregate: "これは集約グループです — リクエストは重みに従って下のサブグループに振り分けられます。",
+    hintAggregate:
+      "これは集約グループです — リクエストは重みに従って下のサブグループに振り分けられます。",
     tabSubGroups: "サブグループ",
     aggSubGroups: "サブグループ",
     aggSubGroupsSub: "重み付きラウンドロビン",
@@ -1039,6 +1040,7 @@ export default {
     alDeleteAliasTitle: "別名削除",
     alDeleteAliasConfirm: "{alias} と {n} 件の候補を削除しますか?",
     alEmpty: "別名がまだありません",
-    alEmptySub: "別名を作成して、複数の (グループ, モデル) を 1 つの分かりやすい名前にまとめましょう",
+    alEmptySub:
+      "別名を作成して、複数の (グループ, モデル) を 1 つの分かりやすい名前にまとめましょう",
   },
 };

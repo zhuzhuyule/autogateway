@@ -552,15 +552,9 @@ function syncFromGroup() {
     : [];
 }
 syncFromGroup();
+// 只在切换分组时重置本地状态;同一分组下的服务端更新交给 updateGroup 的
+// 响应自行同步 — 否则父组件 refresh 一次会把乐观更新打回旧值。
 watch(() => props.group?.id, syncFromGroup);
-watch(
-  () => [
-    (props.group as unknown as { model_routing_mode?: string })?.model_routing_mode,
-    (props.group as unknown as { exposed_models?: string[] })?.exposed_models,
-  ],
-  syncFromGroup,
-  { deep: true }
-);
 
 const exposedSet = computed(() => new Set(exposedModels.value));
 
@@ -602,11 +596,33 @@ async function persistGroupPatch(patch: {
     return;
   }
   try {
-    await keysApi.updateGroup(props.group.id, patch);
+    const updated = (await keysApi.updateGroup(
+      props.group.id,
+      patch
+    )) as unknown as {
+      model_routing_mode?: string;
+      exposed_models?: string[] | null;
+    };
+    // 检测 schema 漂移:后端没识别新字段时返回的 group 保留旧值,
+    // 此时不要让父级 refresh 把乐观状态打回去。
+    const modeOk =
+      patch.model_routing_mode === undefined ||
+      updated.model_routing_mode === patch.model_routing_mode;
+    const exposedOk =
+      patch.exposed_models === undefined ||
+      JSON.stringify(updated.exposed_models || []) ===
+        JSON.stringify(patch.exposed_models);
+    if (!modeOk || !exposedOk) {
+      message.warning(
+        t("v3.routingPersistDrift") ||
+          "后端未识别新字段,请重启服务并刷新 — 改动暂存于本地"
+      );
+      return; // 保留乐观值, 不发 refresh
+    }
     emit("refresh");
   } catch (e) {
     message.error((e as Error).message || (t("common.requestFailed") as string));
-    syncFromGroup(); // rollback to server state
+    syncFromGroup(); // 真错才回滚
   }
 }
 
