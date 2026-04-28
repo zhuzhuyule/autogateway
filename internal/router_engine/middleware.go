@@ -116,6 +116,25 @@ func Middleware(s *Selector, resolver AliasResolver) gin.HandlerFunc {
 		if !ok || groupName == "" {
 			return
 		}
+		// 也要同步改写 URL path 里的 group 段:从 /proxy/{old}/... 改成
+		// /proxy/{new}/...,否则 BuildUpstreamURL 用新 groupName 算 proxyPrefix
+		// 时 strip 失败,会拼出 /openai/proxy/openai/... 之类的错误路径。
+		// 系统快捷路由 (/openai/* /anthropic/* /gemini/*) 也同步替换前缀。
+		oldGroupName := c.Param("group_name")
+		if oldGroupName != "" && oldGroupName != groupName {
+			oldPrefix := "/proxy/" + oldGroupName
+			if strings.HasPrefix(c.Request.URL.Path, oldPrefix) {
+				c.Request.URL.Path = "/proxy/" + groupName + strings.TrimPrefix(c.Request.URL.Path, oldPrefix)
+			} else {
+				// 系统快捷路由: /openai /anthropic /gemini
+				for _, sc := range []string{"/openai", "/anthropic", "/gemini"} {
+					if strings.HasPrefix(c.Request.URL.Path, sc+"/") || c.Request.URL.Path == sc {
+						c.Request.URL.Path = "/proxy/" + groupName + strings.TrimPrefix(c.Request.URL.Path, sc)
+						break
+					}
+				}
+			}
+		}
 		c.Params = setParam(c.Params, "group_name", groupName)
 		c.Set("router_engine.candidate", picked)
 
