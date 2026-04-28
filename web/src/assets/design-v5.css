@@ -552,10 +552,10 @@
   background: var(--v3-surface);
   border: 1px solid var(--v3-line);
   border-radius: var(--v3-radius-md);
-  padding: 14px;
+  padding: 10px 12px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 6px;
   transition: all 120ms;
 }
 .v5-modelcard:hover {
@@ -563,39 +563,18 @@
   box-shadow: var(--v3-shadow-sm);
   transform: translateY(-1px);
 }
-.v5-modelcard__top {
+.v5-modelcard__row {
   display: flex;
   align-items: center;
-  gap: 8px;
 }
 .v5-modelcard__name {
-  font: 500 12.5px/1.3 var(--v3-mono);
+  font: 600 14px/1.3 var(--v3-mono);
   color: var(--v3-ink);
   flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-.v5-modelcard__meta {
-  display: flex;
-  gap: 14px;
-  flex-wrap: wrap;
-  font: 400 11.5px/1.4 var(--v3-sans);
-  color: var(--v3-ink-3);
-}
-.v5-modelcard__meta span {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-family: var(--v3-mono);
-  font-size: 11px;
-}
-.v5-modelcard__via {
-  font: 400 11px/1.3 var(--v3-mono);
-  color: var(--v3-ink-3);
-  padding-top: 8px;
-  border-top: 1px dashed var(--v3-line);
 }
 
 /* Aliases bar inside ModelCard */
@@ -609,45 +588,94 @@
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  font: 600 11.5px/1 var(--v3-sans);
+  font: 600 11px/1 var(--v3-sans);
   background: var(--v3-info-soft);
   color: var(--v3-info);
-  padding: 4px 9px;
-  border-radius: 999px;
-  border: 0;
+  padding: 3px 8px;
+  border-radius: 6px;
+  border: 1px solid oklch(from var(--v3-info) l c h / 0.1);
   cursor: pointer;
   transition: filter 100ms;
 }
 .v5-modelcard__alias:hover {
   filter: brightness(0.96);
 }
-.v5-modelcard__alias small {
-  font: 500 10px/1 var(--v3-mono);
-  color: oklch(from var(--v3-info) l c h / 0.7);
-  letter-spacing: 0.02em;
-}
 .v5-modelcard__alias-add {
   background: transparent;
   border: 1px dashed var(--v3-line);
   color: var(--v3-ink-3);
   cursor: pointer;
-  padding: 3px 9px;
+  padding: 3px 10px;
   border-radius: 999px;
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  font: 500 11.5px/1 var(--v3-sans);
+  gap: 4px;
+  font: 500 11px/1 var(--v3-sans);
   transition: all 120ms;
+  min-height: 24px;
 }
 .v5-modelcard__alias-add:hover {
   border-color: var(--v3-info);
   color: var(--v3-info);
+  background: var(--v3-info-soft);
 }
-.v5-modelcard__alias-add--block {
-  width: 100%;
-  justify-content: center;
-  padding: 6px 9px;
+
+/* ===== Model card states for specified routing mode ===== */
+.v5-modelcard--exposed {
+  background: oklch(from var(--v3-accent) l c h / 0.04);
+  border-color: oklch(from var(--v3-accent) l c h / 0.25);
 }
+.v5-modelcard--exposed:active {
+  cursor: grabbing;
+}
+.v5-modelcard--inexposed {
+  opacity: 0.55;
+}
+.v5-modelcard--inexposed:hover {
+  opacity: 1;
+}
+.v5-modelcard--dragging {
+  opacity: 0.5;
+  transform: scale(0.98);
+}
+
+/* Section heading inside Models tab */
+.v5-section-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 0 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--v3-line);
+}
+.v5-section-head__title {
+  font: 600 13px/1 var(--v3-sans);
+  color: var(--v3-ink);
+}
+.v5-section-head__hint {
+  font: 400 11px/1 var(--v3-sans);
+  color: var(--v3-ink-3);
+  margin-left: 4px;
+}
+
+/* mini empty state for sections */
+.v5-empty-mini {
+  text-align: center;
+  padding: 18px 12px;
+  color: var(--v3-ink-3);
+  font: 400 12px/1.5 var(--v3-sans);
+  border: 1px dashed var(--v3-line);
+  border-radius: var(--v3-radius-md);
+  background: var(--v3-surface-2);
+}
+
+/* Mode toggle button cluster */
+.v5-modemode {
+  display: inline-flex;
+  align-items: stretch;
+  gap: 4px;
+}
+
 
 /* ===== Status dot ===== */
 .v5-dot {

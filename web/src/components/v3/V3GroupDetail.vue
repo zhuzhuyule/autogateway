@@ -535,17 +535,128 @@ watch([modelSearch, modelFilterFree], () => {
   }));
 });
 
-const filteredModels = computed(() => {
+
+// === Routing mode + exposed_models (specified 模式白名单) ===
+
+type RoutingMode = "passthrough" | "specified";
+
+const routingMode = ref<RoutingMode>("passthrough");
+const exposedModels = ref<string[]>([]);
+const availFilter = ref<"all" | "free" | "paid">("all");
+const savingMode = ref(false);
+
+function syncFromGroup() {
+  routingMode.value = (props.group?.model_routing_mode as RoutingMode) || "passthrough";
+  exposedModels.value = Array.isArray(props.group?.exposed_models)
+    ? [...(props.group!.exposed_models as string[])]
+    : [];
+}
+syncFromGroup();
+watch(() => props.group?.id, syncFromGroup);
+watch(
+  () => [
+    (props.group as unknown as { model_routing_mode?: string })?.model_routing_mode,
+    (props.group as unknown as { exposed_models?: string[] })?.exposed_models,
+  ],
+  syncFromGroup,
+  { deep: true }
+);
+
+const exposedSet = computed(() => new Set(exposedModels.value));
+
+// 已暴露列表(顶部区,specified 模式才显示) — 应用 search + free/paid 过滤
+const filteredExposed = computed(() => {
+  let list = exposedModels.value;
+  const q = modelSearch.value.toLowerCase().trim();
+  if (q) {
+    list = list.filter(m => m.toLowerCase().includes(q));
+  }
+  if (availFilter.value === "free") {
+    list = list.filter(m => isFreeModel(m));
+  } else if (availFilter.value === "paid") {
+    list = list.filter(m => !isFreeModel(m));
+  }
+  return list;
+});
+
+// 上游全部列表(底部区) — 应用 search + free/paid 过滤
+const filteredAvailable = computed(() => {
   let list = groupModels.value;
   const q = modelSearch.value.toLowerCase().trim();
   if (q) {
     list = list.filter(m => m.toLowerCase().includes(q));
   }
-  if (modelFilterFree.value) {
+  if (availFilter.value === "free") {
     list = list.filter(m => isFreeModel(m));
+  } else if (availFilter.value === "paid") {
+    list = list.filter(m => !isFreeModel(m));
   }
   return list;
 });
+
+async function persistGroupPatch(patch: {
+  model_routing_mode?: RoutingMode;
+  exposed_models?: string[];
+}) {
+  if (!props.group?.id) {
+    return;
+  }
+  try {
+    await keysApi.updateGroup(props.group.id, patch);
+    emit("refresh");
+  } catch (e) {
+    message.error((e as Error).message || (t("common.requestFailed") as string));
+    syncFromGroup(); // rollback to server state
+  }
+}
+
+async function setRoutingMode(mode: RoutingMode) {
+  if (savingMode.value || routingMode.value === mode) {
+    return;
+  }
+  savingMode.value = true;
+  routingMode.value = mode; // optimistic
+  try {
+    await persistGroupPatch({ model_routing_mode: mode });
+  } finally {
+    savingMode.value = false;
+  }
+}
+
+async function addToExposed(modelId: string) {
+  if (exposedSet.value.has(modelId)) {
+    return;
+  }
+  const next = [...exposedModels.value, modelId];
+  exposedModels.value = next; // optimistic
+  await persistGroupPatch({ exposed_models: next });
+}
+
+async function removeFromExposed(modelId: string) {
+  const next = exposedModels.value.filter(m => m !== modelId);
+  exposedModels.value = next; // optimistic
+  await persistGroupPatch({ exposed_models: next });
+}
+
+// 拖拽排序(specified 模式上方区)
+const dragIdx = ref<number | null>(null);
+
+function onExposedDragStart(idx: number) {
+  dragIdx.value = idx;
+}
+
+async function onExposedDrop(targetIdx: number) {
+  const src = dragIdx.value;
+  dragIdx.value = null;
+  if (src == null || src === targetIdx) {
+    return;
+  }
+  const next = [...exposedModels.value];
+  const [moved] = next.splice(src, 1);
+  next.splice(targetIdx, 0, moved);
+  exposedModels.value = next;
+  await persistGroupPatch({ exposed_models: next });
+}
 
 // inline notes editing
 const editingNoteId = ref<number | null>(null);
@@ -1286,6 +1397,7 @@ const filterCounts = computed(() => ({
 
       <!-- ===== MODELS TAB ===== -->
       <div v-else-if="tab === 'models'">
+        <!-- Toolbar: mode toggle + search + free/paid filter -->
         <div class="v5-toolbar">
           <div class="v5-toolbar__hint">
             {{ t("v5.modelsHint") }}
@@ -1293,97 +1405,183 @@ const filterCounts = computed(() => ({
               · {{ t("v5.refreshedAt") }} {{ modelsRefreshedAtDisplay }}
             </span>
           </div>
-          <div class="v5-toolbar__spacer" style="gap: 16px">
-            <div class="v5-search" style="width: 240px">
-              <n-icon :component="SearchOutline" :size="12" />
-              <input
-                v-model="modelSearch"
-                :placeholder="t('v3.filterModels') || 'Filter models…'"
-              />
+          <div class="v5-toolbar__spacer" style="gap: 16px; flex-wrap: wrap">
+            <div v-if="!isAggregate" class="v5-modemode">
+              <button
+                class="v3-btn v3-btn--sm"
+                :class="{ 'v3-btn--accent': routingMode === 'passthrough' }"
+                :disabled="savingMode"
+                @click="setRoutingMode('passthrough')"
+              >{{ t("v3.modePassthrough") || "透传" }}</button>
+              <button
+                class="v3-btn v3-btn--sm"
+                :class="{ 'v3-btn--accent': routingMode === 'specified' }"
+                :disabled="savingMode"
+                @click="setRoutingMode('specified')"
+              >{{ t("v3.modeSpecified") || "指定" }}</button>
             </div>
-            <div style="display: flex; align-items: center; gap: 8px">
-              <span style="font-size: 11px; color: var(--v3-ink-3)">{{ t("v3.freeOnly") || "Free only" }}</span>
-              <n-switch v-model:value="modelFilterFree" size="small" />
+            <div class="v5-search" style="width: 220px">
+              <n-icon :component="SearchOutline" :size="12" />
+              <input v-model="modelSearch" :placeholder="t('v3.filterModels') || 'Filter models…'" />
+            </div>
+            <div class="v5-modemode">
+              <button class="v3-btn v3-btn--sm" :class="{ 'v3-btn--accent': availFilter === 'all' }" @click="availFilter = 'all'">
+                {{ t("common.all") || "All" }}
+              </button>
+              <button class="v3-btn v3-btn--sm" :class="{ 'v3-btn--accent': availFilter === 'free' }" @click="availFilter = 'free'">
+                🆓 {{ t("modelcatalog.freeTag") || "Free" }}
+              </button>
+              <button class="v3-btn v3-btn--sm" :class="{ 'v3-btn--accent': availFilter === 'paid' }" @click="availFilter = 'paid'">
+                {{ t("v3.paid") || "Paid" }}
+              </button>
             </div>
           </div>
         </div>
 
-        <div v-if="filteredModels.length" class="v5-cardgrid">
-          <div v-for="modelId in filteredModels" :key="modelId" class="v5-modelcard">
-            <!-- Row 1: Name -->
-            <div class="v5-modelcard__row">
-              <code class="v5-modelcard__name">{{ modelId }}</code>
-            </div>
+        <!-- =============================================== -->
+        <!-- SPECIFIED MODE: top "已暴露" + bottom "上游全部" -->
+        <!-- =============================================== -->
+        <template v-if="!isAggregate && routingMode === 'specified'">
+          <div class="v5-section-head">
+            <span class="v5-section-head__title">{{ t("v3.exposedModels") || "已暴露" }}</span>
+            <span class="v3-chip" style="font-size: 10px">{{ exposedModels.length }}</span>
+            <span class="v5-section-head__hint">{{ t("v3.exposedHint") || "白名单 — 仅这些模型可调用,可加别名,支持拖拽排序" }}</span>
+          </div>
 
-            <!-- Row 2: Tags + Actions -->
-            <div class="v5-modelcard__row" style="margin-top: 6px; align-items: center; gap: 6px">
-              <span :class="tierChipClass(tierForModel(modelId))" style="flex-shrink: 0; font-size: 10px">
-                {{ tierLabel(tierForModel(modelId)) }}
-              </span>
-              <span v-if="isFreeModel(modelId)" class="v3-chip v3-chip--info" style="flex-shrink: 0; font-size: 10px">
-                {{ t("v3.free") || "free" }}
-              </span>
-
-              <div class="v5-modelcard__spacer" style="flex: 1"></div>
-
-              <!-- Aliases inline -->
-              <div class="v5-modelcard__aliases">
-                <template v-if="aliasesFor(modelId).length">
-                  <n-tooltip
-                    v-for="a in aliasesFor(modelId)"
-                    :key="a.id"
-                    placement="top"
-                  >
+          <div v-if="filteredExposed.length" class="v5-cardgrid">
+            <div
+              v-for="modelId in filteredExposed"
+              :key="`exposed-${modelId}`"
+              class="v5-modelcard v5-modelcard--exposed"
+              :class="{ 'v5-modelcard--dragging': dragIdx === exposedModels.indexOf(modelId) }"
+              draggable="true"
+              @dragstart="onExposedDragStart(exposedModels.indexOf(modelId))"
+              @dragover.prevent
+              @drop="onExposedDrop(exposedModels.indexOf(modelId))"
+            >
+              <div class="v5-modelcard__row">
+                <code class="v5-modelcard__name">{{ modelId }}</code>
+              </div>
+              <div class="v5-modelcard__row" style="margin-top: 6px; align-items: center; gap: 6px">
+                <span :class="tierChipClass(tierForModel(modelId))" style="flex-shrink: 0; font-size: 10px">
+                  {{ tierLabel(tierForModel(modelId)) }}
+                </span>
+                <span v-if="isFreeModel(modelId)" class="v3-chip v3-chip--info" style="flex-shrink: 0; font-size: 10px">
+                  {{ t("v3.free") || "free" }}
+                </span>
+                <div class="v5-modelcard__spacer" style="flex: 1"></div>
+                <div class="v5-modelcard__aliases">
+                  <n-tooltip v-for="a in aliasesFor(modelId)" :key="a.id" placement="top">
                     <template #trigger>
-                      <button
-                        class="v5-modelcard__alias"
-                        style="font-size: 10.5px; padding: 2px 6px"
-                        @click.stop="goToAliases(a.alias)"
-                      >
+                      <button class="v5-modelcard__alias" style="font-size: 10.5px; padding: 2px 6px" @click.stop="goToAliases(a.alias)">
                         <span>{{ a.alias }}</span>
                       </button>
                     </template>
                     {{ t("v5.mcAliasTip", { weight: a.weight, priority: a.priority }) }}
                   </n-tooltip>
-                </template>
-                <n-tooltip>
-                  <template #trigger>
-                    <button
-                      class="v5-modelcard__alias-add"
-                      style="font-size: 10.5px; padding: 2px 8px; min-height: 22px"
-                      @click.stop="addAliasFor(modelId)"
-                    >
-                      @别名
-                    </button>
-                  </template>
-                  {{ t("v5.mcAddAliasTip") }}
-                </n-tooltip>
+                  <button class="v5-modelcard__alias-add" style="font-size: 10.5px; padding: 2px 8px; min-height: 22px" @click.stop="addAliasFor(modelId)">
+                    @{{ t("v3.alias") || "别名" }}
+                  </button>
+                  <button class="v3-btn v3-btn--sm v3-btn--icon" style="min-height: 22px" :title="t('v3.removeFromExposed') || 'Remove from exposed'" @click.stop="removeFromExposed(modelId)">
+                    <n-icon :component="CloseOutline" :size="12" />
+                  </button>
+                </div>
               </div>
             </div>
           </div>
-        </div>
+          <div v-else class="v5-empty-mini">
+            <span v-if="exposedModels.length === 0">{{ t("v3.noExposedModels") || "暂无已暴露模型,从下方加入" }}</span>
+            <span v-else>{{ t("v3.noModelsMatching") || "No models match your current filters." }}</span>
+          </div>
 
-        <div v-else class="v5-empty">
-          <div class="v5-empty__icon">
-            <n-icon :component="CubeOutline" :size="22" />
+          <div class="v5-section-head" style="margin-top: 16px">
+            <span class="v5-section-head__title">{{ t("v3.upstreamAll") || "上游全部" }}</span>
+            <span class="v3-chip" style="font-size: 10px">{{ filteredAvailable.length }} / {{ groupModels.length }}</span>
           </div>
-          <div class="v5-empty__title">{{ t("v5.noModelsTitle") }}</div>
-          <div class="v5-empty__sub">
-            <template v-if="modelSearch || modelFilterFree">
-              {{ t("v3.noModelsMatching") || "No models match your current filters." }}
-            </template>
-            <template v-else>
-              {{ t("v5.noModelsSub") }}
-            </template>
+
+          <div v-if="filteredAvailable.length" class="v5-cardgrid">
+            <div
+              v-for="modelId in filteredAvailable"
+              :key="`avail-${modelId}`"
+              class="v5-modelcard"
+              :class="{ 'v5-modelcard--inexposed': exposedSet.has(modelId) }"
+            >
+              <div class="v5-modelcard__row">
+                <code class="v5-modelcard__name">{{ modelId }}</code>
+              </div>
+              <div class="v5-modelcard__row" style="margin-top: 6px; align-items: center; gap: 6px">
+                <span :class="tierChipClass(tierForModel(modelId))" style="flex-shrink: 0; font-size: 10px">
+                  {{ tierLabel(tierForModel(modelId)) }}
+                </span>
+                <span v-if="isFreeModel(modelId)" class="v3-chip v3-chip--info" style="flex-shrink: 0; font-size: 10px">
+                  {{ t("v3.free") || "free" }}
+                </span>
+                <div class="v5-modelcard__spacer" style="flex: 1"></div>
+                <button v-if="exposedSet.has(modelId)" class="v3-btn v3-btn--sm" disabled style="font-size: 10.5px; padding: 2px 8px; min-height: 22px">
+                  ✓ {{ t("v3.alreadyExposed") || "已加入" }}
+                </button>
+                <button v-else class="v3-btn v3-btn--sm v3-btn--accent" style="font-size: 10.5px; padding: 2px 8px; min-height: 22px" @click.stop="addToExposed(modelId)">
+                  + {{ t("v3.addToExposed") || "加入" }}
+                </button>
+              </div>
+            </div>
           </div>
-          <button v-if="!group.is_system && !modelSearch && !modelFilterFree" class="v3-btn" style="margin-top: 8px" @click="showEditGroup = true">
-            <n-icon :component="PencilOutline" :size="12" />
-            {{ t("v5.openGroupSettings") }}
-          </button>
-          <button v-if="modelSearch || modelFilterFree" class="v3-btn" style="margin-top: 8px" @click="() => { modelSearch = ''; modelFilterFree = false; }">
-            {{ t("v3.clearFilters") || "Clear filters" }}
-          </button>
-        </div>
+          <div v-else class="v5-empty-mini">
+            <span>{{ groupModels.length === 0 ? (t("v3.upstreamEmpty") || "上游模型列表为空,请先刷新") : (t("v3.noModelsMatching") || "No models match.") }}</span>
+          </div>
+        </template>
+
+        <!-- =================================== -->
+        <!-- PASSTHROUGH MODE / AGGREGATE: 单列表 -->
+        <!-- =================================== -->
+        <template v-else>
+          <div v-if="filteredAvailable.length" class="v5-cardgrid">
+            <div v-for="modelId in filteredAvailable" :key="modelId" class="v5-modelcard">
+              <div class="v5-modelcard__row">
+                <code class="v5-modelcard__name">{{ modelId }}</code>
+              </div>
+              <div class="v5-modelcard__row" style="margin-top: 6px; align-items: center; gap: 6px">
+                <span :class="tierChipClass(tierForModel(modelId))" style="flex-shrink: 0; font-size: 10px">
+                  {{ tierLabel(tierForModel(modelId)) }}
+                </span>
+                <span v-if="isFreeModel(modelId)" class="v3-chip v3-chip--info" style="flex-shrink: 0; font-size: 10px">
+                  {{ t("v3.free") || "free" }}
+                </span>
+                <div class="v5-modelcard__spacer" style="flex: 1"></div>
+                <div class="v5-modelcard__aliases">
+                  <n-tooltip v-for="a in aliasesFor(modelId)" :key="a.id" placement="top">
+                    <template #trigger>
+                      <button class="v5-modelcard__alias" style="font-size: 10.5px; padding: 2px 6px" @click.stop="goToAliases(a.alias)">
+                        <span>{{ a.alias }}</span>
+                      </button>
+                    </template>
+                    {{ t("v5.mcAliasTip", { weight: a.weight, priority: a.priority }) }}
+                  </n-tooltip>
+                  <button class="v5-modelcard__alias-add" style="font-size: 10.5px; padding: 2px 8px; min-height: 22px" @click.stop="addAliasFor(modelId)">
+                    @{{ t("v3.alias") || "别名" }}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div v-else class="v5-empty">
+            <div class="v5-empty__icon"><n-icon :component="CubeOutline" :size="22" /></div>
+            <div class="v5-empty__title">{{ t("v5.noModelsTitle") }}</div>
+            <div class="v5-empty__sub">
+              <template v-if="modelSearch || availFilter !== 'all'">
+                {{ t("v3.noModelsMatching") || "No models match your current filters." }}
+              </template>
+              <template v-else>{{ t("v5.noModelsSub") }}</template>
+            </div>
+            <button v-if="!group.is_system && !modelSearch && availFilter === 'all'" class="v3-btn" style="margin-top: 8px" @click="showEditGroup = true">
+              <n-icon :component="PencilOutline" :size="12" />
+              {{ t("v5.openGroupSettings") }}
+            </button>
+            <button v-if="modelSearch || availFilter !== 'all'" class="v3-btn" style="margin-top: 8px" @click="() => { modelSearch = ''; availFilter = 'all'; }">
+              {{ t("v3.clearFilters") || "Clear filters" }}
+            </button>
+          </div>
+        </template>
       </div>
 
       <!-- ===== SETTINGS TAB ===== -->
