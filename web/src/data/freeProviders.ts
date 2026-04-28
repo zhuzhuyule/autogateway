@@ -472,12 +472,21 @@ export const FREE_PROVIDERS: FreeProvider[] = [
     channelType: "openai",
     baseUrl: "https://ai.gitee.com/v1",
     testModel: "internlm3-8b-instruct",
+    // 取自 https://ai.gitee.com/api/pay/{user}/services?type=serverless 实际枚举
+    // 过滤条件: operation_summary.min_price === 0 && tags 含 'text-generation'
+    // 仅含 text-generation 类(chat/completions),非 embedding/asr/tts 等专用类
     models: [
       "internlm3-8b-instruct",
       "Qwen3-8B",
       "Qwen3-4B",
+      "Qwen3-0.6B",
+      "Qwen2-7B-Instruct",
       "DeepSeek-R1-Distill-Qwen-14B",
+      "DeepSeek-R1-Distill-Qwen-7B",
+      "DeepSeek-R1-Distill-Qwen-1.5B",
       "GLM-4.7-Flash",
+      "GLM-4-9B-0414",
+      "glm-4-9b-chat",
     ],
     paidModels: [
       "DeepSeek-V4-Flash",
@@ -833,17 +842,33 @@ export const FREE_MODELS: FreeModel[] = [
   { providerId: "xfyun", modelId: "xop3qwen8b", tier: "balanced" },
   { providerId: "xfyun", modelId: "xdeepseekr1", tier: "max", notes: "推理增强" },
 
-  // Gitee AI (永久免费小模型)
-  { providerId: "gitee-ai", modelId: "internlm3-8b-instruct", tier: "fast", notes: "永久免费" },
+  // Gitee AI (永久免费 text-generation,源自 /api/pay/.../services?type=serverless)
+  { providerId: "gitee-ai", modelId: "internlm3-8b-instruct", tier: "fast", notes: "InternLM3-8B · 永久免费" },
   { providerId: "gitee-ai", modelId: "Qwen3-8B", tier: "fast", notes: "永久免费" },
   { providerId: "gitee-ai", modelId: "Qwen3-4B", tier: "fast", notes: "永久免费" },
+  { providerId: "gitee-ai", modelId: "Qwen3-0.6B", tier: "fast", notes: "极速小模型" },
+  { providerId: "gitee-ai", modelId: "Qwen2-7B-Instruct", tier: "fast", notes: "永久免费" },
   {
     providerId: "gitee-ai",
     modelId: "DeepSeek-R1-Distill-Qwen-14B",
     tier: "balanced",
     notes: "推理蒸馏 · 永久免费",
   },
+  {
+    providerId: "gitee-ai",
+    modelId: "DeepSeek-R1-Distill-Qwen-7B",
+    tier: "fast",
+    notes: "推理蒸馏 7B",
+  },
+  {
+    providerId: "gitee-ai",
+    modelId: "DeepSeek-R1-Distill-Qwen-1.5B",
+    tier: "fast",
+    notes: "推理蒸馏 1.5B 极速",
+  },
   { providerId: "gitee-ai", modelId: "GLM-4.7-Flash", tier: "fast", notes: "30B SOTA · 免费" },
+  { providerId: "gitee-ai", modelId: "GLM-4-9B-0414", tier: "fast", notes: "智谱 9B" },
+  { providerId: "gitee-ai", modelId: "glm-4-9b-chat", tier: "fast", notes: "智谱 9B chat" },
 
   // AIHubMix
   { providerId: "aihubmix", modelId: "gpt-4o-mini", tier: "fast" },
