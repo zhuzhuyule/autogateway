@@ -45,6 +45,13 @@ export interface FreeProvider {
   context?: string;
   /** 其他亮点,短标签数组,e.g. ["多模态","推理增强"] */
   highlights?: string[];
+  /**
+   * 从上游 /models 返回的单条模型 meta 判断是否免费;
+   * - true  = 明确免费
+   * - false = 明确付费
+   * - null  = 无判断依据,交给后续 tier
+   */
+  freeFromMeta?: (modelMeta: unknown) => boolean | null;
   verifiedAt: string;
 }
 
@@ -123,6 +130,26 @@ export const FREE_PROVIDERS: FreeProvider[] = [
     badge: "multi-model",
     rpm: "20 RPM",
     rpd: "50/day",
+    freeFromMeta: meta => {
+      if (typeof meta !== "object" || meta === null) {
+        return null;
+      }
+      const m = meta as Record<string, unknown>;
+      // OpenRouter /models 暴露 pricing 字段,字符串型小数,e.g. "0" "0.000005"
+      const pricing = m.pricing as Record<string, unknown> | undefined;
+      if (pricing && typeof pricing === "object") {
+        const prompt = parseFloat(String(pricing.prompt ?? "NaN"));
+        const completion = parseFloat(String(pricing.completion ?? "NaN"));
+        if (Number.isFinite(prompt) && Number.isFinite(completion)) {
+          return prompt === 0 && completion === 0;
+        }
+      }
+      // 兜底:id 以 :free 结尾
+      if (typeof m.id === "string" && m.id.endsWith(":free")) {
+        return true;
+      }
+      return null;
+    },
     verifiedAt: "2026-04",
   },
   {
@@ -839,4 +866,72 @@ export function findFreeModel(modelId: string): FreeModel | undefined {
     return undefined;
   }
   return freeModelMap.get(modelId) || freeModelMap.get(modelId.toLowerCase());
+}
+
+/**
+ * 三层免费检测,统一入口:
+ *
+ * 1. provider 自己的 freeFromMeta adapter (有 upstream meta 时, 最高置信度)
+ * 2. 静态 FREE_MODELS map (provider-aware; 无 providerId 时全局回退)
+ * 3. modelId 启发式 (`:free` 后缀等, 跨 provider 通用)
+ *
+ * 返回值:
+ * - true  = 明确免费
+ * - false = 明确付费 (仅 tier 1 adapter 能给出)
+ * - null  = 未知 (不要当作付费!)
+ */
+export function isFree(
+  providerId: string | undefined,
+  modelId: string,
+  upstreamMeta?: unknown
+): boolean | null {
+  if (!modelId) {
+    return null;
+  }
+
+  // Tier 1: provider adapter
+  if (providerId && upstreamMeta != null) {
+    const provider = FREE_PROVIDERS.find(p => p.id === providerId);
+    if (provider?.freeFromMeta) {
+      const r = provider.freeFromMeta(upstreamMeta);
+      if (r !== null) {
+        return r;
+      }
+    }
+  }
+
+  // Tier 2: 静态 FREE_MODELS map
+  if (providerId) {
+    const exact = FREE_MODELS.find(
+      m => m.providerId === providerId && m.modelId === modelId
+    );
+    if (exact) {
+      return true;
+    }
+    const ci = FREE_MODELS.find(
+      m =>
+        m.providerId === providerId && m.modelId.toLowerCase() === modelId.toLowerCase()
+    );
+    if (ci) {
+      return true;
+    }
+  } else {
+    // 无 providerId:全局回退
+    if (freeModelMap.has(modelId) || freeModelMap.has(modelId.toLowerCase())) {
+      return true;
+    }
+  }
+
+  // Tier 3: 启发式 (跨 provider 通用)
+  const lower = modelId.toLowerCase();
+  // OpenRouter / 部分 router 用 :free 标识
+  if (lower.endsWith(":free")) {
+    return true;
+  }
+  // 名字里独立的 free 段(如 "llama-3-free", "model_free_v1") — 排除 freeway / freeform
+  if (/(^|[/_-])free([/_-]|$)/.test(lower)) {
+    return true;
+  }
+
+  return null;
 }

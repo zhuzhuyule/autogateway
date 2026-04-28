@@ -7,7 +7,7 @@ import GroupCopyModal from "@/components/keys/GroupCopyModal.vue";
 import GroupFormModal from "@/components/keys/GroupFormModal.vue";
 import ModelAliasModal from "@/components/keys/ModelAliasModal.vue";
 import V3SubGroupTable from "@/components/v3/V3SubGroupTable.vue";
-import { findProviderByUpstreams, findFreeModel } from "@/data/freeProviders";
+import { findProviderByUpstreams, isFree } from "@/data/freeProviders";
 import type { APIKey, Group, GroupStatsResponse, KeyStatus, SubGroupInfo } from "@/types/models";
 import { appState, triggerSyncOperationRefresh } from "@/utils/app-state";
 import { copy as copyToClipboard } from "@/utils/clipboard";
@@ -497,10 +497,55 @@ function tierLabel(tier: "fast" | "balanced" | "max"): string {
 }
 
 function isFreeModel(modelId: string): boolean {
-  return !!findFreeModel(modelId);
+  return isFree(matchedProvider.value?.id, modelId) === true;
 }
 
 const modelCount = computed(() => groupModels.value.length);
+
+// === Filters & Persistence ===
+const modelSearch = ref("");
+const modelFilterFree = ref(false);
+
+// Load persisted filters when group changes
+watch(
+  () => props.group?.id,
+  (newId) => {
+    if (!newId) return;
+    const saved = localStorage.getItem(`group_models_filter_${newId}`);
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        modelSearch.value = parsed.search || "";
+        modelFilterFree.value = !!parsed.freeOnly;
+      } catch { /* ignore */ }
+    } else {
+      modelSearch.value = "";
+      modelFilterFree.value = false;
+    }
+  },
+  { immediate: true }
+);
+
+// Save filters on change
+watch([modelSearch, modelFilterFree], () => {
+  if (!props.group?.id) return;
+  localStorage.setItem(`group_models_filter_${props.group.id}`, JSON.stringify({
+    search: modelSearch.value,
+    freeOnly: modelFilterFree.value
+  }));
+});
+
+const filteredModels = computed(() => {
+  let list = groupModels.value;
+  const q = modelSearch.value.toLowerCase().trim();
+  if (q) {
+    list = list.filter(m => m.toLowerCase().includes(q));
+  }
+  if (modelFilterFree.value) {
+    list = list.filter(m => isFreeModel(m));
+  }
+  return list;
+});
 
 // inline notes editing
 const editingNoteId = ref<number | null>(null);
@@ -1248,54 +1293,72 @@ const filterCounts = computed(() => ({
               · {{ t("v5.refreshedAt") }} {{ modelsRefreshedAtDisplay }}
             </span>
           </div>
+          <div class="v5-toolbar__spacer" style="gap: 16px">
+            <div class="v5-search" style="width: 240px">
+              <n-icon :component="SearchOutline" :size="12" />
+              <input
+                v-model="modelSearch"
+                :placeholder="t('v3.filterModels') || 'Filter models…'"
+              />
+            </div>
+            <div style="display: flex; align-items: center; gap: 8px">
+              <span style="font-size: 11px; color: var(--v3-ink-3)">{{ t("v3.freeOnly") || "Free only" }}</span>
+              <n-switch v-model:value="modelFilterFree" size="small" />
+            </div>
+          </div>
         </div>
 
-        <div v-if="groupModels.length" class="v5-cardgrid">
-          <div v-for="modelId in groupModels" :key="modelId" class="v5-modelcard">
-            <div class="v5-modelcard__top">
+        <div v-if="filteredModels.length" class="v5-cardgrid">
+          <div v-for="modelId in filteredModels" :key="modelId" class="v5-modelcard">
+            <!-- Row 1: Name -->
+            <div class="v5-modelcard__row">
               <code class="v5-modelcard__name">{{ modelId }}</code>
-              <span :class="tierChipClass(tierForModel(modelId))" style="flex-shrink: 0">
-                {{ tierLabel(tierForModel(modelId)) }}
-              </span>
-              <span
-                v-if="isFreeModel(modelId)"
-                class="v3-chip v3-chip--info"
-                style="flex-shrink: 0"
-              >
-                {{ t("v3.free") || "free" }}
-              </span>
             </div>
 
-            <!-- Aliases inline (clickable chip → jump to Aliases page) -->
-            <div class="v5-modelcard__aliases">
-              <template v-if="aliasesFor(modelId).length">
-                <n-tooltip v-for="a in aliasesFor(modelId)" :key="a.id" placement="top">
+            <!-- Row 2: Tags + Actions -->
+            <div class="v5-modelcard__row" style="margin-top: 6px; align-items: center; gap: 6px">
+              <span :class="tierChipClass(tierForModel(modelId))" style="flex-shrink: 0; font-size: 10px">
+                {{ tierLabel(tierForModel(modelId)) }}
+              </span>
+              <span v-if="isFreeModel(modelId)" class="v3-chip v3-chip--info" style="flex-shrink: 0; font-size: 10px">
+                {{ t("v3.free") || "free" }}
+              </span>
+
+              <div class="v5-modelcard__spacer" style="flex: 1"></div>
+
+              <!-- Aliases inline -->
+              <div class="v5-modelcard__aliases">
+                <template v-if="aliasesFor(modelId).length">
+                  <n-tooltip
+                    v-for="a in aliasesFor(modelId)"
+                    :key="a.id"
+                    placement="top"
+                  >
+                    <template #trigger>
+                      <button
+                        class="v5-modelcard__alias"
+                        style="font-size: 10.5px; padding: 2px 6px"
+                        @click.stop="goToAliases(a.alias)"
+                      >
+                        <span>{{ a.alias }}</span>
+                      </button>
+                    </template>
+                    {{ t("v5.mcAliasTip", { weight: a.weight, priority: a.priority }) }}
+                  </n-tooltip>
+                </template>
+                <n-tooltip>
                   <template #trigger>
-                    <button class="v5-modelcard__alias" @click.stop="goToAliases(a.alias)">
-                      <span>{{ a.alias }}</span>
-                      <small>w{{ a.weight }}</small>
+                    <button
+                      class="v5-modelcard__alias-add"
+                      style="font-size: 10.5px; padding: 2px 8px; min-height: 22px"
+                      @click.stop="addAliasFor(modelId)"
+                    >
+                      @别名
                     </button>
                   </template>
-                  {{ t("v5.mcAliasTip", { weight: a.weight, priority: a.priority }) }}
+                  {{ t("v5.mcAddAliasTip") }}
                 </n-tooltip>
-              </template>
-              <n-tooltip>
-                <template #trigger>
-                  <button
-                    :class="[
-                      'v5-modelcard__alias-add',
-                      aliasesFor(modelId).length === 0 ? 'v5-modelcard__alias-add--block' : '',
-                    ]"
-                    @click.stop="addAliasFor(modelId)"
-                  >
-                    <n-icon :component="AddOutline" :size="11" />
-                    <span v-if="aliasesFor(modelId).length === 0">
-                      {{ t("v5.mcAddAlias") }}
-                    </span>
-                  </button>
-                </template>
-                {{ t("v5.mcAddAliasTip") }}
-              </n-tooltip>
+              </div>
             </div>
           </div>
         </div>
@@ -1305,15 +1368,20 @@ const filterCounts = computed(() => ({
             <n-icon :component="CubeOutline" :size="22" />
           </div>
           <div class="v5-empty__title">{{ t("v5.noModelsTitle") }}</div>
-          <div class="v5-empty__sub">{{ t("v5.noModelsSub") }}</div>
-          <button
-            v-if="!group.is_system"
-            class="v3-btn"
-            style="margin-top: 8px"
-            @click="showEditGroup = true"
-          >
+          <div class="v5-empty__sub">
+            <template v-if="modelSearch || modelFilterFree">
+              {{ t("v3.noModelsMatching") || "No models match your current filters." }}
+            </template>
+            <template v-else>
+              {{ t("v5.noModelsSub") }}
+            </template>
+          </div>
+          <button v-if="!group.is_system && !modelSearch && !modelFilterFree" class="v3-btn" style="margin-top: 8px" @click="showEditGroup = true">
             <n-icon :component="PencilOutline" :size="12" />
             {{ t("v5.openGroupSettings") }}
+          </button>
+          <button v-if="modelSearch || modelFilterFree" class="v3-btn" style="margin-top: 8px" @click="() => { modelSearch = ''; modelFilterFree = false; }">
+            {{ t("v3.clearFilters") || "Clear filters" }}
           </button>
         </div>
       </div>

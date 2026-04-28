@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { findFreeModel, FREE_PROVIDERS, type ModelTier } from "@/data/freeProviders";
+import { findFreeModel, isFree, FREE_PROVIDERS, type ModelTier } from "@/data/freeProviders";
 import { RefreshOutline, SearchOutline } from "@vicons/ionicons5";
 import { NIcon, NSpin, useMessage } from "naive-ui";
 import { computed, onMounted, ref } from "vue";
@@ -105,10 +105,12 @@ const authHeader = computed(() => {
 
 const augmented = computed<AugmentedItem[]>(() =>
   catalogData.value.map(row => {
+    // 静态 FREE_MODELS 命中可拿到 tier/providerId; 启发式只能给布尔
     const free = findFreeModel(row.id);
+    const heuristic = free ? true : isFree(undefined, row.id) === true;
     return {
       ...row,
-      isFree: !!free,
+      isFree: heuristic,
       tier: free?.tier,
       freeProviderId: free?.providerId,
       hasVision: inferVision(row.id),
@@ -129,18 +131,21 @@ const filtered = computed<AugmentedItem[]>(() => {
       ) {
         return false;
       }
-      if (freeOnly.value && !row.isFree) return false;
-      if (tierFilter.value !== "all" && row.tier !== tierFilter.value) return false;
-      if (
-        providerFilter.value !== "all" &&
-        row.freeProviderId !== providerFilter.value
-      ) {
+      if (freeOnly.value && !row.isFree) {
+        return false;
+      }
+      if (tierFilter.value !== "all" && row.tier !== tierFilter.value) {
+        return false;
+      }
+      if (providerFilter.value !== "all" && row.freeProviderId !== providerFilter.value) {
         return false;
       }
       return true;
     })
     .sort((a, b) => {
-      if (a.isFree !== b.isFree) return a.isFree ? -1 : 1;
+      if (a.isFree !== b.isFree) {
+        return a.isFree ? -1 : 1;
+      }
       return a.id.localeCompare(b.id);
     });
 });
@@ -155,14 +160,22 @@ const tierPills: Array<{ k: ModelTier | "all"; label: string }> = [
 ];
 
 function tierChipClass(tier?: ModelTier): string {
-  if (tier === "fast") return "v3-chip v3-chip--ok";
-  if (tier === "balanced") return "v3-chip v3-chip--warn";
-  if (tier === "max") return "v3-chip v3-chip--danger";
+  if (tier === "fast") {
+    return "v3-chip v3-chip--ok";
+  }
+  if (tier === "balanced") {
+    return "v3-chip v3-chip--warn";
+  }
+  if (tier === "max") {
+    return "v3-chip v3-chip--danger";
+  }
   return "v3-chip";
 }
 
 function providerShort(id?: string): string {
-  if (!id) return "—";
+  if (!id) {
+    return "—";
+  }
   const p = FREE_PROVIDERS.find(x => x.id === id);
   if (p) {
     return p.name
@@ -174,12 +187,16 @@ function providerShort(id?: string): string {
 }
 
 function providerName(id?: string): string {
-  if (!id) return "—";
+  if (!id) {
+    return "—";
+  }
   return FREE_PROVIDERS.find(x => x.id === id)?.name || id;
 }
 
 function pavClassFor(providerId?: string): string {
-  if (!providerId) return "v3-pav v3-pav-default";
+  if (!providerId) {
+    return "v3-pav v3-pav-default";
+  }
   const known = [
     "groq",
     "cerebras",
@@ -192,10 +209,18 @@ function pavClassFor(providerId?: string): string {
     "github",
     "anthropic",
   ];
-  if (known.includes(providerId)) return `v3-pav v3-pav-${providerId}`;
-  if (providerId.includes("google")) return "v3-pav v3-pav-google";
-  if (providerId.includes("github")) return "v3-pav v3-pav-github";
-  if (providerId.includes("hugging")) return "v3-pav v3-pav-cohere";
+  if (known.includes(providerId)) {
+    return `v3-pav v3-pav-${providerId}`;
+  }
+  if (providerId.includes("google")) {
+    return "v3-pav v3-pav-google";
+  }
+  if (providerId.includes("github")) {
+    return "v3-pav v3-pav-github";
+  }
+  if (providerId.includes("hugging")) {
+    return "v3-pav v3-pav-cohere";
+  }
   return "v3-pav v3-pav-default";
 }
 
@@ -208,7 +233,9 @@ async function fetchCatalog() {
     const response = await fetch("/api/models", {
       headers: { Authorization: authHeader.value },
     });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
     const result = await response.json();
     catalogData.value = result.data || [];
   } catch (e) {
@@ -246,15 +273,7 @@ async function fetchCatalog() {
     </h1>
 
     <!-- Filter pills -->
-    <div
-      style="
-        display: flex;
-        flex-wrap: wrap;
-        gap: 6px;
-        margin: -4px 0 12px;
-        align-items: center;
-      "
-    >
+    <div style="display: flex; flex-wrap: wrap; gap: 6px; margin: -4px 0 12px; align-items: center">
       <span
         v-for="p in tierPills"
         :key="p.k"
@@ -265,11 +284,7 @@ async function fetchCatalog() {
         {{ p.label }}
       </span>
       <span style="color: var(--v3-line); margin: 0 4px">|</span>
-      <span
-        class="v3-pill"
-        :class="{ 'v3-pill--active': freeOnly }"
-        @click="freeOnly = !freeOnly"
-      >
+      <span class="v3-pill" :class="{ 'v3-pill--active': freeOnly }" @click="freeOnly = !freeOnly">
         🆓 {{ t("modelcatalog.freeOnly") || "Free only" }}
       </span>
       <span style="color: var(--v3-line); margin: 0 4px">|</span>
@@ -294,11 +309,7 @@ async function fetchCatalog() {
     <div
       v-if="fetchError"
       class="v3-empty-hint"
-      style="
-        background: var(--v3-danger-soft);
-        color: var(--v3-danger);
-        margin-bottom: 12px;
-      "
+      style="background: var(--v3-danger-soft); color: var(--v3-danger); margin-bottom: 12px"
     >
       {{ t("modelcatalog.loadFailed") || "Failed to load model catalog" }}
     </div>
@@ -306,7 +317,7 @@ async function fetchCatalog() {
     <n-spin :show="loading">
       <div class="v3-card">
         <div class="v3-model-row v3-model-row--head">
-          <div></div>
+          <div />
           <div>{{ t("modelcatalog.modelId") || "Model" }}</div>
           <div>{{ t("modelcatalog.ownedBy") || "Owned by" }}</div>
           <div>{{ t("modelcatalog.groups") || "Groups" }}</div>
@@ -314,7 +325,11 @@ async function fetchCatalog() {
             {{ t("modelcatalog.tier") || "Tier" }}
           </div>
         </div>
-        <div v-for="row in filtered" :key="`${row.id}-${row.freeProviderId || ''}`" class="v3-model-row">
+        <div
+          v-for="row in filtered"
+          :key="`${row.id}-${row.freeProviderId || ''}`"
+          class="v3-model-row"
+        >
           <div>
             <span
               :class="pavClassFor(row.freeProviderId)"
@@ -326,18 +341,10 @@ async function fetchCatalog() {
           <div>
             <div class="v3-model-row__name">{{ row.id }}</div>
             <div
-              style="
-                display: flex;
-                gap: 6px;
-                margin-top: 5px;
-                align-items: center;
-                flex-wrap: wrap;
-              "
+              style="display: flex; gap: 6px; margin-top: 5px; align-items: center; flex-wrap: wrap"
             >
-              <span v-if="row.isFree" class="v3-chip v3-chip--ok"> 🆓 free </span>
-              <span v-if="row.contextHint" class="v3-chip">
-                ctx {{ row.contextHint }}
-              </span>
+              <span v-if="row.isFree" class="v3-chip v3-chip--ok">🆓 free</span>
+              <span v-if="row.contextHint" class="v3-chip">ctx {{ row.contextHint }}</span>
               <span v-if="row.hasTools" class="v3-chip">tools</span>
               <span v-if="row.hasVision" class="v3-chip v3-chip--info">vision</span>
               <span
@@ -348,23 +355,18 @@ async function fetchCatalog() {
               </span>
             </div>
           </div>
-          <div
-            style="
-              font: 500 12px var(--v3-sans);
-              color: var(--v3-ink-2);
-              word-break: break-all;
-            "
-          >
+          <div style="font: 500 12px var(--v3-sans); color: var(--v3-ink-2); word-break: break-all">
             {{ row.owned_by || "—" }}
           </div>
           <div style="display: flex; gap: 4px; flex-wrap: wrap">
-            <span
-              v-if="!row.groups || row.groups.length === 0"
-              class="v3-chip v3-chip--warn"
-            >
+            <span v-if="!row.groups || row.groups.length === 0" class="v3-chip v3-chip--warn">
               {{ t("modelcatalog.noGroups") || "no groups" }}
             </span>
-            <span v-for="g in (row.groups || []).slice(0, 4)" :key="g" class="v3-chip v3-chip--info">
+            <span
+              v-for="g in (row.groups || []).slice(0, 4)"
+              :key="g"
+              class="v3-chip v3-chip--info"
+            >
               {{ g }}
             </span>
             <span
@@ -381,12 +383,7 @@ async function fetchCatalog() {
         </div>
         <div
           v-if="!filtered.length && !loading"
-          style="
-            padding: 32px 16px;
-            text-align: center;
-            color: var(--v3-ink-3);
-            font-size: 12.5px;
-          "
+          style="padding: 32px 16px; text-align: center; color: var(--v3-ink-3); font-size: 12.5px"
         >
           {{ t("modelcatalog.noData") || "No models match your filter." }}
         </div>
