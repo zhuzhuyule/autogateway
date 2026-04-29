@@ -8,6 +8,8 @@ import { computed, reactive, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import AggregateGroupModal from "@/components/keys/AggregateGroupModal.vue";
 import V3NewGroupFlow from "@/components/v3/V3NewGroupFlow.vue";
+import ProviderLogo from "@/components/common/ProviderLogo.vue";
+import { hasProviderLogo } from "@/data/providerLogos";
 
 const { t } = useI18n();
 
@@ -148,6 +150,18 @@ function faviconFor(g: Group): string {
     return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(host)}&sz=64`;
   }
   return "";
+}
+
+// providerHint 把 group 解析成 ProviderLogo 能识别的字符串(system_role 优先,
+// 否则回退到 name + 第一个 upstream host)。
+function providerHint(g: Group): string {
+  return [
+    g.system_role || "",
+    g.name || "",
+    extractHost(g.upstreams?.[0]?.url) || "",
+  ]
+    .filter(Boolean)
+    .join(" ");
 }
 
 const faviconErr = reactive<Record<string, boolean>>({});
@@ -312,8 +326,13 @@ function onDragEnd() {
           @click="emit('select', g)"
         >
           <span class="v5-picon" style="width: 28px; height: 28px">
+            <ProviderLogo
+              v-if="hasProviderLogo(providerHint(g))"
+              :hint="providerHint(g)"
+              size="20"
+            />
             <img
-              v-if="faviconFor(g) && !isFaviconBroken(g)"
+              v-else-if="faviconFor(g) && !isFaviconBroken(g)"
               :src="faviconFor(g)"
               alt=""
               draggable="false"
@@ -362,8 +381,13 @@ function onDragEnd() {
         @dragend="onDragEnd"
       >
         <span class="v5-picon" style="width: 28px; height: 28px">
+          <ProviderLogo
+            v-if="hasProviderLogo(providerHint(g))"
+            :hint="providerHint(g)"
+            size="20"
+          />
           <img
-            v-if="faviconFor(g) && !isFaviconBroken(g)"
+            v-else-if="faviconFor(g) && !isFaviconBroken(g)"
             :src="faviconFor(g)"
             alt=""
             draggable="false"

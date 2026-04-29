@@ -4,7 +4,16 @@
   "version": "0.1.0",
   "description": "AutoGateway frontend — Smart AI API gateway with auto routing, free provider aggregation and unified entry. Built on Vue 3 + Naive UI.",
   "type": "module",
-  "keywords": ["autogateway", "ai-gateway", "llm-proxy", "auto-routing", "vue3", "typescript", "vite", "naive-ui"],
+  "keywords": [
+    "autogateway",
+    "ai-gateway",
+    "llm-proxy",
+    "auto-routing",
+    "vue3",
+    "typescript",
+    "vite",
+    "naive-ui"
+  ],
   "author": "AutoGateway contributors",
   "license": "MIT",
   "repository": {
@@ -31,10 +40,12 @@
     "check-all": "npm lint:check && npm format:check && npm type-check"
   },
   "dependencies": {
+    "@lobehub/icons-static-svg": "^1.88.0",
     "@vicons/ionicons5": "^0.13.0",
     "@vueuse/core": "^13.6.0",
     "axios": "^1.13.5",
     "naive-ui": "^2.41.0",
+    "simple-icons": "^16.18.0",
     "vue": "^3.5.13",
     "vue-i18n": "^9.14.5",
     "vue-router": "^4.5.1"
