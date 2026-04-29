@@ -1876,6 +1876,7 @@ const filterCounts = computed(() => ({
       v-model:show="showAliasModal"
       :group="group"
       :model-id="aliasModalModel"
+      :all-groups="allGroups"
       @success="onAliasCreated"
       @toggle-block="toggleBlock"
       @remove-exposed="removeFromExposed"

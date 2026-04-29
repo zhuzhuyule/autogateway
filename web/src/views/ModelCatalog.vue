@@ -1,5 +1,8 @@
 <script setup lang="ts">
 import { findFreeModel, isFree, FREE_PROVIDERS, type ModelTier } from "@/data/freeProviders";
+import { getFreeStatus, lookupRegistry } from "@/api/freemodels";
+import FreeBadge from "@/components/common/FreeBadge.vue";
+import SpeedBadge from "@/components/common/SpeedBadge.vue";
 import { RefreshOutline, SearchOutline } from "@vicons/ionicons5";
 import { NIcon, NSpin, useMessage } from "naive-ui";
 import { computed, onMounted, ref } from "vue";
@@ -17,23 +20,25 @@ interface ModelItem {
 
 interface AugmentedItem extends ModelItem {
   isFree: boolean;
+  freeVariant: "full" | "trial" | null;
   tier?: ModelTier;
   freeProviderId?: string;
   hasVision: boolean;
   hasTools: boolean;
+  isReasoning: boolean;
   contextHint: string | null;
+  /** registry 直读的 speed 档位 (fast/balanced/slow), 缺失时 null. */
+  speed: "fast" | "balanced" | "slow" | null;
 }
 
 /**
- * Heuristic capability flags inferred from the model id.
- * Backend `/api/models` does not expose these yet (see V3_STATUS.md P1-7);
- * we surface them client-side so the catalog row carries useful chips.
+ * Capability flags 优先取自 FreeModels Registry; registry miss 时降级关键字推断,
+ * 让 catalog 行的 chip 不至于全空。无客户端打分。
  */
-function inferVision(id: string): boolean {
+function fallbackVision(id: string): boolean {
   const lower = id.toLowerCase();
   return (
     lower.includes("vision") ||
-    lower.includes("flash") ||
     lower.includes("4o") ||
     lower.includes("gpt-5") ||
     lower.includes("claude-3") ||
@@ -45,48 +50,15 @@ function inferVision(id: string): boolean {
   );
 }
 
-function inferTools(id: string): boolean {
+function fallbackTools(id: string): boolean {
   const lower = id.toLowerCase();
   if (lower.includes("embedding") || lower.includes("whisper") || lower.includes("tts")) {
     return false;
   }
-  // most modern instruct/chat models support tools
   if (lower.includes("base") || lower.includes("raw")) {
     return false;
   }
   return true;
-}
-
-function inferContext(id: string): string | null {
-  const lower = id.toLowerCase();
-  if (lower.includes("2m") || lower.includes("2-million")) {
-    return "2m";
-  }
-  if (lower.includes("1m") || lower.includes("gemini") || lower.includes("flash")) {
-    return "1m";
-  }
-  if (lower.includes("200k") || lower.includes("claude")) {
-    return "200k";
-  }
-  if (lower.includes("164k") || lower.includes("deepseek")) {
-    return "164k";
-  }
-  if (lower.includes("131k") || lower.includes("llama-3")) {
-    return "131k";
-  }
-  if (lower.includes("128k") || lower.includes("4o") || lower.includes("command-r")) {
-    return "128k";
-  }
-  if (lower.includes("32k") || lower.includes("mistral-small") || lower.includes("codestral")) {
-    return "32k";
-  }
-  if (lower.includes("16k")) {
-    return "16k";
-  }
-  if (lower.includes("8k")) {
-    return "8k";
-  }
-  return null;
 }
 
 const loading = ref(false);
@@ -105,17 +77,48 @@ const authHeader = computed(() => {
 
 const augmented = computed<AugmentedItem[]>(() =>
   catalogData.value.map(row => {
-    // 静态 FREE_MODELS 命中可拿到 tier/providerId; 启发式只能给布尔
+    // Registry 单一可信源:能 hit 就直接用,字段都齐全(isFree / isMultimodal /
+    // hasToolUse / isReasoning / contextLabel / tier / speed)。
+    const reg = lookupRegistry(undefined, row.id);
+    const status = getFreeStatus(undefined, row.id);
+
+    // freeProviderId 仅用于 UI 上的 provider 头像/标签, 优先 registry 的 provider
     const free = findFreeModel(row.id);
-    const heuristic = free ? true : isFree(undefined, row.id) === true;
+    const providerId = reg?.provider || free?.providerId;
+
+    const isFreeFlag =
+      status === "full" || status === "trial"
+        ? true
+        : status === "paid"
+          ? false
+          : free
+            ? true
+            : isFree(undefined, row.id) === true;
+
+    const freeVariant: "full" | "trial" | null =
+      status === "trial" ? "trial" : status === "full" || isFreeFlag ? "full" : null;
+
+    // tier(老 fast/balanced/max 三档)— registry 的 speed 优先映射, 否则 free.tier
+    let tier: ModelTier | undefined = free?.tier;
+    if (reg?.speed === "fast") {
+      tier = "fast";
+    } else if (reg?.speed === "slow") {
+      tier = "max";
+    } else if (reg?.speed === "balanced") {
+      tier = "balanced";
+    }
+
     return {
       ...row,
-      isFree: heuristic,
-      tier: free?.tier,
-      freeProviderId: free?.providerId,
-      hasVision: inferVision(row.id),
-      hasTools: inferTools(row.id),
-      contextHint: inferContext(row.id),
+      isFree: isFreeFlag,
+      freeVariant,
+      tier,
+      freeProviderId: providerId,
+      hasVision: reg ? reg.isMultimodal : fallbackVision(row.id),
+      hasTools: reg ? reg.hasToolUse : fallbackTools(row.id),
+      isReasoning: reg ? reg.isReasoning : false,
+      contextHint: reg?.contextLabel || null,
+      speed: (reg?.speed as "fast" | "balanced" | "slow" | null) || null,
     };
   })
 );
@@ -285,7 +288,8 @@ async function fetchCatalog() {
       </span>
       <span style="color: var(--v3-line); margin: 0 4px">|</span>
       <span class="v3-pill" :class="{ 'v3-pill--active': freeOnly }" @click="freeOnly = !freeOnly">
-        🆓 {{ t("modelcatalog.freeOnly") || "Free only" }}
+        <FreeBadge compact :size="11" />
+        <span style="margin-left: 4px">{{ t("modelcatalog.freeOnly") || "Free only" }}</span>
       </span>
       <span style="color: var(--v3-line); margin: 0 4px">|</span>
       <span
@@ -343,10 +347,16 @@ async function fetchCatalog() {
             <div
               style="display: flex; gap: 6px; margin-top: 5px; align-items: center; flex-wrap: wrap"
             >
-              <span v-if="row.isFree" class="v3-chip v3-chip--ok">🆓 free</span>
+              <FreeBadge
+                v-if="row.freeVariant"
+                :variant="row.freeVariant"
+                :size="11"
+              />
+              <SpeedBadge v-if="row.speed" :speed="row.speed" :size="11" />
               <span v-if="row.contextHint" class="v3-chip">ctx {{ row.contextHint }}</span>
               <span v-if="row.hasTools" class="v3-chip">tools</span>
               <span v-if="row.hasVision" class="v3-chip v3-chip--info">vision</span>
+              <span v-if="row.isReasoning" class="v3-chip v3-chip--warn">reasoning</span>
               <span
                 v-if="row.freeProviderId"
                 style="font: 400 10.5px var(--v3-mono); color: var(--v3-ink-3)"

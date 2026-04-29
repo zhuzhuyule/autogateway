@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { aliasesApi, type ModelAliasRow } from "@/api/aliases";
+import { lookupRegistry } from "@/api/freemodels";
 import type { Group } from "@/types/models";
-import { BanOutline, CloseOutline, HelpCircleOutline } from "@vicons/ionicons5";
+import { BanOutline, CloseOutline, HelpCircleOutline, LinkOutline } from "@vicons/ionicons5";
 import {
   NButton,
   NCard,
@@ -20,6 +21,8 @@ interface Props {
   show: boolean;
   group: Group;
   modelId: string;
+  /** 用户的全部 groups, 用于把 registry 的跨 provider aliases 反查到实际的 groupId. */
+  allGroups?: Group[];
 }
 
 interface Emits {
@@ -29,7 +32,9 @@ interface Emits {
   (e: "remove-exposed", modelId: string): void;
 }
 
-const props = defineProps<Props>();
+const props = withDefaults(defineProps<Props>(), {
+  allGroups: () => [],
+});
 const emit = defineEmits<Emits>();
 
 const { t } = useI18n();
@@ -57,6 +62,99 @@ watch(
 
 function reset() {
   selectedAliases.value = [];
+  selectedCrossProvider.value = [];
+}
+
+// === FreeModels Registry 跨 provider 同名候选 ===========================
+// registry 的每条 model meta 都带 aliases: ["groq/llama-3.3-70b-versatile", ...]
+// 我们解析这些 string, 找到用户实际拥有的 group, 让用户一键把它们加入同一别名
+// 候选池, 实现"一个别名跨 provider 路由"。
+interface CrossProviderCandidate {
+  raw: string; // 原始 alias 串, e.g. "groq/llama-3.3-70b-versatile"
+  providerId: string; // "groq"
+  realModel: string; // "llama-3.3-70b-versatile"
+  groupId: number | null; // 用户实际的 group, null = 未配置该 provider
+  groupName: string;
+}
+
+function parseAliasRef(raw: string): { providerId: string; realModel: string } | null {
+  const idx = raw.indexOf("/");
+  if (idx <= 0 || idx === raw.length - 1) {
+    return null;
+  }
+  return { providerId: raw.slice(0, idx), realModel: raw.slice(idx + 1) };
+}
+
+function findGroupForProvider(providerId: string): Group | null {
+  if (!providerId || !props.allGroups.length) {
+    return null;
+  }
+  const lower = providerId.toLowerCase();
+  // 1. group.name 子串命中 (常见情况, e.g. "groq" group, "openrouter-free" group)
+  const byName = props.allGroups.find(
+    g => g.group_type !== "aggregate" && g.name.toLowerCase().includes(lower)
+  );
+  if (byName) {
+    return byName;
+  }
+  // 2. upstream host 命中
+  const byHost = props.allGroups.find(g => {
+    if (g.group_type === "aggregate") {
+      return false;
+    }
+    const upstreams = (g as unknown as { upstreams?: Array<{ url?: string }> }).upstreams || [];
+    return upstreams.some(u => (u.url || "").toLowerCase().includes(lower));
+  });
+  return byHost || null;
+}
+
+const crossProviderCandidates = computed<CrossProviderCandidate[]>(() => {
+  const meta = lookupRegistry(undefined, props.modelId);
+  if (!meta?.aliases?.length) {
+    return [];
+  }
+  const out: CrossProviderCandidate[] = [];
+  const seen = new Set<string>();
+  for (const raw of meta.aliases) {
+    const parsed = parseAliasRef(raw);
+    if (!parsed) {
+      continue;
+    }
+    // 排除当前 (group, model) 自身
+    const matchedGroup = findGroupForProvider(parsed.providerId);
+    if (matchedGroup?.id === props.group?.id && parsed.realModel === props.modelId) {
+      continue;
+    }
+    const dedupeKey = `${parsed.providerId}/${parsed.realModel}`;
+    if (seen.has(dedupeKey)) {
+      continue;
+    }
+    seen.add(dedupeKey);
+    out.push({
+      raw,
+      providerId: parsed.providerId,
+      realModel: parsed.realModel,
+      groupId: matchedGroup?.id ?? null,
+      groupName: matchedGroup?.display_name || matchedGroup?.name || parsed.providerId,
+    });
+  }
+  return out;
+});
+
+// 用户已勾选的跨 provider 候选 (raw 字符串作为 key)
+const selectedCrossProvider = ref<string[]>([]);
+
+function toggleCrossProvider(raw: string) {
+  const idx = selectedCrossProvider.value.indexOf(raw);
+  if (idx >= 0) {
+    selectedCrossProvider.value.splice(idx, 1);
+  } else {
+    selectedCrossProvider.value.push(raw);
+  }
+}
+
+function isCrossProviderSelected(raw: string): boolean {
+  return selectedCrossProvider.value.includes(raw);
 }
 
 async function loadAliases() {
@@ -192,20 +290,32 @@ async function handleSave() {
   loading.value = true;
   let ok = 0;
   let fail = 0;
+  // 主候选 + 跨 provider 候选 — 都作为同一组 alias 的候选池
+  const targets: Array<{ groupId: number; realModel: string }> = [
+    { groupId: props.group.id, realModel: props.modelId },
+  ];
+  for (const raw of selectedCrossProvider.value) {
+    const c = crossProviderCandidates.value.find(x => x.raw === raw);
+    if (c?.groupId) {
+      targets.push({ groupId: c.groupId, realModel: c.realModel });
+    }
+  }
   for (const alias of selectedAliases.value) {
-    try {
-      await aliasesApi.create({
-        alias,
-        group_id: props.group.id,
-        real_model: props.modelId,
-        weight: DEFAULT_WEIGHT,
-        priority: DEFAULT_PRIORITY,
-        enabled: DEFAULT_ENABLED,
-      });
-      ok += 1;
-    } catch (e) {
-      console.error(`create alias ${alias} failed`, e);
-      fail += 1;
+    for (const tgt of targets) {
+      try {
+        await aliasesApi.create({
+          alias,
+          group_id: tgt.groupId,
+          real_model: tgt.realModel,
+          weight: DEFAULT_WEIGHT,
+          priority: DEFAULT_PRIORITY,
+          enabled: DEFAULT_ENABLED,
+        });
+        ok += 1;
+      } catch (e) {
+        console.error(`create alias ${alias} for ${tgt.groupId}/${tgt.realModel} failed`, e);
+        fail += 1;
+      }
     }
   }
   loading.value = false;
@@ -383,6 +493,50 @@ async function handleSave() {
 
         <div class="v5-ma-field__hint">
           {{ t("v5.maAddHint") || "选已有别名 = 把当前模型加入候选池;输入新名回车 = 创建新别名" }}
+        </div>
+      </div>
+
+      <!-- 跨 provider 同名候选 (FreeModels Registry 的 aliases 字段) -->
+      <div v-if="crossProviderCandidates.length" class="v5-ma-divider" />
+      <div v-if="crossProviderCandidates.length" class="v5-ma-field">
+        <div class="v5-ma-field__lbl">
+          <n-icon :component="LinkOutline" :size="11" />
+          {{ t("v5.maCrossProviderTitle") || "跨 provider 同名候选" }}
+          <n-tooltip>
+            <template #trigger>
+              <span class="v5-helpicon"><n-icon :component="HelpCircleOutline" :size="11" /></span>
+            </template>
+            {{
+              t("v5.maCrossProviderTip") ||
+                "FreeModels 注册表显示这些 provider 也提供同名模型。勾选后,本次创建的别名会同时把它们加入候选池,实现跨 provider failover。"
+            }}
+          </n-tooltip>
+        </div>
+        <div class="v5-ma-chips">
+          <button
+            v-for="c in crossProviderCandidates"
+            :key="c.raw"
+            class="v5-ma-chip v5-ma-chip--cross"
+            :class="{
+              'v5-ma-chip--cross-selected': isCrossProviderSelected(c.raw),
+              'v5-ma-chip--cross-disabled': !c.groupId,
+            }"
+            :disabled="!c.groupId"
+            :title="
+              c.groupId
+                ? `${c.groupName} · ${c.realModel}`
+                : t('v5.maCrossProviderUnconfigured', { provider: c.providerId }) ||
+                  `用户未配置 ${c.providerId} group`
+            "
+            @click="c.groupId && toggleCrossProvider(c.raw)"
+          >
+            <span v-if="c.groupId" class="v5-ma-chip__plus">
+              {{ isCrossProviderSelected(c.raw) ? "✓" : "+" }}
+            </span>
+            <span class="v5-ma-chip__cross-prov">{{ c.providerId }}</span>
+            <span class="v5-ma-chip__cross-sep">·</span>
+            <span class="v5-ma-chip__label">{{ c.realModel }}</span>
+          </button>
         </div>
       </div>
 
@@ -597,5 +751,33 @@ async function handleSave() {
 }
 .v5-ma-chip--quickpick:hover .v5-ma-chip__plus {
   color: var(--v3-accent);
+}
+
+.v5-ma-chip--cross {
+  cursor: pointer;
+  background: transparent;
+  border-style: dashed;
+  color: var(--v3-ink-2);
+}
+.v5-ma-chip--cross:hover:not(.v5-ma-chip--cross-disabled) {
+  border-color: var(--v3-info);
+  background: var(--v3-info-soft);
+}
+.v5-ma-chip--cross-selected {
+  border-color: var(--v3-info);
+  background: var(--v3-info-soft);
+  color: var(--v3-info);
+}
+.v5-ma-chip--cross-disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+.v5-ma-chip__cross-prov {
+  font: 700 10px var(--v3-mono);
+  color: var(--v3-ink-3);
+  text-transform: uppercase;
+}
+.v5-ma-chip__cross-sep {
+  color: var(--v3-ink-4);
 }
 </style>
