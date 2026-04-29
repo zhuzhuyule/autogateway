@@ -430,31 +430,31 @@ onMounted(() => {
 const tiers = computed(() => {
   return [
     {
-      id: "auto-simple",
+      id: "simple",
       title: t("v3.fast") || "Simple",
       icon: FlashOutline,
       class: "v3-tier--simple",
-      models: grouped.value.find(g => g.alias === "auto-simple")?.members || [],
+      models: grouped.value.find(g => g.alias === "simple")?.members || [],
     },
     {
-      id: "auto-medium",
+      id: "medium",
       title: t("v3.balanced") || "Balanced",
       icon: PulseOutline,
       class: "v3-tier--medium",
-      models: grouped.value.find(g => g.alias === "auto-medium")?.members || [],
+      models: grouped.value.find(g => g.alias === "medium")?.members || [],
     },
     {
-      id: "auto-complex",
+      id: "complex",
       title: t("v3.max") || "Complex",
       icon: CubeOutline,
       class: "v3-tier--complex",
-      models: grouped.value.find(g => g.alias === "auto-complex")?.members || [],
+      models: grouped.value.find(g => g.alias === "complex")?.members || [],
     },
   ];
 });
 
 const customAliases = computed(() =>
-  grouped.value.filter(g => !["auto-simple", "auto-medium", "auto-complex"].includes(g.alias))
+  grouped.value.filter(g => !["simple", "medium", "complex"].includes(g.alias))
 );
 
 // === New alias creation ===

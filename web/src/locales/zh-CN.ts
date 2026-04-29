@@ -910,7 +910,7 @@ export default {
     },
     aliasesTitle: "模型别名",
     aliasesDesc:
-      "把一个易记的名字映射到多个 (group, model) 候选。路由器用 SWRR + 429 cooldown 轮询挑选。保留别名 auto-simple/medium/complex 用作 smart 路由的 tier 池。",
+      "把一个易记的名字映射到多个 (group, model) 候选。路由器用 SWRR + 429 cooldown 轮询挑选。保留别名 simple/medium/complex 是 smart 路由的 tier 池(由 model=\"auto\" 触发)。",
     aliasReserved: "保留",
     aliasReservedHint: "Smart 路由的 tier 池 — 名字锁定，成员可编辑。",
     aliasMembers: "个候选",

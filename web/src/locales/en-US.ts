@@ -934,7 +934,7 @@ export default {
     },
     aliasesTitle: "Model Aliases",
     aliasesDesc:
-      "Map a friendly name to one or more (group, model) candidates. The router picks via SWRR + 429 cooldown. Reserved aliases auto-simple/medium/complex back the smart 'auto' keyword.",
+      "Map a friendly name to one or more (group, model) candidates. The router picks via SWRR + 429 cooldown. Reserved aliases simple/medium/complex back the smart routing triggered by model=\"auto\".",
     aliasReserved: "reserved",
     aliasReservedHint: "Smart-routing tier pool — name is locked, members can be edited.",
     aliasMembers: "candidates",

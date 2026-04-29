@@ -42,7 +42,7 @@ export interface AliasSuggestion {
   last_seen: string;
 }
 
-export const RESERVED_ALIASES = ["auto-simple", "auto-medium", "auto-complex"] as const;
+export const RESERVED_ALIASES = ["simple", "medium", "complex"] as const;
 export type ReservedAlias = (typeof RESERVED_ALIASES)[number];
 
 export const aliasesApi = {

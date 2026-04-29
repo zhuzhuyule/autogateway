@@ -906,7 +906,7 @@ export default {
     },
     aliasesTitle: "モデル別名",
     aliasesDesc:
-      "わかりやすい名前を複数の (group, model) 候補にマッピング。ルーターは SWRR + 429 cooldown で選択。予約別名 auto-simple/medium/complex は 'auto' 用の tier プール。",
+      "わかりやすい名前を複数の (group, model) 候補にマッピング。ルーターは SWRR + 429 cooldown で選択。予約別名 simple/medium/complex は model=\"auto\" によるスマートルーティングの tier プール。",
     aliasReserved: "予約",
     aliasReservedHint: "Smart ルーティングの tier プール — 名前は固定、メンバーは編集可。",
     aliasMembers: "候補",

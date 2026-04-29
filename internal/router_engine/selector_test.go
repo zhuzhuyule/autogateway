@@ -70,11 +70,11 @@ func TestPickForAutoTierSelection(t *testing.T) {
 		tokens int
 		alias  string
 	}{
-		{500, "auto-simple"},
-		{2000, "auto-medium"},  // boundary: not < 2000 → medium
-		{5000, "auto-medium"},
-		{8000, "auto-complex"}, // boundary: >= 8000 → complex
-		{20000, "auto-complex"},
+		{500, "simple"},
+		{2000, "medium"},  // boundary: not < 2000 → medium
+		{5000, "medium"},
+		{8000, "complex"}, // boundary: >= 8000 → complex
+		{20000, "complex"},
 	}
 	for _, tc := range cases {
 		// We can't actually call PickForAuto without a DB; just verify

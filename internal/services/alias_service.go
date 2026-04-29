@@ -15,7 +15,21 @@ import (
 // routing path. They are seeded as placeholder rows (group_id=0) so the
 // frontend always shows them, and the alias CRUD service refuses to
 // rename / delete them.
-var ReservedAliases = []string{"auto-simple", "auto-medium", "auto-complex"}
+//
+// Names mirror router_engine.Tier (simple/medium/complex) — the historical
+// "auto-*" prefix was dropped in v1.x because the smart-routing trigger is
+// the model == "auto" keyword, not the alias name itself. Existing rows
+// are renamed on startup (see EnsureReservedSeeded).
+var ReservedAliases = []string{"simple", "medium", "complex"}
+
+// legacyReservedRenameMap maps old reserved alias names to new ones so we
+// can rename DB rows in place on startup, preserving any user-attached
+// (group_id, real_model) candidates.
+var legacyReservedRenameMap = map[string]string{
+	"auto-simple":  "simple",
+	"auto-medium":  "medium",
+	"auto-complex": "complex",
+}
 
 // AliasService manages CRUD on model_aliases plus seeding of reserved
 // aliases. Routing decisions live in internal/router_engine — this
@@ -29,8 +43,38 @@ func NewAliasService(db *gorm.DB) *AliasService {
 }
 
 // EnsureReservedSeeded inserts the three reserved aliases as placeholder
-// rows if they are missing. Called once on app start.
+// rows if they are missing, and renames any legacy "auto-*" rows to the
+// new short names so user-attached candidates survive the rename.
+// Called once on app start.
 func (s *AliasService) EnsureReservedSeeded(ctx context.Context) error {
+	// 1. Migrate legacy "auto-{tier}" rows (placeholder + user-attached) to
+	//    the new short names. Doing this before seeding avoids duplicate
+	//    placeholders when both old and new exist.
+	for oldName, newName := range legacyReservedRenameMap {
+		// If a new-name placeholder already exists, drop the old placeholder
+		// (group_id=0) outright but still rename any user-attached rows.
+		var newPlaceholderCount int64
+		if err := s.db.WithContext(ctx).Model(&models.ModelAlias{}).
+			Where("alias = ? AND is_reserved = ? AND group_id = 0", newName, true).
+			Count(&newPlaceholderCount).Error; err != nil {
+			return app_errors.ParseDBError(err)
+		}
+		if newPlaceholderCount > 0 {
+			if err := s.db.WithContext(ctx).
+				Where("alias = ? AND is_reserved = ? AND group_id = 0", oldName, true).
+				Delete(&models.ModelAlias{}).Error; err != nil {
+				return app_errors.ParseDBError(err)
+			}
+		}
+		// Rename remaining rows (placeholder OR user-attached) in place.
+		if err := s.db.WithContext(ctx).Model(&models.ModelAlias{}).
+			Where("alias = ?", oldName).
+			Update("alias", newName).Error; err != nil {
+			return app_errors.ParseDBError(err)
+		}
+	}
+
+	// 2. Seed missing placeholders.
 	for _, name := range ReservedAliases {
 		var count int64
 		if err := s.db.WithContext(ctx).Model(&models.ModelAlias{}).

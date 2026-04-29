@@ -35,7 +35,9 @@ const (
 )
 
 // ReservedAlias maps a tier to its reserved alias name.
-func ReservedAlias(t Tier) string { return "auto-" + string(t) }
+// 命名直接用 tier 名 (simple/medium/complex), 比 "auto-simple" 等更紧凑;
+// 智能路由仍由 model == "auto" 关键字触发, 这里只是 reserved alias 池的名字。
+func ReservedAlias(t Tier) string { return string(t) }
 
 // Candidate is one (group, model) destination eligible for routing.
 type Candidate struct {
