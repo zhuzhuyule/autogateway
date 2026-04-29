@@ -47,23 +47,61 @@ interface CachedEnvelope {
 // envelope is replaced (i.e. after the network fetch completes).
 export const freeModelsRef = ref<FreeModelsEnvelope | null>(null);
 
+// FreeModels CDN 的 modelId 都带 provider 前缀 (e.g. "bigmodel/glm-4-flash-250414"),
+// 而我们 group.available_models 拿的是上游裸 modelId ("glm-4-flash-250414"). 反查时
+// 用裸 modelId, 否则两边永远对不齐 — 这是合并去重失败的根因.
+function bareModelId(idWithMaybePrefix: string): string {
+  const slash = idWithMaybePrefix.indexOf("/");
+  return slash >= 0 ? idWithMaybePrefix.slice(slash + 1) : idWithMaybePrefix;
+}
+
+// FreeModels 上游 provider id ↔ 我们 freeProviders.ts 内 id 别名映射.
+// 上游用 9 家精简命名 (bigmodel / gitee / google ...), 我们用 30+ 家更细 (zhipu / gitee-ai / google-aistudio ...).
+// 反查 + 跨 provider aliases 解析时用此 map 同名互通.
+const PROVIDER_ID_ALIASES: Record<string, string[]> = {
+  bigmodel: ["zhipu", "bigmodel"],
+  gitee: ["gitee-ai", "gitee"],
+  google: ["google-aistudio", "google"],
+  nvidia: ["nvidia-nim", "nvidia"],
+  xunfei: ["xfyun", "xunfei"],
+  zhipu: ["bigmodel", "zhipu"],
+  "gitee-ai": ["gitee", "gitee-ai"],
+  "google-aistudio": ["google", "google-aistudio"],
+  "nvidia-nim": ["nvidia", "nvidia-nim"],
+  xfyun: ["xunfei", "xfyun"],
+};
+
+/** 把任意 provider id 展开成它的所有同名候选 (含自身). */
+export function expandProviderAliases(providerId: string): string[] {
+  const lower = providerId.toLowerCase();
+  return PROVIDER_ID_ALIASES[lower] || [lower];
+}
+
 // Indexed lookup tables — rebuilt every time freeModelsRef changes.
+// byProvMod: 同时索引 "<freemodels-provider>/<bareId>" 和 "<aliased-provider>/<bareId>"
+// byBareModel: 裸 modelId → meta list (用于不知 provider 时回退)
 let byProvMod: Map<string, FreeModelMeta> = new Map();
-let byModelOnly: Map<string, FreeModelMeta[]> = new Map();
+let byBareModel: Map<string, FreeModelMeta[]> = new Map();
 
 function rebuildIndex(env: FreeModelsEnvelope | null): void {
   byProvMod = new Map();
-  byModelOnly = new Map();
+  byBareModel = new Map();
   if (!env) {
     return;
   }
   for (const m of env.models) {
-    const key = `${m.provider.toLowerCase()}/${m.modelId.toLowerCase()}`;
-    byProvMod.set(key, m);
-    const bare = m.modelId.toLowerCase();
-    const list = byModelOnly.get(bare) || [];
-    list.push(m);
-    byModelOnly.set(bare, list);
+    const bare = bareModelId(m.modelId).toLowerCase();
+    // 全 provider 别名都索引一遍, 让 "zhipu/glm-4-flash" 和 "bigmodel/glm-4-flash" 都命中
+    for (const alias of expandProviderAliases(m.provider)) {
+      byProvMod.set(`${alias}/${bare}`, m);
+    }
+    // 也索引原始 prefixed modelId, 兼容直接传 "bigmodel/glm-4-flash" 的 caller
+    byProvMod.set(m.modelId.toLowerCase(), m);
+
+    if (!byBareModel.has(bare)) {
+      byBareModel.set(bare, []);
+    }
+    byBareModel.get(bare)!.push(m);
   }
 }
 
@@ -74,14 +112,23 @@ export function lookupRegistry(provider: string | undefined, modelId: string): F
   if (!modelId) {
     return null;
   }
-  const lower = modelId.toLowerCase();
+  const bare = bareModelId(modelId).toLowerCase();
   if (provider) {
-    const hit = byProvMod.get(`${provider.toLowerCase()}/${lower}`);
-    if (hit) {
-      return hit;
+    // 尝试每个 provider 别名
+    for (const alias of expandProviderAliases(provider)) {
+      const hit = byProvMod.get(`${alias}/${bare}`);
+      if (hit) {
+        return hit;
+      }
     }
   }
-  const list = byModelOnly.get(lower);
+  // 也尝试原始 modelId.toLowerCase() (caller 可能直接传带前缀的 id)
+  const direct = byProvMod.get(modelId.toLowerCase());
+  if (direct) {
+    return direct;
+  }
+  // 裸 modelId 全局回退
+  const list = byBareModel.get(bare);
   if (list && list.length) {
     return list[0];
   }
@@ -99,16 +146,17 @@ export function isFreeFromRegistry(provider: string | undefined, modelId: string
   if (!modelId) {
     return null;
   }
-  const lower = modelId.toLowerCase();
+  const bare = bareModelId(modelId).toLowerCase();
   if (provider) {
-    const hit = byProvMod.get(`${provider.toLowerCase()}/${lower}`);
-    if (hit) {
-      return hit.isFree;
+    for (const alias of expandProviderAliases(provider)) {
+      const hit = byProvMod.get(`${alias}/${bare}`);
+      if (hit) {
+        return hit.isFree;
+      }
     }
   }
-  const list = byModelOnly.get(lower);
+  const list = byBareModel.get(bare);
   if (list && list.length) {
-    // 任一 provider 标 free 就视为 free
     if (list.some(m => m.isFree)) {
       return true;
     }

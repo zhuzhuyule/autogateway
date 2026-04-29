@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { aliasesApi, type ModelAliasRow } from "@/api/aliases";
-import { lookupRegistry } from "@/api/freemodels";
+import { expandProviderAliases, lookupRegistry } from "@/api/freemodels";
 import type { Group } from "@/types/models";
 import { BanOutline, CloseOutline, HelpCircleOutline, LinkOutline } from "@vicons/ionicons5";
 import {
@@ -89,23 +89,30 @@ function findGroupForProvider(providerId: string): Group | null {
   if (!providerId || !props.allGroups.length) {
     return null;
   }
-  const lower = providerId.toLowerCase();
-  // 1. group.name 子串命中 (常见情况, e.g. "groq" group, "openrouter-free" group)
-  const byName = props.allGroups.find(
-    g => g.group_type !== "aggregate" && g.name.toLowerCase().includes(lower)
-  );
-  if (byName) {
-    return byName;
-  }
-  // 2. upstream host 命中
-  const byHost = props.allGroups.find(g => {
-    if (g.group_type === "aggregate") {
-      return false;
+  // 用 provider 别名映射展开 (e.g. "bigmodel" → ["zhipu", "bigmodel"]),
+  // 因为 FreeModels CDN 用 9 家精简命名, 我们 freeProviders 用 30+ 家细分命名.
+  const candidates = expandProviderAliases(providerId);
+  for (const c of candidates) {
+    // 1. group.name 子串命中
+    const byName = props.allGroups.find(
+      g => g.group_type !== "aggregate" && g.name.toLowerCase().includes(c)
+    );
+    if (byName) {
+      return byName;
     }
-    const upstreams = (g as unknown as { upstreams?: Array<{ url?: string }> }).upstreams || [];
-    return upstreams.some(u => (u.url || "").toLowerCase().includes(lower));
-  });
-  return byHost || null;
+    // 2. upstream host 命中
+    const byHost = props.allGroups.find(g => {
+      if (g.group_type === "aggregate") {
+        return false;
+      }
+      const upstreams = (g as unknown as { upstreams?: Array<{ url?: string }> }).upstreams || [];
+      return upstreams.some(u => (u.url || "").toLowerCase().includes(c));
+    });
+    if (byHost) {
+      return byHost;
+    }
+  }
+  return null;
 }
 
 const crossProviderCandidates = computed<CrossProviderCandidate[]>(() => {

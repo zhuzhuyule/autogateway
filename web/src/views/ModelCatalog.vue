@@ -113,23 +113,32 @@ const authHeader = computed(() => {
   return k ? `Bearer ${k}` : "";
 });
 
-// 合并本地已配的 catalog (catalogData, 来自 /api/models) 和 FreeModels Registry
-// 的全量免费清单, 以 modelId 去重。 重复条目以本地为基底 (有 groups 信息),
-// registry 仅补未在本地的免费模型 (configured=false, 提示用户去配置 group)。
+// 合并本地 catalog (/api/models) 和 FreeModels Registry, 按 bare modelId 去重。
+// FreeModels CDN 的 modelId 都带 provider 前缀 ("bigmodel/glm-4-flash-250414"),
+// 上游真实返回的 group.available_models 是裸 id ("glm-4-flash-250414") — 必须
+// 用裸形式做 key 才能正确去重, 否则一条模型会被显示两次.
+function bareId(id: string): string {
+  const slash = id.indexOf("/");
+  return slash >= 0 ? id.slice(slash + 1) : id;
+}
+
 const mergedRows = computed<ModelItem[]>(() => {
   const out = new Map<string, ModelItem>();
   for (const r of catalogData.value) {
-    out.set(r.id, { ...r, configured: (r.groups || []).length > 0 });
+    const key = bareId(r.id).toLowerCase();
+    out.set(key, { ...r, configured: (r.groups || []).length > 0 });
   }
   const env = freeModelsRef.value;
   if (env?.models) {
     for (const m of env.models) {
-      if (out.has(m.modelId)) {
-        continue; // 重复 → 以本地 list 中的为准, 不再追加
+      const bare = bareId(m.modelId);
+      const key = bare.toLowerCase();
+      if (out.has(key)) {
+        continue; // 重复 → 以本地为准 (有 groups), 不再追加
       }
-      out.set(m.modelId, {
-        id: m.modelId,
-        display_name: m.name || m.modelId,
+      out.set(key, {
+        id: bare,
+        display_name: m.name || bare,
         owned_by: m.provider || "",
         groups: [],
         configured: false,
