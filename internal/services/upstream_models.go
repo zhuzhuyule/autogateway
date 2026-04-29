@@ -1,6 +1,7 @@
 package services
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -86,12 +87,40 @@ func fetchOpenAIModels(ctx context.Context, baseURL, apiKey string) ([]string, e
 		return nil, err
 	}
 
-	// OpenAI 兼容: { "data": [ { "id": "..." } ] }
+	// OpenAI 兼容三种返回形态:
+	//   1. { "data":   [{"id":"..."}] }   ← 标准 OpenAI / Groq / Cerebras
+	//   2. { "models": [{"id":"..."}] }   ← 部分国内 provider
+	//   3. [ {"id":"..."} ]                ← Together.ai 等裸数组
+	out := make([]string, 0)
+
+	// peek 第一个非空字符 — 区分 envelope (object) 还是裸数组
+	trimmed := bytes.TrimLeft(body, " \t\r\n")
+	if len(trimmed) > 0 && trimmed[0] == '[' {
+		// 裸数组形态
+		var arr []struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		}
+		if err := json.Unmarshal(body, &arr); err != nil {
+			return nil, fmt.Errorf("parse openai models (array): %w", err)
+		}
+		for _, m := range arr {
+			id := m.ID
+			if id == "" {
+				id = m.Name // 极少数 provider 用 name 字段
+			}
+			if id != "" {
+				out = append(out, id)
+			}
+		}
+		return out, nil
+	}
+
+	// envelope 形态
 	var resp struct {
 		Data []struct {
 			ID string `json:"id"`
 		} `json:"data"`
-		// 部分实现直接返回数组
 		Models []struct {
 			ID string `json:"id"`
 		} `json:"models"`
@@ -99,7 +128,6 @@ func fetchOpenAIModels(ctx context.Context, baseURL, apiKey string) ([]string, e
 	if err := json.Unmarshal(body, &resp); err != nil {
 		return nil, fmt.Errorf("parse openai models: %w", err)
 	}
-	out := make([]string, 0, len(resp.Data)+len(resp.Models))
 	for _, m := range resp.Data {
 		if m.ID != "" {
 			out = append(out, m.ID)

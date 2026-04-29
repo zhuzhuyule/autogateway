@@ -1,6 +1,8 @@
 <script setup lang="ts">
-import { findFreeModel, isFree, FREE_PROVIDERS, type ModelTier } from "@/data/freeProviders";
+import { findFreeModel, findProviderByUpstreams, isFree, FREE_PROVIDERS, type ModelTier } from "@/data/freeProviders";
 import { freeModelsRef, getFreeStatus, lookupRegistry } from "@/api/freemodels";
+import { keysApi } from "@/api/keys";
+import type { Group } from "@/types/models";
 import FreeBadge from "@/components/common/FreeBadge.vue";
 import SpeedBadge from "@/components/common/SpeedBadge.vue";
 import { RefreshOutline, SearchOutline } from "@vicons/ionicons5";
@@ -24,6 +26,9 @@ interface AugmentedItem extends ModelItem {
   isFree: boolean;
   freeVariant: "full" | "trial" | null;
   tier?: ModelTier;
+  /** 该模型涉及的 provider id 集合 (合并: row.groups 反查 + registry.provider). */
+  providers: string[];
+  /** UI 头像选哪个 provider — 取 providers[0] 或 row.owned_by. */
   freeProviderId?: string;
   hasVision: boolean;
   hasTools: boolean;
@@ -66,6 +71,36 @@ function fallbackTools(id: string): boolean {
 const loading = ref(false);
 const fetchError = ref(false);
 const catalogData = ref<ModelItem[]>([]);
+// 用户已配 groups — 用来反查每个 group_name → provider id (内置 freeProviders 反查)
+const groupsCache = ref<Group[]>([]);
+const groupNameToProvider = computed<Record<string, string>>(() => {
+  const map: Record<string, string> = {};
+  for (const g of groupsCache.value) {
+    if (g.group_type === "aggregate") {
+      continue;
+    }
+    const p = findProviderByUpstreams(g.upstreams || []);
+    if (p) {
+      map[g.name] = p.id;
+    } else {
+      // fallback: 用 group.name 子串去比对内置 provider id 列表
+      const lower = g.name.toLowerCase();
+      const hit = FREE_PROVIDERS.find(fp => lower.includes(fp.id));
+      if (hit) {
+        map[g.name] = hit.id;
+      }
+    }
+  }
+  return map;
+});
+
+async function loadGroups() {
+  try {
+    groupsCache.value = await keysApi.getGroups();
+  } catch {
+    groupsCache.value = [];
+  }
+}
 
 const searchText = ref("");
 const tierFilter = ref<ModelTier | "all">("all");
@@ -111,9 +146,21 @@ const augmented = computed<AugmentedItem[]>(() =>
     const reg = lookupRegistry(undefined, row.id);
     const status = getFreeStatus(undefined, row.id);
 
-    // freeProviderId 仅用于 UI 上的 provider 头像/标签, 优先 registry 的 provider
+    // 真实 providers: row.groups 反查 + registry.provider 合并 (并集)
+    const providers = new Set<string>();
+    for (const gName of row.groups || []) {
+      const pid = groupNameToProvider.value[gName];
+      if (pid) {
+        providers.add(pid);
+      }
+    }
+    if (reg?.provider) {
+      providers.add(reg.provider);
+    }
+    // freeProviderId 用作 UI 头像/标签 — 取第一个 provider, fallback registry/free
     const free = findFreeModel(row.id);
-    const providerId = reg?.provider || free?.providerId;
+    const providerId =
+      [...providers][0] || reg?.provider || free?.providerId || row.owned_by || undefined;
 
     const isFreeFlag =
       status === "full" || status === "trial"
@@ -142,6 +189,7 @@ const augmented = computed<AugmentedItem[]>(() =>
       isFree: isFreeFlag,
       freeVariant,
       tier,
+      providers: [...providers],
       freeProviderId: providerId,
       hasVision: reg ? reg.isMultimodal : fallbackVision(row.id),
       hasTools: reg ? reg.hasToolUse : fallbackTools(row.id),
@@ -172,7 +220,7 @@ const filtered = computed<AugmentedItem[]>(() => {
       if (tierFilter.value !== "all" && row.tier !== tierFilter.value) {
         return false;
       }
-      if (providerFilter.value !== "all" && row.freeProviderId !== providerFilter.value) {
+      if (providerFilter.value !== "all" && !row.providers.includes(providerFilter.value)) {
         return false;
       }
       return true;
@@ -259,7 +307,9 @@ function pavClassFor(providerId?: string): string {
   return "v3-pav v3-pav-default";
 }
 
-onMounted(() => fetchCatalog());
+onMounted(async () => {
+  await Promise.all([fetchCatalog(), loadGroups()]);
+});
 
 async function fetchCatalog() {
   loading.value = true;
