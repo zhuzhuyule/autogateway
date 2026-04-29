@@ -14,7 +14,6 @@ import { copy as copyToClipboard } from "@/utils/clipboard";
 import { getGroupDisplayName, maskKey } from "@/utils/display";
 import {
   AddOutline,
-  BanOutline,
   CheckmarkCircle,
   CloseOutline,
   CopyOutline,
@@ -1542,17 +1541,6 @@ const filterCounts = computed(() => ({
                   <button class="v5-modelcard__alias-add" style="font-size: 10.5px; padding: 2px 8px; min-height: 22px" @click.stop="addAliasFor(modelId)">
                     @{{ t("v3.alias") || "别名" }}
                   </button>
-                  <button
-                    class="v3-btn v3-btn--sm v3-btn--icon"
-                    style="min-height: 22px"
-                    :title="blockedSet.has(modelId) ? (t('v3.unblock') || '解除拉黑') : (t('v3.block') || '加入黑名单')"
-                    @click.stop="toggleBlock(modelId)"
-                  >
-                    <n-icon :component="BanOutline" :size="12" />
-                  </button>
-                  <button class="v3-btn v3-btn--sm v3-btn--icon" style="min-height: 22px" :title="t('v3.removeFromExposed') || 'Remove from exposed'" @click.stop="removeFromExposed(modelId)">
-                    <n-icon :component="CloseOutline" :size="12" />
-                  </button>
                 </div>
               </div>
             </div>
@@ -1591,14 +1579,6 @@ const filterCounts = computed(() => ({
                   🚫 {{ t("v3.blocked") || "blocked" }}
                 </span>
                 <div class="v5-modelcard__spacer" style="flex: 1"></div>
-                <button
-                  class="v3-btn v3-btn--sm v3-btn--icon"
-                  style="min-height: 22px"
-                  :title="blockedSet.has(modelId) ? (t('v3.unblock') || '解除拉黑') : (t('v3.block') || '加入黑名单')"
-                  @click.stop="toggleBlock(modelId)"
-                >
-                  <n-icon :component="BanOutline" :size="12" />
-                </button>
                 <button v-if="exposedSet.has(modelId)" class="v3-btn v3-btn--sm" disabled style="font-size: 10.5px; padding: 2px 8px; min-height: 22px">
                   ✓ {{ t("v3.alreadyExposed") || "已加入" }}
                 </button>
@@ -1649,14 +1629,6 @@ const filterCounts = computed(() => ({
                   </n-tooltip>
                   <button class="v5-modelcard__alias-add" style="font-size: 10.5px; padding: 2px 8px; min-height: 22px" @click.stop="addAliasFor(modelId)">
                     @{{ t("v3.alias") || "别名" }}
-                  </button>
-                  <button
-                    class="v3-btn v3-btn--sm v3-btn--icon"
-                    style="min-height: 22px"
-                    :title="blockedSet.has(modelId) ? (t('v3.unblock') || '解除拉黑') : (t('v3.block') || '加入黑名单')"
-                    @click.stop="toggleBlock(modelId)"
-                  >
-                    <n-icon :component="BanOutline" :size="12" />
                   </button>
                 </div>
               </div>
@@ -1853,6 +1825,8 @@ const filterCounts = computed(() => ({
       :group="group"
       :model-id="aliasModalModel"
       @success="onAliasCreated"
+      @toggle-block="toggleBlock"
+      @remove-exposed="removeFromExposed"
     />
   </section>
 </template>

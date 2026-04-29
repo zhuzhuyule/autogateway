@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { aliasesApi, type ModelAliasRow } from "@/api/aliases";
 import type { Group } from "@/types/models";
-import { CloseOutline, HelpCircleOutline } from "@vicons/ionicons5";
+import { BanOutline, CloseOutline, HelpCircleOutline } from "@vicons/ionicons5";
 import {
   NButton,
   NCard,
@@ -25,6 +25,8 @@ interface Props {
 interface Emits {
   (e: "update:show", value: boolean): void;
   (e: "success"): void;
+  (e: "toggle-block", modelId: string): void;
+  (e: "remove-exposed", modelId: string): void;
 }
 
 const props = defineProps<Props>();
@@ -139,6 +141,42 @@ function handleClose() {
   emit("update:show", false);
 }
 
+// 模型相对当前 group 的状态:已暴露(specified mode) / 已拉黑(black list)
+function parseModelArray(raw: unknown): string[] {
+  if (Array.isArray(raw)) {
+    return raw.filter((m): m is string => typeof m === "string");
+  }
+  if (typeof raw === "string" && raw.trim()) {
+    try {
+      const j = JSON.parse(raw);
+      if (Array.isArray(j)) {
+        return j.filter((m): m is string => typeof m === "string");
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+  return [];
+}
+const isSpecifiedMode = computed(
+  () => (props.group as unknown as { model_routing_mode?: string }).model_routing_mode === "specified"
+);
+const exposedList = computed(() =>
+  parseModelArray((props.group as unknown as { exposed_models?: unknown }).exposed_models)
+);
+const blockedList = computed(() =>
+  parseModelArray((props.group as unknown as { blocked_models?: unknown }).blocked_models)
+);
+const isExposed = computed(() => exposedList.value.includes(props.modelId));
+const isBlocked = computed(() => blockedList.value.includes(props.modelId));
+
+function onToggleBlock() {
+  emit("toggle-block", props.modelId);
+}
+function onRemoveExposed() {
+  emit("remove-exposed", props.modelId);
+}
+
 async function handleSave() {
   if (loading.value) {
     return;
@@ -205,6 +243,36 @@ async function handleSave() {
           <span class="v5-ma-target__sep">·</span>
           <span class="v5-ma-target__group">{{ group?.display_name || group?.name }}</span>
         </div>
+      </div>
+
+      <!-- 模型行为:加入黑名单 / 从暴露移除 -->
+      <div class="v5-ma-actions">
+        <button
+          class="v5-ma-action"
+          :class="{ 'v5-ma-action--active': isBlocked }"
+          @click="onToggleBlock"
+        >
+          <n-icon :component="BanOutline" :size="13" />
+          <span>{{
+            isBlocked
+              ? (t("v3.unblock") || "解除拉黑")
+              : (t("v3.block") || "加入黑名单")
+          }}</span>
+        </button>
+        <n-popconfirm
+          v-if="isSpecifiedMode && isExposed"
+          :positive-text="t('common.confirm') || 'OK'"
+          :negative-text="t('common.cancel') || 'Cancel'"
+          @positive-click="onRemoveExposed"
+        >
+          <template #trigger>
+            <button class="v5-ma-action v5-ma-action--danger">
+              <n-icon :component="CloseOutline" :size="13" />
+              <span>{{ t("v3.removeFromExposed") || "从暴露移除" }}</span>
+            </button>
+          </template>
+          {{ t("v5.maRemoveExposedConfirm", { model: modelId }) || `从已暴露列表中移除 ${modelId}?` }}
+        </n-popconfirm>
       </div>
 
       <!-- Existing Aliases Section -->
@@ -357,6 +425,40 @@ async function handleSave() {
   border: 1px solid var(--v3-line);
   border-radius: var(--v3-radius);
   padding: 10px 12px;
+}
+
+.v5-ma-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.v5-ma-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  background: transparent;
+  border: 1px solid var(--v3-line);
+  border-radius: 4px;
+  font: 500 11px var(--v3-sans);
+  color: var(--v3-ink-2);
+  cursor: pointer;
+  transition: all 120ms;
+}
+.v5-ma-action:hover {
+  border-color: var(--v3-warn, oklch(0.7 0.16 80));
+  color: var(--v3-warn, oklch(0.55 0.18 70));
+  background: var(--v3-warn-soft, oklch(0.95 0.05 80));
+}
+.v5-ma-action--active {
+  border-color: var(--v3-warn, oklch(0.7 0.16 80));
+  color: var(--v3-warn, oklch(0.55 0.18 70));
+  background: var(--v3-warn-soft, oklch(0.95 0.05 80));
+}
+.v5-ma-action--danger:hover {
+  border-color: var(--v3-danger);
+  color: var(--v3-danger);
+  background: var(--v3-danger-soft);
 }
 .v5-ma-target__l {
   font: 500 11px/1 var(--v3-sans);
