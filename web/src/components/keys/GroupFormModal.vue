@@ -43,6 +43,7 @@ import {
 import { computed, reactive, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import UrlProbeBadge from "@/components/keys/UrlProbeBadge.vue";
+import FreeBadge from "@/components/common/FreeBadge.vue";
 import type { ProbeResult } from "@/api/upstream";
 
 interface Props {
@@ -1145,11 +1146,7 @@ async function handleSubmit() {
 
                   <div class="models-grid">
                     <div v-for="m in filteredAvailableModels" :key="m" class="model-item">
-                      <span
-                        v-if="modelIsFree(m)"
-                        class="model-item-free"
-                        :title="t('modelcatalog.freeTag')"
-                      >🆓</span>
+                      <FreeBadge v-if="modelIsFree(m)" compact :size="12" />
                       <span class="model-item-id" :title="m">{{ m }}</span>
                       <button
                         class="model-item-copy"

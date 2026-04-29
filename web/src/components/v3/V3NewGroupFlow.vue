@@ -19,6 +19,7 @@ import {
 import { NIcon, NModal, useMessage } from "naive-ui";
 import { computed, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
+import FreeBadge from "@/components/common/FreeBadge.vue";
 
 const { t } = useI18n();
 const message = useMessage();
@@ -491,7 +492,7 @@ async function testAndSave() {
               @click="selectedModel = m.id"
             >
               <span class="v3-msel__chip-id">{{ m.id }}</span>
-              <span v-if="m.isFree" class="v3-msel__chip-badge v3-msel__chip-badge--free">🆓</span>
+              <FreeBadge v-if="m.isFree" compact />
               <span v-else class="v3-msel__chip-badge v3-msel__chip-badge--paid">paid</span>
               <span v-if="m.tier" class="v3-msel__chip-tier">{{ m.tier }}</span>
             </button>

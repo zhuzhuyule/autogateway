@@ -32,6 +32,7 @@ import {
   Trash,
 } from "@vicons/ionicons5";
 import { NIcon, NPagination, NSpin, NTooltip, useDialog, useMessage } from "naive-ui";
+import FreeBadge from "@/components/common/FreeBadge.vue";
 import { computed, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRouter } from "vue-router";
@@ -1482,7 +1483,7 @@ const filterCounts = computed(() => ({
                 {{ t("common.all") || "All" }}
               </button>
               <button class="v3-btn v3-btn--sm" :class="{ 'v3-btn--accent': availFilter === 'free' }" @click="availFilter = 'free'">
-                🆓 {{ t("modelcatalog.freeTag") || "Free" }}
+                <FreeBadge :label="t('modelcatalog.freeTag') || 'Free'" />
               </button>
               <button class="v3-btn v3-btn--sm" :class="{ 'v3-btn--accent': availFilter === 'paid' }" @click="availFilter = 'paid'">
                 {{ t("v3.paid") || "Paid" }}
@@ -1522,9 +1523,8 @@ const filterCounts = computed(() => ({
                 <span :class="tierChipClass(tierForModel(modelId))" style="flex-shrink: 0; font-size: 10px">
                   {{ tierLabel(tierForModel(modelId)) }}
                 </span>
-                <span v-if="isFreeModel(modelId)" class="v3-chip v3-chip--info" style="flex-shrink: 0; font-size: 10px">
-                  {{ t("v3.free") || "free" }}
-                </span>
+                <FreeBadge v-if="isFreeModel(modelId)" :size="10" />
+
                 <span v-if="blockedSet.has(modelId)" class="v3-chip v3-chip--danger" style="flex-shrink: 0; font-size: 10px">
                   🚫 {{ t("v3.blocked") || "blocked" }}
                 </span>
@@ -1572,9 +1572,8 @@ const filterCounts = computed(() => ({
                 <span :class="tierChipClass(tierForModel(modelId))" style="flex-shrink: 0; font-size: 10px">
                   {{ tierLabel(tierForModel(modelId)) }}
                 </span>
-                <span v-if="isFreeModel(modelId)" class="v3-chip v3-chip--info" style="flex-shrink: 0; font-size: 10px">
-                  {{ t("v3.free") || "free" }}
-                </span>
+                <FreeBadge v-if="isFreeModel(modelId)" :size="10" />
+
                 <span v-if="blockedSet.has(modelId)" class="v3-chip v3-chip--danger" style="flex-shrink: 0; font-size: 10px">
                   🚫 {{ t("v3.blocked") || "blocked" }}
                 </span>
@@ -1611,9 +1610,8 @@ const filterCounts = computed(() => ({
                 <span :class="tierChipClass(tierForModel(modelId))" style="flex-shrink: 0; font-size: 10px">
                   {{ tierLabel(tierForModel(modelId)) }}
                 </span>
-                <span v-if="isFreeModel(modelId)" class="v3-chip v3-chip--info" style="flex-shrink: 0; font-size: 10px">
-                  {{ t("v3.free") || "free" }}
-                </span>
+                <FreeBadge v-if="isFreeModel(modelId)" :size="10" />
+
                 <span v-if="blockedSet.has(modelId)" class="v3-chip v3-chip--danger" style="flex-shrink: 0; font-size: 10px">
                   🚫 {{ t("v3.blocked") || "blocked" }}
                 </span>

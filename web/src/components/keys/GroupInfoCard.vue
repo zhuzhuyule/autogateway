@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { keysApi } from "@/api/keys";
 import { findFreeModel, findProviderByUpstreams, isFree, type ModelTier } from "@/data/freeProviders";
+import FreeBadge from "@/components/common/FreeBadge.vue";
 import type {
   Group,
   GroupConfigOption,
@@ -908,14 +909,7 @@ function resetPage() {
                         <div v-for="m in filteredGroupModels" :key="m" class="model-item">
                           <div class="model-item-main">
                             <span class="model-item-id">{{ m }}</span>
-                            <n-tag
-                              v-if="modelIsFree(m)"
-                              size="tiny"
-                              type="success"
-                              :bordered="false"
-                            >
-                              🆓 {{ t("modelcatalog.freeTag") }}
-                            </n-tag>
+                            <FreeBadge v-if="modelIsFree(m)" :label="t('modelcatalog.freeTag')" />
                             <n-tag
                               v-if="findFreeModel(m)?.tier"
                               size="tiny"
@@ -961,14 +955,7 @@ function resetPage() {
                         >
                           <div class="model-item-main">
                             <span class="model-item-id">{{ r.modelId }}</span>
-                            <n-tag
-                              v-if="modelIsFree(r.modelId)"
-                              size="tiny"
-                              type="success"
-                              :bordered="false"
-                            >
-                              🆓 {{ t("modelcatalog.freeTag") }}
-                            </n-tag>
+                            <FreeBadge v-if="modelIsFree(r.modelId)" :label="t('modelcatalog.freeTag')" />
                             <n-tag
                               v-if="findFreeModel(r.modelId)?.tier"
                               size="tiny"
