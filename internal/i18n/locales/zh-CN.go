@@ -150,6 +150,8 @@ var MessagesZhCN = map[string]string{
 	"config.log_write_interval_desc":          "请求日志从缓存写入数据库的周期（分钟），0为实时写入数据。",
 	"config.enable_request_body_logging":      "启用日志详情",
 	"config.enable_request_body_logging_desc": "是否在请求日志中记录完整的请求体内容。启用此功能会增加内存以及存储空间的占用。",
+	"config.use_freemodels_registry":          "启用 FreeModels 注册表",
+	"config.use_freemodels_registry_desc":     "开启时，免费模型清单从 FreeModels 公共数据 hub 拉取（每 6h 刷新），并与本地各 group 上游 /v1/models 数据合并；关闭时，仅展示用户已配 group 真实拉到的清单。",
 
 	// Request settings related
 	"config.request_timeout":              "请求超时（秒）",

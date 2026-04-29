@@ -117,21 +117,46 @@ const authHeader = computed(() => {
 // FreeModels CDN 的 modelId 都带 provider 前缀 ("bigmodel/glm-4-flash-250414"),
 // 上游真实返回的 group.available_models 是裸 id ("glm-4-flash-250414") — 必须
 // 用裸形式做 key 才能正确去重, 否则一条模型会被显示两次.
-function bareId(id: string): string {
+// 仅在 modelId 第一段 === provider 名时剥前缀, 避免误剥模型作者前缀.
+// FreeModels 内部不一致: groq/cerebras/bigmodel/openrouter/xunfei/longcat 加 prefix,
+// gitee/nvidia/google 不加. 我们 group.available_models 总是裸 id.
+const FREEMODELS_PROVIDERS = new Set([
+  "bigmodel",
+  "cerebras",
+  "gitee",
+  "google",
+  "groq",
+  "longcat",
+  "nvidia",
+  "openrouter",
+  "xunfei",
+]);
+function bareId(id: string, provider?: string): string {
   const slash = id.indexOf("/");
-  return slash >= 0 ? id.slice(slash + 1) : id;
+  if (slash <= 0) {
+    return id;
+  }
+  const head = id.slice(0, slash).toLowerCase();
+  if (provider && head === provider.toLowerCase()) {
+    return id.slice(slash + 1);
+  }
+  if (!provider && FREEMODELS_PROVIDERS.has(head)) {
+    return id.slice(slash + 1);
+  }
+  return id; // 首段是作者名 (e.g. "bytedance/seed-oss-36b") — 保留
 }
 
 const mergedRows = computed<ModelItem[]>(() => {
   const out = new Map<string, ModelItem>();
   for (const r of catalogData.value) {
-    const key = bareId(r.id).toLowerCase();
+    // /api/models 来的 row.id 已经是裸 id (上游 /v1/models 真实返回)
+    const key = r.id.toLowerCase();
     out.set(key, { ...r, configured: (r.groups || []).length > 0 });
   }
   const env = freeModelsRef.value;
   if (env?.models) {
     for (const m of env.models) {
-      const bare = bareId(m.modelId);
+      const bare = bareId(m.modelId, m.provider);
       const key = bare.toLowerCase();
       if (out.has(key)) {
         continue; // 重复 → 以本地为准 (有 groups), 不再追加

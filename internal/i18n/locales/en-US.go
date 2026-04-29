@@ -150,6 +150,8 @@ var MessagesEnUS = map[string]string{
 	"config.log_write_interval_desc":          "Interval (in minutes) for writing request logs from cache to database, 0 for real-time writes.",
 	"config.enable_request_body_logging":      "Enable Request Body Logging",
 	"config.enable_request_body_logging_desc": "Whether to log complete request body content. Enabling this will increase memory and storage usage.",
+	"config.use_freemodels_registry":          "Use FreeModels Registry",
+	"config.use_freemodels_registry_desc":     "When on, the free-model catalog is sourced from the FreeModels public hub (refreshed every 6h) and merged with each group's upstream /v1/models. When off, only models actually fetched from configured groups are shown.",
 
 	// Request settings related
 	"config.request_timeout":              "Request Timeout (seconds)",

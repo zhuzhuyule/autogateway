@@ -150,6 +150,8 @@ var MessagesJaJP = map[string]string{
 	"config.log_write_interval_desc":          "リクエストログをキャッシュからデータベースに書き込む間隔（分）、0でリアルタイム書き込み。",
 	"config.enable_request_body_logging":      "リクエストボディログを有効化",
 	"config.enable_request_body_logging_desc": "完全なリクエストボディの内容をログに記録するかどうか。有効にするとメモリとストレージの使用量が増加します。",
+	"config.use_freemodels_registry":          "FreeModels レジストリを使用",
+	"config.use_freemodels_registry_desc":     "オン時: FreeModels 公開ハブから無料モデル一覧を取得 (6h 毎に更新) し、各 group の /v1/models と統合。オフ時: 設定済み group の /v1/models から実際に取得できたモデルのみ表示。",
 
 	// Request settings related
 	"config.request_timeout":              "リクエストタイムアウト（秒）",

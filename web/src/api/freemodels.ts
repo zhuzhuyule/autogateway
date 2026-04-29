@@ -47,12 +47,53 @@ interface CachedEnvelope {
 // envelope is replaced (i.e. after the network fetch completes).
 export const freeModelsRef = ref<FreeModelsEnvelope | null>(null);
 
-// FreeModels CDN 的 modelId 都带 provider 前缀 (e.g. "bigmodel/glm-4-flash-250414"),
-// 而我们 group.available_models 拿的是上游裸 modelId ("glm-4-flash-250414"). 反查时
-// 用裸 modelId, 否则两边永远对不齐 — 这是合并去重失败的根因.
-function bareModelId(idWithMaybePrefix: string): string {
+// FreeModels CDN 的 modelId 格式不统一:
+//   groq/cerebras/bigmodel/openrouter/xunfei/longcat → 加 "<provider>/" 前缀
+//     groq/minimax-m2.5, bigmodel/glm-4-flash, groq/qwen/qwen3-vl-32b
+//   gitee/nvidia/google → 直接用上游 raw modelId, 不加前缀
+//     jina-clip-v1 (gitee), bytedance/seed-oss-36b-instruct (nvidia 上托管的 ByteDance 模型)
+//
+// 而我们 group.available_models 是上游 /v1/models 真实返回的裸 id, 总不带 provider 前缀.
+// 对齐方法: 只在 modelId 第一段 === provider 名时剥, 否则保留原样.
+//   - "groq/minimax-m2.5"          + provider="groq"   → "minimax-m2.5"           (剥)
+//   - "groq/qwen/qwen3-vl-32b"     + provider="groq"   → "qwen/qwen3-vl-32b"      (剥, 保留作者前缀)
+//   - "bytedance/seed-oss-36b-instruct" + provider="nvidia" → 不剥 (第一段 != "nvidia")
+//   - "jina-clip-v1"               + provider="gitee"  → "jina-clip-v1"           (无 /)
+function bareModelId(idWithMaybePrefix: string, provider?: string): string {
   const slash = idWithMaybePrefix.indexOf("/");
-  return slash >= 0 ? idWithMaybePrefix.slice(slash + 1) : idWithMaybePrefix;
+  if (slash <= 0) {
+    return idWithMaybePrefix;
+  }
+  const head = idWithMaybePrefix.slice(0, slash).toLowerCase();
+  // 仅当首段等于 provider 名 (含 alias) 时才视为前缀
+  if (provider) {
+    const providerAliases = expandProviderAliases(provider);
+    if (providerAliases.includes(head)) {
+      return idWithMaybePrefix.slice(slash + 1);
+    }
+    return idWithMaybePrefix; // 首段是模型作者名 (e.g. "bytedance/", "google/") — 保留
+  }
+  // 不知 provider, 保守:仅当首段是已知 provider 名时剥
+  if (PROVIDER_ID_ALIASES[head] || isKnownProviderId(head)) {
+    return idWithMaybePrefix.slice(slash + 1);
+  }
+  return idWithMaybePrefix;
+}
+
+// FreeModels 上游已知 9 家 provider id, 用于不知 provider 时的前缀判定
+const KNOWN_FREEMODELS_PROVIDERS = new Set([
+  "bigmodel",
+  "cerebras",
+  "gitee",
+  "google",
+  "groq",
+  "longcat",
+  "nvidia",
+  "openrouter",
+  "xunfei",
+]);
+function isKnownProviderId(s: string): boolean {
+  return KNOWN_FREEMODELS_PROVIDERS.has(s);
 }
 
 // FreeModels 上游 provider id ↔ 我们 freeProviders.ts 内 id 别名映射.
@@ -90,7 +131,8 @@ function rebuildIndex(env: FreeModelsEnvelope | null): void {
     return;
   }
   for (const m of env.models) {
-    const bare = bareModelId(m.modelId).toLowerCase();
+    // 用 provider 精准剥前缀,避免误剥 "bytedance/" 这种作者前缀
+    const bare = bareModelId(m.modelId, m.provider).toLowerCase();
     // 全 provider 别名都索引一遍, 让 "zhipu/glm-4-flash" 和 "bigmodel/glm-4-flash" 都命中
     for (const alias of expandProviderAliases(m.provider)) {
       byProvMod.set(`${alias}/${bare}`, m);
@@ -112,7 +154,7 @@ export function lookupRegistry(provider: string | undefined, modelId: string): F
   if (!modelId) {
     return null;
   }
-  const bare = bareModelId(modelId).toLowerCase();
+  const bare = bareModelId(modelId, provider).toLowerCase();
   if (provider) {
     // 尝试每个 provider 别名
     for (const alias of expandProviderAliases(provider)) {
@@ -146,7 +188,7 @@ export function isFreeFromRegistry(provider: string | undefined, modelId: string
   if (!modelId) {
     return null;
   }
-  const bare = bareModelId(modelId).toLowerCase();
+  const bare = bareModelId(modelId, provider).toLowerCase();
   if (provider) {
     for (const alias of expandProviderAliases(provider)) {
       const hit = byProvMod.get(`${alias}/${bare}`);
@@ -252,12 +294,22 @@ let pending: Promise<void> | null = null;
 /**
  * 启动时调用一次。先用 localStorage 给一个即时值,再异步从后端拉最新覆盖。
  * 重复调用会复用同一个 in-flight promise。
+ *
+ * 后端 system setting `use_freemodels_registry` (默认 true) 控制总开关:
+ * 关闭时清空 registry, isFree() 等查询自然降级到本地静态清单 / /api/models.
  */
 export function loadFreeModelsRegistry(): Promise<void> {
   if (pending) {
     return pending;
   }
-  loadFromStorage(); // 即时呈现 (若有);失败也无所谓
+  // 先看 settings 开关
+  const enabled = localStorage.getItem("freemodels_registry_enabled");
+  if (enabled === "false") {
+    // 用户/管理员关掉了,清空 registry 让所有 reactive 依赖回退
+    setEnvelope({ view: "free", updatedAt: "", totalModels: 0, models: [] });
+    return Promise.resolve();
+  }
+  loadFromStorage();
   pending = (async () => {
     try {
       const r = await http.get<FreeModelsEnvelope>("/freemodels/registry", { hideMessage: true });
@@ -274,4 +326,20 @@ export function loadFreeModelsRegistry(): Promise<void> {
     }
   })();
   return pending;
+}
+
+/** 设置开关并立即生效. 通常 Settings 页面在 saveSettings 后调用. */
+export function setFreeModelsRegistryEnabled(enabled: boolean): void {
+  localStorage.setItem("freemodels_registry_enabled", enabled ? "true" : "false");
+  if (!enabled) {
+    setEnvelope({ view: "free", updatedAt: "", totalModels: 0, models: [] });
+    try {
+      localStorage.removeItem(STORAGE_KEY);
+    } catch {
+      /* ignore */
+    }
+  } else {
+    pending = null; // 强制下次 loadFreeModelsRegistry 重新拉
+    loadFreeModelsRegistry();
+  }
 }
