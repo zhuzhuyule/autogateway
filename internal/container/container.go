@@ -107,6 +107,12 @@ func BuildContainer() (*dig.Container, error) {
 	if err := container.Provide(handler.NewUpstreamProbeHandler); err != nil {
 		return nil, err
 	}
+	if err := container.Provide(services.NewFreeModelsRegistry); err != nil {
+		return nil, err
+	}
+	if err := container.Provide(handler.NewFreeModelsHandler); err != nil {
+		return nil, err
+	}
 
 	// Model Routing rewrite (§13): selector + alias service + handlers.
 	if err := container.Provide(services.NewAliasService); err != nil {

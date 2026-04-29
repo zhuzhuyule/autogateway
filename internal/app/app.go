@@ -33,6 +33,7 @@ type App struct {
 	groupManager          *services.GroupManager
 	aggregateGroupService *services.AggregateGroupService
 	aliasService          *services.AliasService
+	freeModelsRegistry    *services.FreeModelsRegistry
 	logCleanupService     *services.LogCleanupService
 	requestLogService     *services.RequestLogService
 	cronChecker           *keypool.CronChecker
@@ -52,6 +53,7 @@ type AppParams struct {
 	GroupManager          *services.GroupManager
 	AggregateGroupService *services.AggregateGroupService
 	AliasService          *services.AliasService
+	FreeModelsRegistry    *services.FreeModelsRegistry
 	LogCleanupService     *services.LogCleanupService
 	RequestLogService     *services.RequestLogService
 	CronChecker           *keypool.CronChecker
@@ -70,6 +72,7 @@ func NewApp(params AppParams) *App {
 		groupManager:          params.GroupManager,
 		aggregateGroupService: params.AggregateGroupService,
 		aliasService:          params.AliasService,
+		freeModelsRegistry:    params.FreeModelsRegistry,
 		logCleanupService:     params.LogCleanupService,
 		requestLogService:     params.RequestLogService,
 		cronChecker:           params.CronChecker,
@@ -146,6 +149,11 @@ func (a *App) Start() error {
 		if err := a.aliasService.EnsureReservedSeeded(context.Background()); err != nil {
 			logrus.WithError(err).Warn("seed reserved aliases failed (non-fatal)")
 		}
+
+		// Pull the free-models registry from the public CDN; cached on disk
+		// for offline restart, refreshed every 6h. Non-fatal if upstream is
+		// unreachable — frontend has a static fallback list.
+		a.freeModelsRegistry.Start(context.Background())
 
 		a.settingsManager.Initialize(a.storage, a.groupManager, a.configManager.IsMaster())
 

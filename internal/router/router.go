@@ -51,6 +51,7 @@ func NewRouter(
 	modelCatalogHandler *handler.ModelCatalogHandler,
 	dedupHandler *handler.DedupHandler,
 	upstreamProbeHandler *handler.UpstreamProbeHandler,
+	freeModelsHandler *handler.FreeModelsHandler,
 	buildFS embed.FS,
 	indexPage []byte,
 ) *gin.Engine {
@@ -73,7 +74,7 @@ func NewRouter(
 
 	// 注册路由
 	registerSystemRoutes(router, serverHandler)
-	registerAPIRoutes(router, serverHandler, configManager, aliasHandler, aliasSuggestionHandler, routingSettingsHandler, modelCatalogHandler, dedupHandler, upstreamProbeHandler)
+	registerAPIRoutes(router, serverHandler, configManager, aliasHandler, aliasSuggestionHandler, routingSettingsHandler, modelCatalogHandler, dedupHandler, upstreamProbeHandler, freeModelsHandler)
 	registerProxyRoutes(router, proxyServer, groupManager, serverHandler, selector)
 	registerFrontendRoutes(router, buildFS, indexPage)
 
@@ -96,6 +97,7 @@ func registerAPIRoutes(
 	modelCatalogHandler *handler.ModelCatalogHandler,
 	dedupHandler *handler.DedupHandler,
 	upstreamProbeHandler *handler.UpstreamProbeHandler,
+	freeModelsHandler *handler.FreeModelsHandler,
 ) {
 	api := router.Group("/api")
 	api.Use(i18n.Middleware())
@@ -107,7 +109,7 @@ func registerAPIRoutes(
 	// 用户在 UI 改完即时生效,无需重启
 	protectedAPI := api.Group("")
 	protectedAPI.Use(middleware.Auth(serverHandler.SettingsManager))
-	registerProtectedAPIRoutes(protectedAPI, serverHandler, aliasHandler, aliasSuggestionHandler, routingSettingsHandler, modelCatalogHandler, dedupHandler, upstreamProbeHandler)
+	registerProtectedAPIRoutes(protectedAPI, serverHandler, aliasHandler, aliasSuggestionHandler, routingSettingsHandler, modelCatalogHandler, dedupHandler, upstreamProbeHandler, freeModelsHandler)
 }
 
 // registerPublicAPIRoutes 公开API路由
@@ -126,6 +128,7 @@ func registerProtectedAPIRoutes(
 	modelCatalogHandler *handler.ModelCatalogHandler,
 	dedupHandler *handler.DedupHandler,
 	upstreamProbeHandler *handler.UpstreamProbeHandler,
+	freeModelsHandler *handler.FreeModelsHandler,
 ) {
 	api.GET("/channel-types", serverHandler.CommonHandler.GetChannelTypes)
 
@@ -156,6 +159,7 @@ func registerProtectedAPIRoutes(
 	}
 
 	api.GET("/upstream/probe", upstreamProbeHandler.Probe)
+	api.GET("/freemodels/registry", freeModelsHandler.Registry)
 
 	groups := api.Group("/groups")
 	{

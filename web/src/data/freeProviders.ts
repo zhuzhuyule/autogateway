@@ -2,6 +2,12 @@
 // 数据参考: https://github.com/mnfst/awesome-free-llm-apis (MIT)
 // 同 provider 可能有多个 upstream host,反查时任一命中即视为关联。
 // 仅 host 完全相等才匹配,避免误伤(如 *.openai.com 与 api.openai.com 子集冲突)。
+//
+// FreeModels Registry (zhuzhuyule/FreeModels) 通过 /api/freemodels/registry
+// 提供运行时聚合的免费模型数据,优先级高于本文件的静态 FREE_MODELS 清单。
+// 见 isFree() 内的 Tier 0 查询。
+
+import { isFreeFromRegistry } from "@/api/freemodels";
 
 export type ChannelType = "openai" | "openai-response" | "gemini" | "anthropic";
 
@@ -974,6 +980,14 @@ export function isFree(
 ): boolean | null {
   if (!modelId) {
     return null;
+  }
+
+  // Tier 0: FreeModels Registry (聚合 9 家 provider 的实时清单, 6h 刷新)
+  // 在所有静态规则之前查 — 这是单一可信源,优先级最高。
+  // 注: 动态 import 避免循环依赖, 模块加载时 registry 可能还没初始化。
+  const r0 = isFreeFromRegistry(providerId, modelId);
+  if (r0 !== null) {
+    return r0;
   }
 
   // Tier 1: provider adapter
