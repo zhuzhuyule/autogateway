@@ -120,9 +120,12 @@ func (s *Server) RefreshGroupModels(c *gin.Context) {
 	if s.handleGroupError(c, err) {
 		return
 	}
+	// 把每个 modelId 在 FreeModels Registry 里 lookup 一次, 注入元数据.
+	// Provider hint 留空, 让 registry 用 bare modelId + 别名兜底.
+	enriched := s.enrichModels(models, "")
 	response.Success(c, gin.H{
-		"models": models,
-		"count":  len(models),
+		"models": enriched,
+		"count":  len(enriched),
 	})
 }
 

@@ -548,7 +548,12 @@ async function refreshModels() {
     if (!response.ok || result.code !== 0) {
       throw new Error(result.message || `HTTP ${response.status}`);
     }
-    const list = (result.data?.models || []) as string[];
+    // 后端从 v1.x 起返回 enriched objects [{id, is_free, free_tier, tier, speed, ...}]
+    // 老格式是 string[], 兼容两种
+    const raw = result.data?.models || [];
+    const list: string[] = raw.map((m: unknown) =>
+      typeof m === "string" ? m : ((m as { id: string }).id || "")
+    ).filter((s: string) => s);
     availableModels.value = list;
     modelsRefreshedAt.value = new Date().toISOString();
     if (list.length > 0) {

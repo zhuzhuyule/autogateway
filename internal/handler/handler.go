@@ -31,6 +31,7 @@ type Server struct {
 	KeyImportService           *services.KeyImportService
 	KeyDeleteService           *services.KeyDeleteService
 	LogService                 *services.LogService
+	FreeModelsRegistry         *services.FreeModelsRegistry
 	CommonHandler              *CommonHandler
 	EncryptionSvc              encryption.Service
 }
@@ -50,6 +51,7 @@ type NewServerParams struct {
 	KeyImportService           *services.KeyImportService
 	KeyDeleteService           *services.KeyDeleteService
 	LogService                 *services.LogService
+	FreeModelsRegistry         *services.FreeModelsRegistry
 	CommonHandler              *CommonHandler
 	EncryptionSvc              encryption.Service
 }
@@ -69,9 +71,50 @@ func NewServer(params NewServerParams) *Server {
 		KeyImportService:           params.KeyImportService,
 		KeyDeleteService:           params.KeyDeleteService,
 		LogService:                 params.LogService,
+		FreeModelsRegistry:         params.FreeModelsRegistry,
 		CommonHandler:              params.CommonHandler,
 		EncryptionSvc:              params.EncryptionSvc,
 	}
+}
+
+// EnrichedModel is the per-model object returned by RefreshGroupModels and
+// /api/models. Backend looks each id up in FreeModels Registry so the
+// frontend doesn't have to. All metadata is "best effort": fields default
+// to zero values when registry has no record.
+type EnrichedModel struct {
+	ID           string `json:"id"`
+	IsFree       bool   `json:"is_free"`
+	FreeTier     string `json:"free_tier,omitempty"` // "full" | "trial" | ""
+	Tier         string `json:"tier,omitempty"`      // "small" | "medium" | "large"
+	Speed        string `json:"speed,omitempty"`     // "fast" | "balanced" | "slow"
+	IsReasoning  bool   `json:"is_reasoning,omitempty"`
+	IsMultimodal bool   `json:"is_multimodal,omitempty"`
+	HasToolUse   bool   `json:"has_tool_use,omitempty"`
+	ContextLabel string `json:"context_label,omitempty"`
+}
+
+// enrichModels runs each id through the FreeModels Registry. providerHint
+// (e.g. group's freeProvider id) is optional; on miss we fall back to the
+// bare-modelId index.
+func (s *Server) enrichModels(ids []string, providerHint string) []EnrichedModel {
+	out := make([]EnrichedModel, 0, len(ids))
+	for _, id := range ids {
+		em := EnrichedModel{ID: id}
+		if s.FreeModelsRegistry != nil {
+			if meta := s.FreeModelsRegistry.Lookup(providerHint, id); meta != nil {
+				em.IsFree = meta.IsFree
+				em.FreeTier = meta.FreeTier
+				em.Tier = meta.Tier
+				em.Speed = meta.Speed
+				em.IsReasoning = meta.IsReasoning
+				em.IsMultimodal = meta.IsMultimodal
+				em.HasToolUse = meta.HasToolUse
+				em.ContextLabel = meta.ContextLabel
+			}
+		}
+		out = append(out, em)
+	}
+	return out
 }
 
 // LoginRequest represents the login request payload

@@ -3,7 +3,7 @@
 // any computed/watch reading via `isFree()` etc. auto-refreshes once the
 // registry lands. Falls back to localStorage on cold reload, then to the
 // bundled static FREE_MODELS list (in freeProviders.ts) on full miss.
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import http from "@/utils/http";
 
 export interface FreeModelMeta {
@@ -118,26 +118,23 @@ export function expandProviderAliases(providerId: string): string[] {
   return PROVIDER_ID_ALIASES[lower] || [lower];
 }
 
-// Indexed lookup tables — rebuilt every time freeModelsRef changes.
-// byProvMod: 同时索引 "<freemodels-provider>/<bareId>" 和 "<aliased-provider>/<bareId>"
-// byBareModel: 裸 modelId → meta list (用于不知 provider 时回退)
-let byProvMod: Map<string, FreeModelMeta> = new Map();
-let byBareModel: Map<string, FreeModelMeta[]> = new Map();
-
-function rebuildIndex(env: FreeModelsEnvelope | null): void {
-  byProvMod = new Map();
-  byBareModel = new Map();
-  if (!env) {
-    return;
+// Indexed lookup tables — 必须是 Vue computed 才能让所有 caller (render / watch /
+// 其它 computed) 在 freeModelsRef 改变时正确重算。 用 module-level mutable Map
+// 时 Vue 看不到 Map 内容变化, 即使触发了 ref 依赖也用的是旧索引。
+// byProvMod:  "<freemodels-provider>/<bareId>" 和 "<aliased-provider>/<bareId>"
+// byBareModel: 裸 modelId → meta list (不知 provider 时回退)
+const indexCache = computed(() => {
+  const byProvMod = new Map<string, FreeModelMeta>();
+  const byBareModel = new Map<string, FreeModelMeta[]>();
+  const env = freeModelsRef.value;
+  if (!env || !env.models) {
+    return { byProvMod, byBareModel };
   }
   for (const m of env.models) {
-    // 用 provider 精准剥前缀,避免误剥 "bytedance/" 这种作者前缀
     const bare = bareModelId(m.modelId, m.provider).toLowerCase();
-    // 全 provider 别名都索引一遍, 让 "zhipu/glm-4-flash" 和 "bigmodel/glm-4-flash" 都命中
     for (const alias of expandProviderAliases(m.provider)) {
       byProvMod.set(`${alias}/${bare}`, m);
     }
-    // 也索引原始 prefixed modelId, 兼容直接传 "bigmodel/glm-4-flash" 的 caller
     byProvMod.set(m.modelId.toLowerCase(), m);
 
     if (!byBareModel.has(bare)) {
@@ -145,18 +142,16 @@ function rebuildIndex(env: FreeModelsEnvelope | null): void {
     }
     byBareModel.get(bare)!.push(m);
   }
-}
+  return { byProvMod, byBareModel };
+});
 
 export function lookupRegistry(provider: string | undefined, modelId: string): FreeModelMeta | null {
-  // Touch the ref so reactivity tracking kicks in for callers inside
-  // computed/watch — value itself isn't used.
-  void freeModelsRef.value;
   if (!modelId) {
     return null;
   }
+  const { byProvMod, byBareModel } = indexCache.value;
   const bare = bareModelId(modelId, provider).toLowerCase();
   if (provider) {
-    // 尝试每个 provider 别名
     for (const alias of expandProviderAliases(provider)) {
       const hit = byProvMod.get(`${alias}/${bare}`);
       if (hit) {
@@ -164,12 +159,10 @@ export function lookupRegistry(provider: string | undefined, modelId: string): F
       }
     }
   }
-  // 也尝试原始 modelId.toLowerCase() (caller 可能直接传带前缀的 id)
   const direct = byProvMod.get(modelId.toLowerCase());
   if (direct) {
     return direct;
   }
-  // 裸 modelId 全局回退
   const list = byBareModel.get(bare);
   if (list && list.length) {
     return list[0];
@@ -184,10 +177,10 @@ export function lookupRegistry(provider: string | undefined, modelId: string): F
  *   null   — 注册表无信息,调用方 fallback 静态清单或保持未知
  */
 export function isFreeFromRegistry(provider: string | undefined, modelId: string): boolean | null {
-  void freeModelsRef.value;
   if (!modelId) {
     return null;
   }
+  const { byProvMod, byBareModel } = indexCache.value;
   const bare = bareModelId(modelId, provider).toLowerCase();
   if (provider) {
     for (const alias of expandProviderAliases(provider)) {
@@ -259,10 +252,7 @@ export function getModelTier(
 }
 
 function setEnvelope(env: FreeModelsEnvelope): void {
-  // 索引必须先建好, 再更新 reactive ref。否则 watcher 在 ref 变化时立刻重算,
-  // 此时 byProvMod / byBareModel 还是旧/空数据 → isFreeFromRegistry 返回 null
-  // → 全部模型 fallback 到本地静态清单 (gitee 只 11 条)。
-  rebuildIndex(env);
+  // 索引由 indexCache (computed) 自动维护, 改 freeModelsRef 即可。
   freeModelsRef.value = env;
 }
 
