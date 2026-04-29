@@ -7,7 +7,7 @@ import GroupCopyModal from "@/components/keys/GroupCopyModal.vue";
 import GroupFormModal from "@/components/keys/GroupFormModal.vue";
 import ModelAliasModal from "@/components/keys/ModelAliasModal.vue";
 import V3SubGroupTable from "@/components/v3/V3SubGroupTable.vue";
-import { findProviderByUpstreams, isFree } from "@/data/freeProviders";
+import { findFreeModel, findProviderByUpstreams, isFree } from "@/data/freeProviders";
 import type { APIKey, Group, GroupStatsResponse, KeyStatus, SubGroupInfo } from "@/types/models";
 import { appState, triggerSyncOperationRefresh } from "@/utils/app-state";
 import { copy as copyToClipboard } from "@/utils/clipboard";
@@ -460,31 +460,54 @@ const modelsRefreshedAtDisplay = computed(() => {
   }
 });
 
-function tierForModel(modelId: string): "fast" | "balanced" | "max" {
+// 关键字 → tier 映射,顺序敏感(先匹配 fast,再 max,否则 balanced)。
+// 透出给 tooltip 让用户能看懂判定依据。
+const FAST_KEYWORDS = ["flash", "haiku", "8b", "instant", "mini", "small"];
+const MAX_KEYWORDS = ["pro", "opus", "sonnet", "70b", "405b", "4o", "o1", "r1"];
+
+interface TierInference {
+  tier: "fast" | "balanced" | "max";
+  source: "preset" | "keyword" | "default";
+  reason: string;
+}
+
+function inferTier(modelId: string): TierInference {
+  // 1. 内置免费清单优先(显式声明的 tier 比关键字更可靠)
+  const preset = findFreeModel(modelId);
+  if (preset?.tier) {
+    return {
+      tier: preset.tier,
+      source: "preset",
+      reason: preset.notes ? `${preset.notes}` : `内置清单 (${preset.providerId})`,
+    };
+  }
   const id = modelId.toLowerCase();
-  if (
-    id.includes("flash") ||
-    id.includes("haiku") ||
-    id.includes("8b") ||
-    id.includes("instant") ||
-    id.includes("mini") ||
-    id.includes("small")
-  ) {
-    return "fast";
+  for (const kw of FAST_KEYWORDS) {
+    if (id.includes(kw)) {
+      return { tier: "fast", source: "keyword", reason: `名称含 "${kw}" → fast` };
+    }
   }
-  if (
-    id.includes("pro") ||
-    id.includes("opus") ||
-    id.includes("sonnet") ||
-    id.includes("70b") ||
-    id.includes("405b") ||
-    id.includes("4o") ||
-    id.includes("o1") ||
-    id.includes("r1")
-  ) {
-    return "max";
+  for (const kw of MAX_KEYWORDS) {
+    if (id.includes(kw)) {
+      return { tier: "max", source: "keyword", reason: `名称含 "${kw}" → max` };
+    }
   }
-  return "balanced";
+  return { tier: "balanced", source: "default", reason: "无关键字命中,默认 balanced" };
+}
+
+function tierForModel(modelId: string): "fast" | "balanced" | "max" {
+  return inferTier(modelId).tier;
+}
+
+function tierReasonFor(modelId: string): string {
+  const inf = inferTier(modelId);
+  const sourceLabel =
+    inf.source === "preset"
+      ? t("v3.tierFromPreset") || "✓ 预设清单"
+      : inf.source === "keyword"
+        ? t("v3.tierFromKeyword") || "推断"
+        : t("v3.tierDefault") || "默认";
+  return `${sourceLabel}: ${inf.reason}`;
 }
 
 function tierChipClass(tier: "fast" | "balanced" | "max"): string {
@@ -1520,9 +1543,14 @@ const filterCounts = computed(() => ({
                 <code class="v5-modelcard__name">{{ modelId }}</code>
               </div>
               <div class="v5-modelcard__row" style="margin-top: 6px; align-items: center; gap: 6px">
-                <span :class="tierChipClass(tierForModel(modelId))" style="flex-shrink: 0; font-size: 10px">
-                  {{ tierLabel(tierForModel(modelId)) }}
-                </span>
+                <n-tooltip trigger="hover" placement="top">
+                  <template #trigger>
+                    <span :class="tierChipClass(tierForModel(modelId))" style="flex-shrink: 0; font-size: 10px; cursor: help">
+                      {{ tierLabel(tierForModel(modelId)) }}
+                    </span>
+                  </template>
+                  {{ tierReasonFor(modelId) }}
+                </n-tooltip>
                 <FreeBadge v-if="isFreeModel(modelId)" :size="10" />
 
                 <span v-if="blockedSet.has(modelId)" class="v3-chip v3-chip--danger" style="flex-shrink: 0; font-size: 10px">
@@ -1569,9 +1597,14 @@ const filterCounts = computed(() => ({
                 <code class="v5-modelcard__name">{{ modelId }}</code>
               </div>
               <div class="v5-modelcard__row" style="margin-top: 6px; align-items: center; gap: 6px">
-                <span :class="tierChipClass(tierForModel(modelId))" style="flex-shrink: 0; font-size: 10px">
-                  {{ tierLabel(tierForModel(modelId)) }}
-                </span>
+                <n-tooltip trigger="hover" placement="top">
+                  <template #trigger>
+                    <span :class="tierChipClass(tierForModel(modelId))" style="flex-shrink: 0; font-size: 10px; cursor: help">
+                      {{ tierLabel(tierForModel(modelId)) }}
+                    </span>
+                  </template>
+                  {{ tierReasonFor(modelId) }}
+                </n-tooltip>
                 <FreeBadge v-if="isFreeModel(modelId)" :size="10" />
 
                 <span v-if="blockedSet.has(modelId)" class="v3-chip v3-chip--danger" style="flex-shrink: 0; font-size: 10px">
@@ -1607,9 +1640,14 @@ const filterCounts = computed(() => ({
                 <code class="v5-modelcard__name">{{ modelId }}</code>
               </div>
               <div class="v5-modelcard__row" style="margin-top: 6px; align-items: center; gap: 6px">
-                <span :class="tierChipClass(tierForModel(modelId))" style="flex-shrink: 0; font-size: 10px">
-                  {{ tierLabel(tierForModel(modelId)) }}
-                </span>
+                <n-tooltip trigger="hover" placement="top">
+                  <template #trigger>
+                    <span :class="tierChipClass(tierForModel(modelId))" style="flex-shrink: 0; font-size: 10px; cursor: help">
+                      {{ tierLabel(tierForModel(modelId)) }}
+                    </span>
+                  </template>
+                  {{ tierReasonFor(modelId) }}
+                </n-tooltip>
                 <FreeBadge v-if="isFreeModel(modelId)" :size="10" />
 
                 <span v-if="blockedSet.has(modelId)" class="v3-chip v3-chip--danger" style="flex-shrink: 0; font-size: 10px">
