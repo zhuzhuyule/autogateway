@@ -259,8 +259,11 @@ export function getModelTier(
 }
 
 function setEnvelope(env: FreeModelsEnvelope): void {
-  freeModelsRef.value = env;
+  // 索引必须先建好, 再更新 reactive ref。否则 watcher 在 ref 变化时立刻重算,
+  // 此时 byProvMod / byBareModel 还是旧/空数据 → isFreeFromRegistry 返回 null
+  // → 全部模型 fallback 到本地静态清单 (gitee 只 11 条)。
   rebuildIndex(env);
+  freeModelsRef.value = env;
 }
 
 function loadFromStorage(): boolean {
