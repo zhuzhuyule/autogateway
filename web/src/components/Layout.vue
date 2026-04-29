@@ -21,6 +21,7 @@ import {
 } from "@vicons/ionicons5";
 import { NDrawer, NDrawerContent, NIcon, useMessage } from "naive-ui";
 import { computed, onMounted, ref, watch } from "vue";
+import { loadFreeModelsRegistry } from "@/api/freemodels";
 import { useI18n } from "vue-i18n";
 import { useRoute, useRouter } from "vue-router";
 
@@ -58,6 +59,9 @@ function go(name: string) {
 
 onMounted(async () => {
   // Stats and badge counts are no longer displayed in the UI
+  // 进入主区域才有 authKey, 此时拉 FreeModels Registry 比 main.ts 早期调用更可靠
+  // (尤其 vite HMR 后 main.ts 不重跑, 早期那次失败时 registry 永远空).
+  loadFreeModelsRegistry();
 });
 
 const endpoint = computed(() => {
@@ -70,7 +74,7 @@ const endpoint = computed(() => {
 async function copyEndpoint() {
   const ok = await copyToClipboard(endpoint.value);
   if (ok) {
-    message.success(t("common.copySuccess") || "Copied");
+    message.success(t("common.copySuccess"));
   } else {
     message.error("Copy failed");
   }

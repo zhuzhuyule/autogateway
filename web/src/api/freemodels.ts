@@ -150,6 +150,11 @@ export function lookupRegistry(provider: string | undefined, modelId: string): F
     return null;
   }
   const { byProvMod, byBareModel } = indexCache.value;
+  // 懒加载: 如果 registry 还没填, 触发一次 fetch (不阻塞当前调用,
+  // reactive computed 数据到位后自动重算).
+  if (!freeModelsRef.value) {
+    void loadFreeModelsRegistry();
+  }
   const bare = bareModelId(modelId, provider).toLowerCase();
   if (provider) {
     for (const alias of expandProviderAliases(provider)) {
@@ -181,6 +186,9 @@ export function isFreeFromRegistry(provider: string | undefined, modelId: string
     return null;
   }
   const { byProvMod, byBareModel } = indexCache.value;
+  if (!freeModelsRef.value) {
+    void loadFreeModelsRegistry();
+  }
   const bare = bareModelId(modelId, provider).toLowerCase();
   if (provider) {
     for (const alias of expandProviderAliases(provider)) {
@@ -305,8 +313,10 @@ export function loadFreeModelsRegistry(): Promise<void> {
   loadFromStorage();
   pending = (async () => {
     try {
+      // 后端 freemodels_handler.go 直接 c.JSON(snap), 没有 {code,message,data} 信封,
+      // 所以 axios interceptor 拿到的 response.data 就是 envelope 本身.
       const r = await http.get<FreeModelsEnvelope>("/freemodels/registry", { hideMessage: true });
-      const env = (r as unknown as { data: FreeModelsEnvelope }).data;
+      const env = r as unknown as FreeModelsEnvelope;
       if (env && Array.isArray(env.models)) {
         setEnvelope(env);
         saveToStorage(env);
