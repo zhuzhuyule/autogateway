@@ -33,6 +33,8 @@ import {
 } from "@vicons/ionicons5";
 import { NIcon, NPagination, NSpin, NTooltip, useDialog, useMessage } from "naive-ui";
 import FreeBadge from "@/components/common/FreeBadge.vue";
+import SpeedBadge from "@/components/common/SpeedBadge.vue";
+import { getFreeStatus, lookupRegistry } from "@/api/freemodels";
 import { computed, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRouter } from "vue-router";
@@ -460,78 +462,86 @@ const modelsRefreshedAtDisplay = computed(() => {
   }
 });
 
-// 关键字 → tier 映射,顺序敏感(先匹配 fast,再 max,否则 balanced)。
-// 透出给 tooltip 让用户能看懂判定依据。
+// 速率档位优先取自 FreeModels Registry (无客户端推断)。
+// registry miss 时(模型未收录) → 内置清单 → 关键字推断 → 默认 balanced.
 const FAST_KEYWORDS = ["flash", "haiku", "8b", "instant", "mini", "small"];
-const MAX_KEYWORDS = ["pro", "opus", "sonnet", "70b", "405b", "4o", "o1", "r1"];
+const SLOW_KEYWORDS = ["pro", "opus", "sonnet", "70b", "405b", "4o", "o1", "r1"];
 
-interface TierInference {
-  tier: "fast" | "balanced" | "max";
-  source: "preset" | "keyword" | "default";
+interface SpeedInference {
+  speed: "fast" | "balanced" | "slow";
+  source: "registry" | "preset" | "keyword" | "default";
   reason: string;
 }
 
-function inferTier(modelId: string): TierInference {
-  // 1. 内置免费清单优先(显式声明的 tier 比关键字更可靠)
-  const preset = findFreeModel(modelId);
-  if (preset?.tier) {
+function inferSpeed(modelId: string): SpeedInference {
+  // Tier 0: registry 直读 (FreeModels Hub 数据源, 单一可信源)
+  const reg = lookupRegistry(matchedProvider.value?.id, modelId);
+  if (reg?.speed && (reg.speed === "fast" || reg.speed === "balanced" || reg.speed === "slow")) {
     return {
-      tier: preset.tier,
-      source: "preset",
-      reason: preset.notes ? `${preset.notes}` : `内置清单 (${preset.providerId})`,
+      speed: reg.speed,
+      source: "registry",
+      reason: `tier=${reg.tier || "?"}${reg.contextLabel ? " · " + reg.contextLabel : ""}${reg.isReasoning ? " · reasoning" : ""}`,
     };
   }
+  // Tier 1: 内置静态清单 (preset.tier 是老 fast/balanced/max 三档)
+  const preset = findFreeModel(modelId);
+  if (preset?.tier) {
+    const speed: "fast" | "balanced" | "slow" =
+      preset.tier === "fast" ? "fast" : preset.tier === "max" ? "slow" : "balanced";
+    return {
+      speed,
+      source: "preset",
+      reason: preset.notes || `内置清单 (${preset.providerId})`,
+    };
+  }
+  // Tier 2: 关键字推断 (兜底)
   const id = modelId.toLowerCase();
   for (const kw of FAST_KEYWORDS) {
     if (id.includes(kw)) {
-      return { tier: "fast", source: "keyword", reason: `名称含 "${kw}" → fast` };
+      return { speed: "fast", source: "keyword", reason: `名称含 "${kw}" → fast` };
     }
   }
-  for (const kw of MAX_KEYWORDS) {
+  for (const kw of SLOW_KEYWORDS) {
     if (id.includes(kw)) {
-      return { tier: "max", source: "keyword", reason: `名称含 "${kw}" → max` };
+      return { speed: "slow", source: "keyword", reason: `名称含 "${kw}" → slow` };
     }
   }
-  return { tier: "balanced", source: "default", reason: "无关键字命中,默认 balanced" };
+  return { speed: "balanced", source: "default", reason: "无信息,默认 balanced" };
 }
 
-function tierForModel(modelId: string): "fast" | "balanced" | "max" {
-  return inferTier(modelId).tier;
+function speedForModel(modelId: string): "fast" | "balanced" | "slow" {
+  return inferSpeed(modelId).speed;
 }
 
-function tierReasonFor(modelId: string): string {
-  const inf = inferTier(modelId);
+function speedReasonFor(modelId: string): string {
+  const inf = inferSpeed(modelId);
   const sourceLabel =
-    inf.source === "preset"
-      ? t("v3.tierFromPreset") || "✓ 预设清单"
-      : inf.source === "keyword"
-        ? t("v3.tierFromKeyword") || "推断"
-        : t("v3.tierDefault") || "默认";
+    inf.source === "registry"
+      ? t("v3.tierFromRegistry") || "✓ FreeModels"
+      : inf.source === "preset"
+        ? t("v3.tierFromPreset") || "✓ 预设清单"
+        : inf.source === "keyword"
+          ? t("v3.tierFromKeyword") || "推断"
+          : t("v3.tierDefault") || "默认";
   return `${sourceLabel}: ${inf.reason}`;
-}
-
-function tierChipClass(tier: "fast" | "balanced" | "max"): string {
-  if (tier === "fast") {
-    return "v3-chip v3-chip--ok";
-  }
-  if (tier === "max") {
-    return "v3-chip v3-chip--info";
-  }
-  return "v3-chip v3-chip--warn";
-}
-
-function tierLabel(tier: "fast" | "balanced" | "max"): string {
-  if (tier === "fast") {
-    return t("v3.fast") || "fast";
-  }
-  if (tier === "max") {
-    return t("v3.max") || "max";
-  }
-  return t("v3.balanced") || "balanced";
 }
 
 function isFreeModel(modelId: string): boolean {
   return isFree(matchedProvider.value?.id, modelId) === true;
+}
+
+// 区分 full vs trial — registry 优先, fallback 到 isFree.
+// 返回值用于 FreeBadge 的 variant prop.
+function freeVariantFor(modelId: string): "full" | "trial" | null {
+  const status = getFreeStatus(matchedProvider.value?.id, modelId);
+  if (status === "trial") {
+    return "trial";
+  }
+  if (status === "full") {
+    return "full";
+  }
+  // registry miss: 用 isFree 静态判定;能判免费就当 full,否则不展示 badge
+  return isFreeModel(modelId) ? "full" : null;
 }
 
 // tab 角标:specified 模式展示白名单数量(强调已暴露这件事);
@@ -1545,13 +1555,15 @@ const filterCounts = computed(() => ({
               <div class="v5-modelcard__row" style="margin-top: 6px; align-items: center; gap: 6px">
                 <n-tooltip trigger="hover" placement="top">
                   <template #trigger>
-                    <span :class="tierChipClass(tierForModel(modelId))" style="flex-shrink: 0; font-size: 10px; cursor: help">
-                      {{ tierLabel(tierForModel(modelId)) }}
-                    </span>
+                    <SpeedBadge :speed="speedForModel(modelId)" :size="11" />
                   </template>
-                  {{ tierReasonFor(modelId) }}
+                  {{ speedReasonFor(modelId) }}
                 </n-tooltip>
-                <FreeBadge v-if="isFreeModel(modelId)" :size="10" />
+                <FreeBadge
+                  v-if="freeVariantFor(modelId)"
+                  :variant="freeVariantFor(modelId) === 'trial' ? 'trial' : 'full'"
+                  :size="11"
+                />
 
                 <span v-if="blockedSet.has(modelId)" class="v3-chip v3-chip--danger" style="flex-shrink: 0; font-size: 10px">
                   🚫 {{ t("v3.blocked") || "blocked" }}
@@ -1599,13 +1611,15 @@ const filterCounts = computed(() => ({
               <div class="v5-modelcard__row" style="margin-top: 6px; align-items: center; gap: 6px">
                 <n-tooltip trigger="hover" placement="top">
                   <template #trigger>
-                    <span :class="tierChipClass(tierForModel(modelId))" style="flex-shrink: 0; font-size: 10px; cursor: help">
-                      {{ tierLabel(tierForModel(modelId)) }}
-                    </span>
+                    <SpeedBadge :speed="speedForModel(modelId)" :size="11" />
                   </template>
-                  {{ tierReasonFor(modelId) }}
+                  {{ speedReasonFor(modelId) }}
                 </n-tooltip>
-                <FreeBadge v-if="isFreeModel(modelId)" :size="10" />
+                <FreeBadge
+                  v-if="freeVariantFor(modelId)"
+                  :variant="freeVariantFor(modelId) === 'trial' ? 'trial' : 'full'"
+                  :size="11"
+                />
 
                 <span v-if="blockedSet.has(modelId)" class="v3-chip v3-chip--danger" style="flex-shrink: 0; font-size: 10px">
                   🚫 {{ t("v3.blocked") || "blocked" }}
@@ -1642,13 +1656,15 @@ const filterCounts = computed(() => ({
               <div class="v5-modelcard__row" style="margin-top: 6px; align-items: center; gap: 6px">
                 <n-tooltip trigger="hover" placement="top">
                   <template #trigger>
-                    <span :class="tierChipClass(tierForModel(modelId))" style="flex-shrink: 0; font-size: 10px; cursor: help">
-                      {{ tierLabel(tierForModel(modelId)) }}
-                    </span>
+                    <SpeedBadge :speed="speedForModel(modelId)" :size="11" />
                   </template>
-                  {{ tierReasonFor(modelId) }}
+                  {{ speedReasonFor(modelId) }}
                 </n-tooltip>
-                <FreeBadge v-if="isFreeModel(modelId)" :size="10" />
+                <FreeBadge
+                  v-if="freeVariantFor(modelId)"
+                  :variant="freeVariantFor(modelId) === 'trial' ? 'trial' : 'full'"
+                  :size="11"
+                />
 
                 <span v-if="blockedSet.has(modelId)" class="v3-chip v3-chip--danger" style="flex-shrink: 0; font-size: 10px">
                   🚫 {{ t("v3.blocked") || "blocked" }}

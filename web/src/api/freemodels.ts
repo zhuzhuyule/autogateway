@@ -117,6 +117,57 @@ export function isFreeFromRegistry(provider: string | undefined, modelId: string
   return null;
 }
 
+/**
+ * 三态免费身份(细化 isFree):
+ *   "full"  — 完全免费 (freeTier=full, e.g. openrouter :free, gitee 完全免费)
+ *   "trial" — 体验模式 (freeTier=trial, 目前主要是 gitee 145 个体验模型)
+ *   "paid"  — 注册表确定付费
+ *   null    — 注册表未收录,fallback 上层判断
+ */
+export function getFreeStatus(
+  provider: string | undefined,
+  modelId: string
+): "full" | "trial" | "paid" | null {
+  const meta = lookupRegistry(provider, modelId);
+  if (!meta) {
+    return null;
+  }
+  if (!meta.isFree) {
+    return "paid";
+  }
+  return meta.freeTier === "trial" ? "trial" : "full";
+}
+
+/** registry 直出 speed (fast/balanced/slow), 找不到返回 null. */
+export function getModelSpeed(
+  provider: string | undefined,
+  modelId: string
+): "fast" | "balanced" | "slow" | null {
+  const meta = lookupRegistry(provider, modelId);
+  if (!meta || !meta.speed) {
+    return null;
+  }
+  if (meta.speed === "fast" || meta.speed === "balanced" || meta.speed === "slow") {
+    return meta.speed;
+  }
+  return null;
+}
+
+/** registry 直出 tier (small/medium/large), 找不到返回 null. */
+export function getModelTier(
+  provider: string | undefined,
+  modelId: string
+): "small" | "medium" | "large" | null {
+  const meta = lookupRegistry(provider, modelId);
+  if (!meta || !meta.tier) {
+    return null;
+  }
+  if (meta.tier === "small" || meta.tier === "medium" || meta.tier === "large") {
+    return meta.tier;
+  }
+  return null;
+}
+
 function setEnvelope(env: FreeModelsEnvelope): void {
   freeModelsRef.value = env;
   rebuildIndex(env);
