@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"encoding/json"
 	"net/http"
 	"sort"
 	"strings"
@@ -52,36 +53,48 @@ func (h *ModelCatalogHandler) ListModels(c *gin.Context) {
 	groups := h.groupManager.GetAllGroups()
 	modelMap := make(map[string]*CatalogModel)
 
+	addModel := func(modelID, groupName string) {
+		modelID = strings.TrimSpace(modelID)
+		if modelID == "" {
+			return
+		}
+		entry, ok := modelMap[modelID]
+		if !ok {
+			entry = &CatalogModel{
+				ID:          modelID,
+				DisplayName: formatDisplayName(modelID),
+				Groups:      []string{},
+				Providers:   []string{},
+			}
+			modelMap[modelID] = entry
+		}
+		entry.Groups = appendUnique(entry.Groups, groupName)
+	}
+
 	for _, group := range groups {
 		if group.GroupType == "aggregate" {
 			continue
 		}
 
+		// 1. ModelRedirectMap 的 source model — 客户端可调的"虚拟"名
 		for sourceModel := range group.ModelRedirectMap {
-			if _, exists := modelMap[sourceModel]; !exists {
-				modelMap[sourceModel] = &CatalogModel{
-					ID:          sourceModel,
-					DisplayName: formatDisplayName(sourceModel),
-					Groups:      []string{},
-					Providers:   []string{},
-				}
-			}
-			modelMap[sourceModel].Groups = appendUnique(
-				modelMap[sourceModel].Groups, group.Name)
+			addModel(sourceModel, group.Name)
 		}
 
-		if len(group.ModelRedirectMap) == 0 && group.TestModel != "" {
-			model := group.TestModel
-			if _, exists := modelMap[model]; !exists {
-				modelMap[model] = &CatalogModel{
-					ID:          model,
-					DisplayName: formatDisplayName(model),
-					Groups:      []string{},
-					Providers:   []string{},
+		// 2. AvailableModels — 上游 /v1/models 真实拉到的清单 (主数据源)
+		//    之前完全被忽略, 这是 catalog 缺模型的根因。
+		if len(group.AvailableModels) > 0 {
+			var available []string
+			if err := json.Unmarshal(group.AvailableModels, &available); err == nil {
+				for _, m := range available {
+					addModel(m, group.Name)
 				}
 			}
-			modelMap[model].Groups = appendUnique(
-				modelMap[model].Groups, group.Name)
+		}
+
+		// 3. TestModel 兜底 (仅当前两者都没东西时, 不要重复添加)
+		if len(group.ModelRedirectMap) == 0 && len(group.AvailableModels) == 0 && group.TestModel != "" {
+			addModel(group.TestModel, group.Name)
 		}
 	}
 

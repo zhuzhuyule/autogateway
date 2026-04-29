@@ -749,6 +749,9 @@ export default {
     freeOnly: "🆓 only",
     freeTag: "🆓",
     statsLine: "Total {total} · Showing {filtered} · 🆓 {free}",
+    onlyConfigured: "configured only",
+    registryOnly: "registry only",
+    registryOnlyTip: "FreeModels registry knows this model, but you haven't configured a matching group yet.",
   },
   dedup: {
     title: "Model Deduplication",

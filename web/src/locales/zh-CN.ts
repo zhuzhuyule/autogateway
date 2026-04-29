@@ -728,6 +728,9 @@ export default {
     freeOnly: "仅 🆓",
     freeTag: "🆓",
     statsLine: "共 {total} · 显示 {filtered} · 🆓 {free}",
+    onlyConfigured: "仅已配置",
+    registryOnly: "registry only",
+    registryOnlyTip: "FreeModels 注册表收录此模型，但你尚未配置对应 group。配置 group 后即可调用。",
   },
   dedup: {
     title: "模型去重",

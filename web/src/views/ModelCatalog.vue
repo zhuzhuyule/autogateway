@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { findFreeModel, isFree, FREE_PROVIDERS, type ModelTier } from "@/data/freeProviders";
-import { getFreeStatus, lookupRegistry } from "@/api/freemodels";
+import { freeModelsRef, getFreeStatus, lookupRegistry } from "@/api/freemodels";
 import FreeBadge from "@/components/common/FreeBadge.vue";
 import SpeedBadge from "@/components/common/SpeedBadge.vue";
 import { RefreshOutline, SearchOutline } from "@vicons/ionicons5";
@@ -16,6 +16,8 @@ interface ModelItem {
   display_name: string;
   owned_by: string;
   groups: string[];
+  /** 该模型是否已绑定到用户的某个 group (groups.length > 0). */
+  configured: boolean;
 }
 
 interface AugmentedItem extends ModelItem {
@@ -69,14 +71,41 @@ const searchText = ref("");
 const tierFilter = ref<ModelTier | "all">("all");
 const providerFilter = ref<string | "all">("all");
 const freeOnly = ref(false);
+const configuredOnly = ref(false);
 
 const authHeader = computed(() => {
   const k = localStorage.getItem("authKey");
   return k ? `Bearer ${k}` : "";
 });
 
+// 合并本地已配的 catalog (catalogData, 来自 /api/models) 和 FreeModels Registry
+// 的全量免费清单, 以 modelId 去重。 重复条目以本地为基底 (有 groups 信息),
+// registry 仅补未在本地的免费模型 (configured=false, 提示用户去配置 group)。
+const mergedRows = computed<ModelItem[]>(() => {
+  const out = new Map<string, ModelItem>();
+  for (const r of catalogData.value) {
+    out.set(r.id, { ...r, configured: (r.groups || []).length > 0 });
+  }
+  const env = freeModelsRef.value;
+  if (env?.models) {
+    for (const m of env.models) {
+      if (out.has(m.modelId)) {
+        continue; // 重复 → 以本地 list 中的为准, 不再追加
+      }
+      out.set(m.modelId, {
+        id: m.modelId,
+        display_name: m.name || m.modelId,
+        owned_by: m.provider || "",
+        groups: [],
+        configured: false,
+      });
+    }
+  }
+  return Array.from(out.values());
+});
+
 const augmented = computed<AugmentedItem[]>(() =>
-  catalogData.value.map(row => {
+  mergedRows.value.map(row => {
     // Registry 单一可信源:能 hit 就直接用,字段都齐全(isFree / isMultimodal /
     // hasToolUse / isReasoning / contextLabel / tier / speed)。
     const reg = lookupRegistry(undefined, row.id);
@@ -135,6 +164,9 @@ const filtered = computed<AugmentedItem[]>(() => {
         return false;
       }
       if (freeOnly.value && !row.isFree) {
+        return false;
+      }
+      if (configuredOnly.value && !row.configured) {
         return false;
       }
       if (tierFilter.value !== "all" && row.tier !== tierFilter.value) {
@@ -291,6 +323,13 @@ async function fetchCatalog() {
         <FreeBadge compact :size="11" />
         <span style="margin-left: 4px">{{ t("modelcatalog.freeOnly") || "Free only" }}</span>
       </span>
+      <span
+        class="v3-pill"
+        :class="{ 'v3-pill--active': configuredOnly }"
+        @click="configuredOnly = !configuredOnly"
+      >
+        {{ t("modelcatalog.onlyConfigured") || "已配置" }}
+      </span>
       <span style="color: var(--v3-line); margin: 0 4px">|</span>
       <span
         class="v3-pill"
@@ -369,8 +408,12 @@ async function fetchCatalog() {
             {{ row.owned_by || "—" }}
           </div>
           <div style="display: flex; gap: 4px; flex-wrap: wrap">
-            <span v-if="!row.groups || row.groups.length === 0" class="v3-chip v3-chip--warn">
-              {{ t("modelcatalog.noGroups") || "no groups" }}
+            <span
+              v-if="!row.configured"
+              class="v3-chip v3-chip--warn"
+              :title="t('modelcatalog.registryOnlyTip') || 'FreeModels 注册表知道此模型,但你尚未配置对应 group'"
+            >
+              {{ t("modelcatalog.registryOnly") || "registry only" }}
             </span>
             <span
               v-for="g in (row.groups || []).slice(0, 4)"

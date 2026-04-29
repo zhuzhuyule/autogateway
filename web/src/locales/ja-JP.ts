@@ -748,6 +748,9 @@ export default {
     freeOnly: "🆓 のみ",
     freeTag: "🆓",
     statsLine: "総数 {total} · 表示 {filtered} · 🆓 {free}",
+    onlyConfigured: "設定済みのみ",
+    registryOnly: "registry only",
+    registryOnlyTip: "FreeModels レジストリには登録されていますが、対応する group が未設定です。",
   },
   dedup: {
     title: "モデル重複排除",
