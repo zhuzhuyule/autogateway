@@ -26,7 +26,10 @@ import (
 )
 
 const (
-	freeModelsURL          = "https://ofind.cn/FreeModels/data/views/free/models.json"
+	// view=all 比 view=free 多收录 trial 模型 (Gitee 体验模式 11 个)
+	// 和 paid 模型. isFree 标志位决定是否免费, freeTier 区分 full/trial.
+	// 拉 all 才能让前端正确识别这三态.
+	freeModelsURL          = "https://ofind.cn/FreeModels/data/views/all/models.json"
 	freeModelsRefreshEvery = 6 * time.Hour
 	freeModelsCachePath    = "data/freemodels-cache.json"
 	freeModelsHTTPTimeout  = 15 * time.Second
@@ -35,25 +38,27 @@ const (
 // FreeModelMeta is the subset of fields we expose to the rest of the app.
 // Field tags match the upstream JSON exactly; unused fields stay off the struct.
 type FreeModelMeta struct {
-	Provider     string   `json:"provider"`
-	ModelID      string   `json:"modelId"`
-	Name         string   `json:"name"`
-	IsFree       bool     `json:"isFree"`
-	BillingMode  string   `json:"billingMode"`  // "free" | "trial" | "paid"
-	FreeTier     string   `json:"freeTier"`     // "full" | "trial" | ""
-	FreeKind     string   `json:"freeKind"`     // "permanent" | "rate-limited" | ...
-	ContextSize  int      `json:"contextSize"`
-	ContextLabel string   `json:"contextLabel"`
-	Tier         string   `json:"tier"`  // "small" | "medium" | "large"
-	Speed        string   `json:"speed"` // "fast" | "balanced" | "slow"
-	IsReasoning  bool     `json:"isReasoning"`
-	IsMultimodal bool     `json:"isMultimodal"`
-	HasToolUse   bool     `json:"hasToolUse"`
-	PriceInput   float64  `json:"priceInput"`
-	PriceOutput  float64  `json:"priceOutput"`
-	ModelFamily  string   `json:"modelFamily"`
-	Aliases      []string `json:"aliases"` // 跨 provider 同名,e.g. ["groq/llama-3.3-70b-versatile"]
-	Tags         []string `json:"tags"`
+	Provider         string                 `json:"provider"`
+	ModelID          string                 `json:"modelId"`
+	Name             string                 `json:"name"`
+	IsFree           bool                   `json:"isFree"`
+	IsExperienceable bool                   `json:"isExperienceable"` // gitee 体验额度 (可体验非完全免费)
+	BillingMode      string                 `json:"billingMode"`      // "free" | "trial" | "paid"
+	FreeTier         string                 `json:"freeTier"`         // "full" | "trial" | "none" | ""
+	FreeKind         string                 `json:"freeKind"`         // "permanent" | "rate-limited" | ...
+	ContextSize      int                    `json:"contextSize"`
+	ContextLabel     string                 `json:"contextLabel"`
+	Tier             string                 `json:"tier"`  // "small" | "medium" | "large"
+	Speed            string                 `json:"speed"` // "fast" | "balanced" | "slow"
+	IsReasoning      bool                   `json:"isReasoning"`
+	IsMultimodal     bool                   `json:"isMultimodal"`
+	HasToolUse       bool                   `json:"hasToolUse"`
+	PriceInput       float64                `json:"priceInput"`
+	PriceOutput      float64                `json:"priceOutput"`
+	ModelFamily      string                 `json:"modelFamily"`
+	Aliases          []string               `json:"aliases"` // 跨 provider 同名
+	Tags             []string               `json:"tags"`
+	Metadata         map[string]interface{} `json:"metadata,omitempty"` // provider 原生 meta, 含 gitee 的 isExperienceable / isFullyFree / freeUse 等
 }
 
 // freeModelsEnvelope is the upstream JSON shape.
@@ -163,6 +168,23 @@ func (r *FreeModelsRegistry) replaceIndex(env freeModelsEnvelope) {
 	byModelOnly := make(map[string][]*FreeModelMeta)
 	for i := range env.Models {
 		m := &env.Models[i]
+		// Normalize: 把 provider-原生信号映射到统一字段, 让 frontend 不必懂各家细节.
+		// gitee 的"体验模式"在原始 JSON 里是 freeTier="none" + isExperienceable=true (root),
+		// 我们规范化成标准的 freeTier=trial + isFree=true, 跟其它 provider 的 trial 对齐.
+		if m.IsExperienceable {
+			m.IsFree = true // 体验额度 = 用户可免费使用 (受配额)
+			if m.FreeTier == "" || m.FreeTier == "none" {
+				m.FreeTier = "trial"
+			}
+		}
+		if m.Metadata != nil {
+			if fully, ok := m.Metadata["isFullyFree"].(bool); ok && fully {
+				m.IsFree = true
+				if m.FreeTier == "" || m.FreeTier == "none" {
+					m.FreeTier = "full"
+				}
+			}
+		}
 		key := provModKey(m.Provider, m.ModelID)
 		byProvMod[key] = m
 		bare := strings.ToLower(m.ModelID)
