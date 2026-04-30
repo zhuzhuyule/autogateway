@@ -962,6 +962,17 @@ export default {
     enabledLabel: "是否启用",
   },
   v5: {
+    // 多选批量操作 toolbar
+    bulkSelected: "已选 {n} 个",
+    bulkAddExposed: "批量加入暴露",
+    bulkRemoveExposed: "批量移除暴露",
+    bulkBlock: "批量加入黑名单",
+    bulkUnblock: "批量解除拉黑",
+    bulkClear: "取消选择",
+    bulkAddedExposed: "已加入 {n} 个",
+    bulkRemovedExposed: "已移除 {n} 个",
+    bulkBlocked: "已拉黑 {n} 个",
+    bulkUnblocked: "已解除拉黑 {n} 个",
     // Group detail hero hints — friendly, non-technical
     hintOpenAI: "把这个地址当作 OpenAI SDK 的 base_url 用即可。",
     hintAnthropic: "把这个地址当作 Anthropic SDK 的 base_url 用即可。",

@@ -34,7 +34,7 @@ import {
 import { NIcon, NPagination, NSpin, NTooltip, useDialog, useMessage } from "naive-ui";
 import FreeBadge from "@/components/common/FreeBadge.vue";
 import SpeedBadge from "@/components/common/SpeedBadge.vue";
-import { lookupRegistry } from "@/api/freemodels";
+import { getFreeStatus, lookupRegistry } from "@/api/freemodels";
 import { computed, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRouter } from "vue-router";
@@ -584,7 +584,18 @@ type RoutingMode = "passthrough" | "specified";
 const routingMode = ref<RoutingMode>("passthrough");
 const exposedModels = ref<string[]>([]);
 const blockedModels = ref<string[]>([]);
-const availFilter = ref<"all" | "free" | "paid">("all");
+const availFilter = ref<"all" | "free" | "trial" | "paid">("all");
+
+// 仅 Gitee 显示 "体验" 过滤 (trial-quota 模式只 gitee/longcat/nvidia 有,
+// 但只有 gitee 把它作为常态产品定位 — 其它两家也按业务展示)
+const showTrialFilter = computed(() => {
+  const id = (matchedProvider.value?.id || "").toLowerCase();
+  return id === "gitee-ai" || id === "longcat" || id === "nvidia-nim";
+});
+
+function modelFreeKind(modelId: string): "full" | "trial" | "paid" | null {
+  return getFreeStatus(matchedProvider.value?.id, modelId);
+}
 const savingMode = ref(false);
 
 function syncFromGroup() {
@@ -612,9 +623,22 @@ const filteredExposed = computed(() => {
     list = list.filter(m => m.toLowerCase().includes(q));
   }
   if (availFilter.value === "free") {
-    list = list.filter(m => isFreeModel(m));
+    // "免费" = 完全免费 (full), 不含 trial — 让用户能区分
+    list = list.filter(m => {
+      const k = modelFreeKind(m);
+      if (k === "full") return true;
+      if (k !== null) return false;
+      return isFreeModel(m); // registry miss fallback
+    });
+  } else if (availFilter.value === "trial") {
+    list = list.filter(m => modelFreeKind(m) === "trial");
   } else if (availFilter.value === "paid") {
-    list = list.filter(m => !isFreeModel(m));
+    list = list.filter(m => {
+      const k = modelFreeKind(m);
+      if (k === "paid") return true;
+      if (k !== null) return false;
+      return !isFreeModel(m);
+    });
   }
   return list;
 });
@@ -627,9 +651,22 @@ const filteredAvailable = computed(() => {
     list = list.filter(m => m.toLowerCase().includes(q));
   }
   if (availFilter.value === "free") {
-    list = list.filter(m => isFreeModel(m));
+    // "免费" = 完全免费 (full), 不含 trial — 让用户能区分
+    list = list.filter(m => {
+      const k = modelFreeKind(m);
+      if (k === "full") return true;
+      if (k !== null) return false;
+      return isFreeModel(m); // registry miss fallback
+    });
+  } else if (availFilter.value === "trial") {
+    list = list.filter(m => modelFreeKind(m) === "trial");
   } else if (availFilter.value === "paid") {
-    list = list.filter(m => !isFreeModel(m));
+    list = list.filter(m => {
+      const k = modelFreeKind(m);
+      if (k === "paid") return true;
+      if (k !== null) return false;
+      return !isFreeModel(m);
+    });
   }
   return list;
 });
@@ -1598,10 +1635,19 @@ const filterCounts = computed(() => ({
                 {{ t("common.all") || "All" }}
               </button>
               <button class="v3-btn v3-btn--sm" :class="{ 'v3-btn--accent': availFilter === 'free' }" @click="availFilter = 'free'">
-                <FreeBadge :label="t('modelcatalog.freeTag') || 'Free'" />
+                <FreeBadge />
+                {{ t("v3.free") || "免费" }}
+              </button>
+              <button
+                v-if="showTrialFilter"
+                class="v3-btn v3-btn--sm"
+                :class="{ 'v3-btn--accent': availFilter === 'trial' }"
+                @click="availFilter = 'trial'"
+              >
+                {{ t("v3.trial") || "体验" }}
               </button>
               <button class="v3-btn v3-btn--sm" :class="{ 'v3-btn--accent': availFilter === 'paid' }" @click="availFilter = 'paid'">
-                {{ t("v3.paid") || "Paid" }}
+                {{ t("v3.paid") || "收费" }}
               </button>
             </div>
           </div>
