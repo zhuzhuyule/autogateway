@@ -22,7 +22,8 @@ func (h *UpstreamProbeHandler) Probe(c *gin.Context) {
 		response.ErrorI18nFromAPIError(c, app_errors.ErrBadRequest, "validation.invalid_payload")
 		return
 	}
-	res, err := services.ProbeUpstream(c.Request.Context(), raw)
+	prefer := strings.TrimSpace(c.Query("prefer"))
+	res, err := services.ProbeUpstream(c.Request.Context(), raw, prefer)
 	if err != nil {
 		response.Error(c, app_errors.NewAPIError(app_errors.ErrBadGateway, err.Error()))
 		return

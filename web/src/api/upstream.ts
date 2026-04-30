@@ -9,6 +9,9 @@ export interface ProbeResult {
 }
 
 export const upstreamApi = {
-  probe: (url: string) =>
-    http.get<ProbeResult>("/upstream/probe", { params: { url }, hideMessage: true }),
+  probe: (url: string, prefer?: string) =>
+    http.get<ProbeResult>("/upstream/probe", {
+      params: prefer ? { url, prefer } : { url },
+      hideMessage: true,
+    }),
 };

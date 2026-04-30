@@ -20,7 +20,7 @@ func TestProbeOpenAIStyle(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	got, err := ProbeUpstream(ctx, srv.URL)
+	got, err := ProbeUpstream(ctx, srv.URL, "")
 	if err != nil {
 		t.Fatalf("ProbeUpstream returned error: %v", err)
 	}
@@ -42,7 +42,7 @@ func TestProbeAnthropicStyle(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	got, err := ProbeUpstream(context.Background(), srv.URL)
+	got, err := ProbeUpstream(context.Background(), srv.URL, "")
 	if err != nil {
 		t.Fatalf("ProbeUpstream returned error: %v", err)
 	}
@@ -61,7 +61,7 @@ func TestProbeGeminiStyle(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	got, err := ProbeUpstream(context.Background(), srv.URL)
+	got, err := ProbeUpstream(context.Background(), srv.URL, "")
 	if err != nil {
 		t.Fatalf("ProbeUpstream returned error: %v", err)
 	}
@@ -79,16 +79,33 @@ func TestProbeUnknown(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	_, err := ProbeUpstream(context.Background(), srv.URL)
+	_, err := ProbeUpstream(context.Background(), srv.URL, "")
 	if err == nil {
 		t.Fatalf("expected error for unknown upstream, got nil")
 	}
 }
 
 func TestProbeRejectsNonHTTP(t *testing.T) {
-	_, err := ProbeUpstream(context.Background(), "file:///etc/passwd")
+	_, err := ProbeUpstream(context.Background(), "file:///etc/passwd", "")
 	if err == nil {
 		t.Fatalf("expected scheme rejection, got nil")
+	}
+}
+
+// 多协议 provider (e.g. 智谱 bigmodel): /v1/messages 与 /v1/models 都返回 401,
+// 默认 rank 会落到 anthropic. 调用方传 prefer="openai" 应优先返回 openai.
+func TestProbePreferOverridesRank(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer srv.Close()
+
+	got, err := ProbeUpstream(context.Background(), srv.URL, "openai")
+	if err != nil {
+		t.Fatalf("ProbeUpstream returned error: %v", err)
+	}
+	if got.ChannelType != "openai" {
+		t.Errorf("expected openai (prefer override), got %q", got.ChannelType)
 	}
 }
 
@@ -100,7 +117,7 @@ func TestProbeRealAnthropicShape(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	got, err := ProbeUpstream(context.Background(), srv.URL)
+	got, err := ProbeUpstream(context.Background(), srv.URL, "")
 	if err != nil {
 		t.Fatalf("ProbeUpstream returned error: %v", err)
 	}

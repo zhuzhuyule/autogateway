@@ -45,6 +45,7 @@ import { useI18n } from "vue-i18n";
 import UrlProbeBadge from "@/components/keys/UrlProbeBadge.vue";
 import FreeBadge from "@/components/common/FreeBadge.vue";
 import type { ProbeResult } from "@/api/upstream";
+import { freeModelsRef } from "@/api/freemodels";
 
 interface Props {
   show: boolean;
@@ -161,9 +162,33 @@ function modelIsFree(modelId: string): boolean {
   return isFree(formProviderId.value, modelId) === true;
 }
 
+// 上游 /v1/models 通常只返回订阅 / 推荐的少量条目(智谱默认只暴露 7 个),
+// 而 FreeModels Registry 知道该 provider 的完整名单 — 按 upstream host 反查
+// provider id, 并集进显示列表, 让用户能看到 registry 标"免费"的模型并加入暴露/别名.
+const mergedAvailableModels = computed<string[]>(() => {
+  const fmId = formProviderId.value;
+  const env = freeModelsRef.value;
+  if (!fmId || !env?.models) {
+    return availableModels.value;
+  }
+  const set = new Set<string>(availableModels.value);
+  for (const m of env.models) {
+    if (m.provider !== fmId) {
+      continue;
+    }
+    const slash = m.modelId.indexOf("/");
+    const bare =
+      slash > 0 && m.modelId.slice(0, slash).toLowerCase() === fmId.toLowerCase()
+        ? m.modelId.slice(slash + 1)
+        : m.modelId;
+    set.add(bare);
+  }
+  return Array.from(set);
+});
+
 const filteredAvailableModels = computed(() => {
   const q = modelsListSearch.value.trim().toLowerCase();
-  const list = availableModels.value.filter(m => !q || m.toLowerCase().includes(q));
+  const list = mergedAvailableModels.value.filter(m => !q || m.toLowerCase().includes(q));
   // 免费在前 + 按 id 排序
   return list.sort((a, b) => {
     const fa = modelIsFree(a);
@@ -425,6 +450,9 @@ function getOldDefaultUpstream(channelType: string): string {
 
 // 处理 URL 探测结果
 function onUrlDetected(res: ProbeResult) {
+  if (props.group) {
+    return;
+  }
   // Only auto-fill channel_type if user hasn't deviated from the default openai.
   if (formData.channel_type === "openai" && res.channel_type !== "openai") {
     formData.channel_type = res.channel_type;
@@ -1109,7 +1137,7 @@ async function handleSubmit() {
                       {{ t("keys.upstreamModelsList") }}
                     </span>
                     <n-tag size="tiny" type="info" :bordered="false">
-                      {{ availableModels.length }}
+                      {{ mergedAvailableModels.length }}
                     </n-tag>
                     <span v-if="modelsRefreshedAt" class="hint" style="margin-left: 8px">
                       {{ t("keys.lastRefreshed", { at: refreshedAtDisplay(modelsRefreshedAt) }) }}
@@ -1117,7 +1145,7 @@ async function handleSubmit() {
                   </div>
                 </template>
 
-                <div v-if="availableModels.length === 0" class="empty-models-hint">
+                <div v-if="mergedAvailableModels.length === 0" class="empty-models-hint">
                   <n-empty
                     size="small"
                     :description="
@@ -1151,8 +1179,7 @@ async function handleSubmit() {
 
                   <div class="models-grid">
                     <div v-for="m in filteredAvailableModels" :key="m" class="model-item">
-                      <FreeBadge v-if="modelIsFree(m)" compact :size="12" />
-                      <span class="model-item-id" :title="m">{{ m }}</span>
+                      <span class="model-item-id" :title="m">{{ m }} <FreeBadge v-if="modelIsFree(m)" /></span>
                       <button
                         class="model-item-copy"
                         :title="t('common.copy')"
@@ -1204,6 +1231,7 @@ async function handleSubmit() {
                   <UrlProbeBadge
                     v-if="index === 0"
                     :url="upstream.url"
+                    :channel-type="formData.channel_type"
                     @detected="onUrlDetected"
                   />
                 </div>

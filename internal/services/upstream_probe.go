@@ -27,7 +27,12 @@ var probeClient = &http.Client{Timeout: 3 * time.Second}
 // non-network error. 401 / 403 count as "endpoint exists" — we just have no
 // auth credentials. We deliberately do NOT require a successful 2xx because
 // that would make probing unauthenticated upstreams impossible.
-func ProbeUpstream(ctx context.Context, rawURL string) (*ProbeResult, error) {
+//
+// Many Chinese providers (智谱/bigmodel, deepseek 等) 同时实现了 OpenAI 和
+// Anthropic 兼容协议, 三个 probe 都会成功. 此时若调用方已经选定 channel_type,
+// 应通过 prefer 显式优先返回该协议结果, 而不是沿用全局 rank 把 anthropic 先于
+// openai 错误地匹配上去.
+func ProbeUpstream(ctx context.Context, rawURL, prefer string) (*ProbeResult, error) {
 	u, err := url.Parse(strings.TrimRight(rawURL, "/"))
 	if err != nil {
 		return nil, fmt.Errorf("invalid url: %w", err)
@@ -70,7 +75,13 @@ func ProbeUpstream(ctx context.Context, rawURL string) (*ProbeResult, error) {
 		}
 		hits[r.res.ChannelType] = r.res
 	}
+	if prefer != "" && hits[prefer] != nil {
+		return hits[prefer], nil
+	}
 	// Pick highest-ranked remaining hit: anthropic > gemini > openai.
+	// anthropic 排首位是为了识别真实 api.anthropic.com (它的 /v1/models 也返回 401,
+	// 否则会被错认为 openai). 多协议 provider (智谱等) 通过 prefer 显式指定 channel_type
+	// 来覆盖, 不依赖默认 rank.
 	rank := []string{"anthropic", "gemini", "openai"}
 	for _, ch := range rank {
 		if hits[ch] != nil {

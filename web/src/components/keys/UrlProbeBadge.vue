@@ -2,7 +2,7 @@
 import { ref, watch } from "vue";
 import { upstreamApi, type ProbeResult } from "@/api/upstream";
 
-const props = defineProps<{ url: string }>();
+const props = defineProps<{ url: string; channelType?: string }>();
 const emit = defineEmits<{ (e: "detected", res: ProbeResult): void }>();
 
 type State = "idle" | "probing" | "ok" | "fail";
@@ -11,8 +11,8 @@ const detail = ref<ProbeResult | null>(null);
 let timer: number | undefined;
 
 watch(
-  () => props.url,
-  next => {
+  () => [props.url, props.channelType] as const,
+  ([next]) => {
     if (timer) {
       window.clearTimeout(timer);
     }
@@ -24,7 +24,10 @@ watch(
     state.value = "probing";
     timer = window.setTimeout(async () => {
       try {
-        const res = await upstreamApi.probe(next);
+        // openai-response 在后端 probe 里没有独立分支, 退化成 openai.
+        const prefer =
+          props.channelType === "openai-response" ? "openai" : props.channelType || undefined;
+        const res = await upstreamApi.probe(next, prefer);
         const payload = (res as unknown as { data: ProbeResult }).data;
         state.value = "ok";
         detail.value = payload;
