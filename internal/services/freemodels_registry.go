@@ -168,28 +168,36 @@ func (r *FreeModelsRegistry) replaceIndex(env freeModelsEnvelope) {
 	byModelOnly := make(map[string][]*FreeModelMeta)
 	for i := range env.Models {
 		m := &env.Models[i]
-		// Normalize: 把 provider-原生信号映射到统一字段, 让 frontend 不必懂各家细节.
-		// 上游 FreeModels 自身存在不一致 (e.g. groq/openrouter 等 124 个模型
-		// billingMode=free 但 freeTier=trial), 这里按权威信号重写:
+		// Normalize: free_kind 是权威信号 (上游 FreeModels 项目维护的语义标签),
+		// freeTier / billingMode 字段在上游本身就不一致,不能信. 映射规则:
 		//
-		//   1. billingMode=="free"             → freeTier="full" (完全免费, 覆盖错误的 trial)
-		//   2. isExperienceable=true           → freeTier="trial" (gitee 体验模式, 覆盖 1)
-		//   3. metadata.isFullyFree=true       → freeTier="full" (兜底)
+		//   free_kind                  →  我们的 freeTier
+		//   permanent                  →  full   (永久免费)
+		//   rate-limited               →  full   (免费但限速 RPM/RPD, 用户视角仍是免费)
+		//   preview                    →  full   (预览版免费)
+		//   trial-quota                →  trial  (用完即停的额度试用 - gitee/longcat/nvidia)
+		//   unknown / 其它 + isFree    →  full   (保守视为免费)
 		//
-		// 优先级 2 > 1: gitee 既可能 billingMode=pay+isExperienceable=true (付费模型给体验),
-		// 也可能 billingMode=free+isExperienceable=true (理论上不存在但谨慎处理).
-		if m.BillingMode == "free" {
+		// 这与 https://ofind.cn/FreeModels/ 表格语义对齐:只有 trial-quota 才是真"体验",
+		// rate-limited 在 UI 上仍展示为绿色 free badge.
+		switch m.FreeKind {
+		case "permanent", "rate-limited", "preview":
 			m.IsFree = true
 			m.FreeTier = "full"
-		}
-		if m.IsExperienceable {
+		case "trial-quota":
 			m.IsFree = true
-			m.FreeTier = "trial" // gitee 体验额度优先级最高
-		}
-		if m.Metadata != nil {
-			if fully, ok := m.Metadata["isFullyFree"].(bool); ok && fully {
+			m.FreeTier = "trial"
+		default:
+			// unknown / 空 — 看 isExperienceable / billingMode / isFullyFree 兜底
+			if m.IsExperienceable {
 				m.IsFree = true
-				if m.FreeTier == "" || m.FreeTier == "none" {
+				m.FreeTier = "trial"
+			} else if m.BillingMode == "free" {
+				m.IsFree = true
+				m.FreeTier = "full"
+			} else if m.Metadata != nil {
+				if fully, ok := m.Metadata["isFullyFree"].(bool); ok && fully {
+					m.IsFree = true
 					m.FreeTier = "full"
 				}
 			}
