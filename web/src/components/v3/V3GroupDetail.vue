@@ -34,7 +34,7 @@ import {
 import { NIcon, NPagination, NSpin, NTooltip, useDialog, useMessage } from "naive-ui";
 import FreeBadge from "@/components/common/FreeBadge.vue";
 import SpeedBadge from "@/components/common/SpeedBadge.vue";
-import { getFreeStatus, lookupRegistry } from "@/api/freemodels";
+import { lookupRegistry } from "@/api/freemodels";
 import { computed, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRouter } from "vue-router";
@@ -530,19 +530,9 @@ function isFreeModel(modelId: string): boolean {
   return isFree(matchedProvider.value?.id, modelId) === true;
 }
 
-// 区分 full vs trial — registry 优先, fallback 到 isFree.
-// 返回值用于 FreeBadge 的 variant prop.
-function freeVariantFor(modelId: string): "full" | "trial" | null {
-  const status = getFreeStatus(matchedProvider.value?.id, modelId);
-  if (status === "trial") {
-    return "trial";
-  }
-  if (status === "full") {
-    return "full";
-  }
-  // registry miss: 用 isFree 静态判定;能判免费就当 full,否则不展示 badge
-  return isFreeModel(modelId) ? "full" : null;
-}
+// 注: freeVariantFor 已被简化的 FreeBadge 替代 (v3.free 单一显示),
+// 但 isFreeModel 仍用于过滤 (free/paid 列表). 保留下行 export 给可能的
+// 其它消费者; 当前文件内部不再调用 (避免 TS6133 unused 错).
 
 // tab 角标:specified 模式展示白名单数量(强调已暴露这件事);
 // passthrough / 聚合分组展示上游全量数。
@@ -1686,7 +1676,7 @@ const filterCounts = computed(() => ({
               @drop="onExposedDrop(exposedModels.indexOf(modelId))"
             >
               <div class="v5-modelcard__row">
-                <code class="v5-modelcard__name">{{ modelId }}</code>
+                <code class="v5-modelcard__name">{{ modelId }} <FreeBadge v-if="isFreeModel(modelId)" /></code>
               </div>
               <div class="v5-modelcard__row" style="margin-top: 6px; align-items: center; gap: 6px">
                 <n-tooltip trigger="hover" placement="top">
@@ -1695,7 +1685,6 @@ const filterCounts = computed(() => ({
                   </template>
                   {{ speedReasonFor(modelId) }}
                 </n-tooltip>
-                <FreeBadge v-if="isFreeModel(modelId)" />
 
                 <span v-if="blockedSet.has(modelId)" class="v3-chip v3-chip--danger" style="flex-shrink: 0; font-size: 10px">
                   🚫 {{ t("v3.blocked") || "blocked" }}
@@ -1740,7 +1729,7 @@ const filterCounts = computed(() => ({
               @click="toggleSelected(modelId)"
             >
               <div class="v5-modelcard__row">
-                <code class="v5-modelcard__name">{{ modelId }}</code>
+                <code class="v5-modelcard__name">{{ modelId }} <FreeBadge v-if="isFreeModel(modelId)" /></code>
               </div>
               <div class="v5-modelcard__row" style="margin-top: 6px; align-items: center; gap: 6px">
                 <n-tooltip trigger="hover" placement="top">
@@ -1749,7 +1738,6 @@ const filterCounts = computed(() => ({
                   </template>
                   {{ speedReasonFor(modelId) }}
                 </n-tooltip>
-                <FreeBadge v-if="isFreeModel(modelId)" />
 
                 <span v-if="blockedSet.has(modelId)" class="v3-chip v3-chip--danger" style="flex-shrink: 0; font-size: 10px">
                   🚫 {{ t("v3.blocked") || "blocked" }}
@@ -1785,7 +1773,7 @@ const filterCounts = computed(() => ({
               @click="toggleSelected(modelId)"
             >
               <div class="v5-modelcard__row">
-                <code class="v5-modelcard__name">{{ modelId }}</code>
+                <code class="v5-modelcard__name">{{ modelId }} <FreeBadge v-if="isFreeModel(modelId)" /></code>
               </div>
               <div class="v5-modelcard__row" style="margin-top: 6px; align-items: center; gap: 6px">
                 <n-tooltip trigger="hover" placement="top">
@@ -1794,7 +1782,6 @@ const filterCounts = computed(() => ({
                   </template>
                   {{ speedReasonFor(modelId) }}
                 </n-tooltip>
-                <FreeBadge v-if="isFreeModel(modelId)" />
 
                 <span v-if="blockedSet.has(modelId)" class="v3-chip v3-chip--danger" style="flex-shrink: 0; font-size: 10px">
                   🚫 {{ t("v3.blocked") || "blocked" }}
