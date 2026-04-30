@@ -242,23 +242,32 @@ const aggregateModels = computed<AggregatedModel[]>(() => {
     return [];
   }
   const chatOnly = isSystemAggregate(props.group);
-  const map = new Map<string, Set<string>>();
+  // key = trim + toLowerCase 归一化, value 保留首个出现的原始 ID 作展示;
+  // 避免 "GPT-4o" 与 "gpt-4o" / 带空格的同名条目在聚合视图里重复.
+  const map = new Map<string, { id: string; providers: Set<string> }>();
   for (const sg of props.subGroups) {
     const list = effectiveModelsFor(sg.group);
     const label = sg.group.display_name || sg.group.name;
-    for (const m of list) {
-      if (chatOnly && !isLikelyChatModel(m)) {
+    for (const raw of list) {
+      const id = (raw || "").trim();
+      if (!id) {
         continue;
       }
-      if (!map.has(m)) {
-        map.set(m, new Set());
+      if (chatOnly && !isLikelyChatModel(id)) {
+        continue;
       }
-      map.get(m)!.add(label);
+      const key = id.toLowerCase();
+      let entry = map.get(key);
+      if (!entry) {
+        entry = { id, providers: new Set() };
+        map.set(key, entry);
+      }
+      entry.providers.add(label);
     }
   }
-  return Array.from(map.entries()).map(([modelId, set]) => ({
-    modelId,
-    providers: Array.from(set),
+  return Array.from(map.values()).map(v => ({
+    modelId: v.id,
+    providers: Array.from(v.providers),
   }));
 });
 
