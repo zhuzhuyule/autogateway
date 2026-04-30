@@ -61,12 +61,51 @@ type FreeModelMeta struct {
 	Metadata         map[string]interface{} `json:"metadata,omitempty"` // provider 原生 meta, 含 gitee 的 isExperienceable / isFullyFree / freeUse 等
 }
 
-// freeModelsEnvelope is the upstream JSON shape.
+// freeModelsEnvelope is the **outward** shape we serve to the frontend
+// (kept camelCase + legacy field names so frontend stays decoupled from
+// upstream schema drift). 内部解析见 upstreamEnvelope.
 type freeModelsEnvelope struct {
 	View        string          `json:"view"`
 	UpdatedAt   string          `json:"updatedAt"`
 	TotalModels int             `json:"totalModels"`
 	Models      []FreeModelMeta `json:"models"`
+}
+
+// upstreamEnvelope mirrors the OpenAI-compatible schema served by
+// https://ofind.cn/FreeModels/data/views/all/models.json — switched to
+// snake_case + {object, total, data} in 2026-04. We parse it here and
+// remap into our stable FreeModelMeta shape so any further upstream
+// schema changes only touch this file.
+type upstreamEnvelope struct {
+	Object    string          `json:"object"`
+	View      string          `json:"view"`
+	UpdatedAt string          `json:"updated_at"`
+	Total     int             `json:"total"`
+	Data      []upstreamModel `json:"data"`
+}
+
+type upstreamModel struct {
+	ID            string   `json:"id"`              // "<provider>/<rawId>"
+	ModelID       string   `json:"model_id"`        // 同 ID, 备用
+	OwnedBy       string   `json:"owned_by"`        // provider 名
+	Provider      string   `json:"provider"`
+	Name          string   `json:"name"`
+	ContextSize   int      `json:"context_size"`
+	ContextLabel  string   `json:"context_label"`
+	PriceCurrency string   `json:"price_currency"`
+	PriceInput    float64  `json:"price_input"`
+	PriceOutput   float64  `json:"price_output"`
+	IsFree        bool     `json:"is_free"`
+	FreeMechanism *string  `json:"free_mechanism"` // permanent / rate-limited / preview / trial-credits / daily-tokens / null
+	TrialScope    string   `json:"trial_scope"`    // "all" / "specific" / "none"
+	IsReasoning   bool     `json:"is_reasoning"`
+	IsMultimodal  bool     `json:"is_multimodal"`
+	HasToolUse    bool     `json:"has_tool_use"`
+	ModelFamily   string   `json:"model_family"`
+	Aliases       []string `json:"aliases"`
+	Tags          []string `json:"tags"`
+	Tier          string   `json:"tier"`
+	Speed         string   `json:"speed"`
 }
 
 // FreeModelsRegistry holds an in-memory copy of the upstream registry,
@@ -151,57 +190,102 @@ func (r *FreeModelsRegistry) fetchAndStore(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("read body: %w", err)
 	}
-	var env freeModelsEnvelope
-	if err := json.Unmarshal(body, &env); err != nil {
-		return fmt.Errorf("parse json: %w", err)
+	env, err := parseUpstream(body)
+	if err != nil {
+		return fmt.Errorf("parse upstream: %w", err)
 	}
 	r.replaceIndex(env)
-	if err := r.saveToDisk(body); err != nil {
+	// 持久化的是 normalized envelope (camelCase, 跟前端保持稳定),
+	// 不是 raw upstream — 避免下次启动 schema 漂移时旧 cache 解析失败.
+	cached, _ := json.Marshal(env)
+	if err := r.saveToDisk(cached); err != nil {
 		logrus.WithError(err).Warn("freemodels: failed to write disk cache (continuing)")
 	}
 	logrus.Infof("freemodels: fetched %d models from upstream", env.TotalModels)
 	return nil
 }
 
+// parseUpstream 解析 FreeModels CDN 当前的 OpenAI-compat schema
+// (snake_case + {object, total, data} 包装) 转换成我们对外稳定的
+// camelCase envelope. 上游 schema 漂移只需改这一个函数.
+func parseUpstream(body []byte) (freeModelsEnvelope, error) {
+	var up upstreamEnvelope
+	if err := json.Unmarshal(body, &up); err != nil {
+		return freeModelsEnvelope{}, err
+	}
+	out := freeModelsEnvelope{
+		View:        up.View,
+		UpdatedAt:   up.UpdatedAt,
+		TotalModels: up.Total,
+		Models:      make([]FreeModelMeta, 0, len(up.Data)),
+	}
+	for _, u := range up.Data {
+		// is_free + free_mechanism + trial_scope 决定 freeTier:
+		//   永久免费 / 限速 / 预览 → "full"
+		//   trial-credits / daily-tokens (longcat每日额度, nvidia credits) → "trial"
+		//   付费但 trial_scope=all (Gitee 145 个体验模型) → "trial" + isFree=true
+		//   其它 → ""
+		isFree := u.IsFree
+		freeTier := ""
+		freeKind := ""
+		isExperienceable := false
+		if u.FreeMechanism != nil {
+			freeKind = *u.FreeMechanism
+			switch freeKind {
+			case "permanent", "rate-limited", "preview":
+				freeTier = "full"
+			case "trial-credits", "daily-tokens":
+				freeTier = "trial"
+			}
+		}
+		// is_free=false 但所有用户有体验额度 (Gitee) — 标记为 trial 并视为可用
+		if !isFree && u.TrialScope == "all" {
+			isFree = true
+			freeTier = "trial"
+			isExperienceable = true
+		}
+		modelID := u.ModelID
+		if modelID == "" {
+			modelID = u.ID
+		}
+		provider := u.Provider
+		if provider == "" {
+			provider = u.OwnedBy
+		}
+		out.Models = append(out.Models, FreeModelMeta{
+			Provider:         provider,
+			ModelID:          modelID,
+			Name:             u.Name,
+			IsFree:           isFree,
+			IsExperienceable: isExperienceable,
+			BillingMode:      "", // 上游已不再提供, 留空
+			FreeTier:         freeTier,
+			FreeKind:         freeKind,
+			ContextSize:      u.ContextSize,
+			ContextLabel:     u.ContextLabel,
+			Tier:             u.Tier,
+			Speed:            u.Speed,
+			IsReasoning:      u.IsReasoning,
+			IsMultimodal:     u.IsMultimodal,
+			HasToolUse:       u.HasToolUse,
+			PriceInput:       u.PriceInput,
+			PriceOutput:      u.PriceOutput,
+			ModelFamily:      u.ModelFamily,
+			Aliases:          u.Aliases,
+			Tags:             u.Tags,
+			Metadata:         nil,
+		})
+	}
+	return out, nil
+}
+
 func (r *FreeModelsRegistry) replaceIndex(env freeModelsEnvelope) {
+	// freeTier / isFree / freeKind normalize 已在 parseUpstream 完成,
+	// 这里只负责建索引.
 	byProvMod := make(map[string]*FreeModelMeta, len(env.Models))
 	byModelOnly := make(map[string][]*FreeModelMeta)
 	for i := range env.Models {
 		m := &env.Models[i]
-		// Normalize: free_kind 是权威信号 (上游 FreeModels 项目维护的语义标签),
-		// freeTier / billingMode 字段在上游本身就不一致,不能信. 映射规则:
-		//
-		//   free_kind                  →  我们的 freeTier
-		//   permanent                  →  full   (永久免费)
-		//   rate-limited               →  full   (免费但限速 RPM/RPD, 用户视角仍是免费)
-		//   preview                    →  full   (预览版免费)
-		//   trial-quota                →  trial  (用完即停的额度试用 - gitee/longcat/nvidia)
-		//   unknown / 其它 + isFree    →  full   (保守视为免费)
-		//
-		// 这与 https://ofind.cn/FreeModels/ 表格语义对齐:只有 trial-quota 才是真"体验",
-		// rate-limited 在 UI 上仍展示为绿色 free badge.
-		switch m.FreeKind {
-		case "permanent", "rate-limited", "preview":
-			m.IsFree = true
-			m.FreeTier = "full"
-		case "trial-quota":
-			m.IsFree = true
-			m.FreeTier = "trial"
-		default:
-			// unknown / 空 — 看 isExperienceable / billingMode / isFullyFree 兜底
-			if m.IsExperienceable {
-				m.IsFree = true
-				m.FreeTier = "trial"
-			} else if m.BillingMode == "free" {
-				m.IsFree = true
-				m.FreeTier = "full"
-			} else if m.Metadata != nil {
-				if fully, ok := m.Metadata["isFullyFree"].(bool); ok && fully {
-					m.IsFree = true
-					m.FreeTier = "full"
-				}
-			}
-		}
 		key := provModKey(m.Provider, m.ModelID)
 		byProvMod[key] = m
 		bare := strings.ToLower(m.ModelID)
