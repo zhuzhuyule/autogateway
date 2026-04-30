@@ -164,6 +164,16 @@ function isCrossProviderSelected(raw: string): boolean {
   return selectedCrossProvider.value.includes(raw);
 }
 
+// 创建按钮 count = aliases × (1 主候选 + 跨 provider 选中数)
+const totalCreateCount = computed(() => {
+  const alias = selectedAliases.value.length;
+  if (alias === 0) {
+    return 0;
+  }
+  const targets = 1 + selectedCrossProvider.value.length;
+  return alias * targets;
+});
+
 async function loadAliases() {
   allAliasesLoading.value = true;
   try {
@@ -372,8 +382,8 @@ async function handleSave() {
           <n-icon :component="BanOutline" :size="13" />
           <span>{{
             isBlocked
-              ? (t("v3.unblock") || "解除拉黑")
-              : (t("v3.block") || "加入黑名单")
+              ? (t("v5.maUnblock") || "解除拉黑")
+              : (t("v5.maBlock") || "加入黑名单")
           }}</span>
         </button>
         <n-popconfirm
@@ -385,10 +395,10 @@ async function handleSave() {
           <template #trigger>
             <button class="v5-ma-action v5-ma-action--danger">
               <n-icon :component="CloseOutline" :size="13" />
-              <span>{{ t("v3.removeFromExposed") || "从暴露移除" }}</span>
+              <span>{{ t("v5.maRemoveExposed") || "从模型列表移除" }}</span>
             </button>
           </template>
-          {{ t("v5.maRemoveExposedConfirm", { model: modelId }) || `从已暴露列表中移除 ${modelId}?` }}
+          {{ t("v5.maRemoveExposedConfirm", { model: modelId }) || `从模型列表移除 ${modelId}?` }}
         </n-popconfirm>
       </div>
 
@@ -556,7 +566,7 @@ async function handleSave() {
             :disabled="!selectedAliases.length"
             @click="handleSave"
           >
-            {{ t("v5.maCreate", { n: selectedAliases.length }) }}
+            {{ t("v5.maCreate", { n: totalCreateCount }) }}
           </n-button>
         </div>
       </template>

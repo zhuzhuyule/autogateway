@@ -1113,6 +1113,14 @@ export default {
     maPickFirst: "请至少选择或输入一个别名",
     maCreated: "成功 {ok} · 失败 {fail}",
     maAllFailed: "全部创建失败",
+    maCrossProviderTitle: "其它 provider 同名候选",
+    maCrossProviderTip:
+      "FreeModels 注册表显示这些 provider 也提供同名模型。勾选后,本次创建的别名会同时把它们加入候选池,实现跨 provider failover。",
+    maCrossProviderUnconfigured: "未配置 {provider} 分组",
+    maRemoveExposedConfirm: "确认从模型列表移除 {model}?",
+    maRemoveExposed: "从模型列表移除",
+    maBlock: "加入黑名单",
+    maUnblock: "解除拉黑",
     // Aliases page (card mode)
     alNewAlias: "新建别名",
     alMappings: "{n} 条映射",
