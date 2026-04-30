@@ -1284,59 +1284,66 @@ async function handleSubmit() {
                   </n-tooltip>
                 </div>
               </template>
-              <div class="upstream-row">
-                <div class="upstream-url">
-                  <n-input
-                    v-model:value="upstream.url"
-                    :placeholder="upstreamPlaceholder"
-                    @input="
-                      () => !props.group && index === 0 && (userModifiedFields.upstream = true)
-                    "
-                    @blur="onUpstreamUrlBlur(index)"
-                  />
-                  <UrlProbeBadge
-                    v-if="index === 0"
-                    :url="upstream.url"
-                    :channel-type="formData.channel_type"
-                    @detected="onUrlDetected"
-                  />
+              <!-- 三行纵向: 输入 → 完整 URL 预览 → 探测状态.
+                   外层 .upstream-stack 是 column flex, 防止 Naive form-item-blank
+                   的 flex 把同级子节点横排. -->
+              <div class="upstream-stack">
+                <div class="upstream-row">
+                  <div class="upstream-url">
+                    <n-input
+                      v-model:value="upstream.url"
+                      :placeholder="upstreamPlaceholder"
+                      @input="
+                        () =>
+                          !props.group && index === 0 && (userModifiedFields.upstream = true)
+                      "
+                      @blur="onUpstreamUrlBlur(index)"
+                    />
+                  </div>
+                  <div v-if="multiUpstreamEnabled" class="upstream-weight">
+                    <span class="weight-label">{{ t("keys.weight") }}</span>
+                    <n-tooltip trigger="hover" placement="top" style="width: 100%">
+                      <template #trigger>
+                        <n-input-number
+                          v-model:value="upstream.weight"
+                          :min="0"
+                          :placeholder="t('keys.weight')"
+                          style="width: 100%"
+                        />
+                      </template>
+                      {{ t("keys.weightTooltip") }}
+                    </n-tooltip>
+                  </div>
+                  <div v-if="multiUpstreamEnabled" class="upstream-actions">
+                    <n-button
+                      v-if="formData.upstreams.length > 1"
+                      @click="removeUpstream(index)"
+                      type="error"
+                      quaternary
+                      circle
+                      size="small"
+                    >
+                      <template #icon>
+                        <n-icon :component="Remove" />
+                      </template>
+                    </n-button>
+                  </div>
                 </div>
-                <div v-if="multiUpstreamEnabled" class="upstream-weight">
-                  <span class="weight-label">{{ t("keys.weight") }}</span>
-                  <n-tooltip trigger="hover" placement="top" style="width: 100%">
-                    <template #trigger>
-                      <n-input-number
-                        v-model:value="upstream.weight"
-                        :min="0"
-                        :placeholder="t('keys.weight')"
-                        style="width: 100%"
-                      />
-                    </template>
-                    {{ t("keys.weightTooltip") }}
-                  </n-tooltip>
+                <!-- 路径预览: 第一个上游 + 有 URL 时显示 -->
+                <div
+                  v-if="index === 0 && upstreamPreview"
+                  class="upstream-preview"
+                  :title="upstreamPreview"
+                >
+                  → <span class="upstream-preview-url">{{ upstreamPreview }}</span>
                 </div>
-                <div v-if="multiUpstreamEnabled" class="upstream-actions">
-                  <n-button
-                    v-if="formData.upstreams.length > 1"
-                    @click="removeUpstream(index)"
-                    type="error"
-                    quaternary
-                    circle
-                    size="small"
-                  >
-                    <template #icon>
-                      <n-icon :component="Remove" />
-                    </template>
-                  </n-button>
-                </div>
-              </div>
-              <!-- 完整路径预览: 仅第一个上游 + 有 URL 时显示 -->
-              <div
-                v-if="index === 0 && upstreamPreview"
-                class="upstream-preview"
-                :title="upstreamPreview"
-              >
-                → <span class="upstream-preview-url">{{ upstreamPreview }}</span>
+                <!-- 探测状态: 仅第一个上游 -->
+                <UrlProbeBadge
+                  v-if="index === 0"
+                  :url="upstream.url"
+                  :channel-type="formData.channel_type"
+                  @detected="onUrlDetected"
+                />
               </div>
             </n-form-item>
 
@@ -2137,6 +2144,18 @@ async function handleSubmit() {
 }
 .multi-upstream-label {
   user-select: none;
+}
+
+/* 上游字段三行布局: input → 预览 → 探测状态 */
+.upstream-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  min-width: 0;
+}
+.upstream-stack > :deep(.probe-badge) {
+  align-self: flex-start;
 }
 
 /* 上游 URL + 测试路径拼接预览 */
