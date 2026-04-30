@@ -327,6 +327,8 @@ export default {
     upstreamAddresses: "Upstream Addresses",
     upstream: "Upstream",
     weight: "Weight",
+    multiUpstreamToggle: "Load balance",
+    multiUpstreamTooltip: "Multiple equivalent base URLs of the same provider weighted into one group (self-hosted cluster, multi-region, primary/backup). One URL fits 90% of cases — weight and add button stay hidden by default.",
     advancedConfig: "Advanced Configuration",
     aggregateReferences: "Aggregate References",
     groupInfo: "Group Info",

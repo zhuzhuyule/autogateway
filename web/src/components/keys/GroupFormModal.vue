@@ -46,6 +46,7 @@ import UrlProbeBadge from "@/components/keys/UrlProbeBadge.vue";
 import FreeBadge from "@/components/common/FreeBadge.vue";
 import type { ProbeResult } from "@/api/upstream";
 import { freeModelsRef } from "@/api/freemodels";
+import { normalizeUpstreamUrl, previewUpstreamPath } from "@/utils/upstreamUrl";
 
 interface Props {
   show: boolean;
@@ -153,6 +154,32 @@ const modelsRefreshLoading = ref(false);
 const modelsRefreshedAt = ref<string | null>(null);
 const modelsListExpanded = ref<string[]>([]);
 const modelsListSearch = ref("");
+
+// 多上游负载均衡: 默认折叠, 仅显示单 URL.
+// 编辑已有 group 时若已配置 >1 个 upstream, 自动展开.
+const multiUpstreamEnabled = ref(false);
+
+// 上游 URL 失焦时按规则规范化 (尾部追加 /v1, 处理 # 转义).
+function onUpstreamUrlBlur(index: number) {
+  const cur = formData.upstreams[index]?.url;
+  if (!cur) {
+    return;
+  }
+  const next = normalizeUpstreamUrl(cur);
+  if (next !== cur) {
+    formData.upstreams[index].url = next;
+  }
+}
+
+// 第一个上游 URL + 测试路径拼接出来的最终上游路径预览.
+const upstreamPreview = computed(() => {
+  const first = formData.upstreams[0]?.url || "";
+  if (!first) {
+    return "";
+  }
+  const ep = formData.validation_endpoint || validationEndpointPlaceholder.value || "";
+  return previewUpstreamPath(first, ep);
+});
 
 const formProviderId = computed<string | undefined>(
   () => findProviderByUpstreams(formData.upstreams)?.id
@@ -306,24 +333,27 @@ const upstreamPlaceholder = computed(() => {
   switch (formData.channel_type) {
     case "openai":
     case "openai-response":
-      return "https://api.openai.com";
+      return "https://api.openai.com/v1";
     case "gemini":
-      return "https://generativelanguage.googleapis.com";
+      return "https://generativelanguage.googleapis.com/v1beta";
     case "anthropic":
-      return "https://api.anthropic.com";
+      return "https://api.anthropic.com/v1";
     default:
       return t("keys.enterUpstreamUrl");
   }
 });
 
+// 测试路径默认占位符:走 baseUrl 已含版本段的新约定 → 相对路径不带 /vN.
+// 后端 GetValidationEndpoint 的存储默认仍是 /v1/chat/completions (兼容老数据),
+// dedupeVersionSegment 会消除 baseUrl 与 endpoint 重复的 /vN, 所以两种写法都对.
 const validationEndpointPlaceholder = computed(() => {
   switch (formData.channel_type) {
     case "openai":
-      return "/v1/chat/completions";
+      return "/chat/completions";
     case "openai-response":
-      return "/v1/responses";
+      return "/responses";
     case "anthropic":
-      return "/v1/messages";
+      return "/messages";
     case "gemini":
       return ""; // Gemini 不显示此字段
     default:
@@ -537,6 +567,9 @@ function loadGroupData() {
     group_type: props.group.group_type || "standard",
   });
 
+  // 已配置 >1 个上游 → 默认展开多上游面板, 让用户看到完整配置
+  multiUpstreamEnabled.value = (props.group.upstreams?.length || 0) > 1;
+
   // 编辑模式下,从 group.available_models 加载缓存的真实模型列表
   const cached = (props.group as unknown as { available_models?: unknown }).available_models;
   if (Array.isArray(cached)) {
@@ -706,6 +739,16 @@ async function handleSubmit() {
   }
 
   try {
+    // 提交前对所有上游 URL 跑一次 normalize, 兜住"粘贴后没失焦"或老分组未规范化的情况
+    formData.upstreams.forEach((u, i) => {
+      if (u.url) {
+        const next = normalizeUpstreamUrl(u.url);
+        if (next !== u.url) {
+          formData.upstreams[i].url = next;
+        }
+      }
+    });
+
     await formRef.value?.validate();
 
     loading.value = true;
@@ -1196,11 +1239,28 @@ async function handleSubmit() {
 
           <!-- Upstream addresses -->
           <div class="form-section" style="margin-top: 10px">
-            <h4 class="section-title">{{ t("keys.upstreamAddresses") }}</h4>
+            <div class="upstream-section-header">
+              <h4 class="section-title">{{ t("keys.upstreamAddresses") }}</h4>
+              <label class="multi-upstream-toggle">
+                <n-switch v-model:value="multiUpstreamEnabled" size="small" />
+                <span class="multi-upstream-label">{{ t("keys.multiUpstreamToggle") }}</span>
+                <n-tooltip trigger="hover" placement="top">
+                  <template #trigger>
+                    <n-icon :component="HelpCircleOutline" class="help-icon" />
+                  </template>
+                  {{ t("keys.multiUpstreamTooltip") }}
+                </n-tooltip>
+              </label>
+            </div>
             <n-form-item
               v-for="(upstream, index) in formData.upstreams"
+              v-show="multiUpstreamEnabled || index === 0"
               :key="index"
-              :label="`${t('keys.upstream')} ${index + 1}`"
+              :label="
+                multiUpstreamEnabled
+                  ? `${t('keys.upstream')} ${index + 1}`
+                  : t('keys.upstream')
+              "
               :path="`upstreams[${index}].url`"
               :rule="{
                 required: true,
@@ -1210,7 +1270,12 @@ async function handleSubmit() {
             >
               <template #label>
                 <div class="form-label-with-tooltip">
-                  {{ t("keys.upstream") }} {{ index + 1 }}
+                  <template v-if="multiUpstreamEnabled">
+                    {{ t("keys.upstream") }} {{ index + 1 }}
+                  </template>
+                  <template v-else>
+                    {{ t("keys.upstream") }}
+                  </template>
                   <n-tooltip trigger="hover" placement="top">
                     <template #trigger>
                       <n-icon :component="HelpCircleOutline" class="help-icon" />
@@ -1227,6 +1292,7 @@ async function handleSubmit() {
                     @input="
                       () => !props.group && index === 0 && (userModifiedFields.upstream = true)
                     "
+                    @blur="onUpstreamUrlBlur(index)"
                   />
                   <UrlProbeBadge
                     v-if="index === 0"
@@ -1235,7 +1301,7 @@ async function handleSubmit() {
                     @detected="onUrlDetected"
                   />
                 </div>
-                <div class="upstream-weight">
+                <div v-if="multiUpstreamEnabled" class="upstream-weight">
                   <span class="weight-label">{{ t("keys.weight") }}</span>
                   <n-tooltip trigger="hover" placement="top" style="width: 100%">
                     <template #trigger>
@@ -1249,7 +1315,7 @@ async function handleSubmit() {
                     {{ t("keys.weightTooltip") }}
                   </n-tooltip>
                 </div>
-                <div class="upstream-actions">
+                <div v-if="multiUpstreamEnabled" class="upstream-actions">
                   <n-button
                     v-if="formData.upstreams.length > 1"
                     @click="removeUpstream(index)"
@@ -1264,9 +1330,17 @@ async function handleSubmit() {
                   </n-button>
                 </div>
               </div>
+              <!-- 完整路径预览: 仅第一个上游 + 有 URL 时显示 -->
+              <div
+                v-if="index === 0 && upstreamPreview"
+                class="upstream-preview"
+                :title="upstreamPreview"
+              >
+                → <span class="upstream-preview-url">{{ upstreamPreview }}</span>
+              </div>
             </n-form-item>
 
-            <n-form-item>
+            <n-form-item v-if="multiUpstreamEnabled">
               <n-button @click="addUpstream" dashed style="width: 100%">
                 <template #icon>
                   <n-icon :component="Add" />
@@ -2043,6 +2117,39 @@ async function handleSubmit() {
 .form-item-half {
   flex: 1;
   width: 50%;
+}
+
+/* 上游 section 头: 标题 + 多上游开关在一行 */
+.upstream-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 4px;
+}
+.multi-upstream-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--v3-ink-2, #6b7280);
+  cursor: pointer;
+}
+.multi-upstream-label {
+  user-select: none;
+}
+
+/* 上游 URL + 测试路径拼接预览 */
+.upstream-preview {
+  font: 500 11px/1.6 var(--v3-mono);
+  color: var(--v3-ink-3, #94a3b8);
+  margin-top: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.upstream-preview-url {
+  color: var(--v3-ink-2, #475569);
 }
 
 /* 上游地址行布局 */

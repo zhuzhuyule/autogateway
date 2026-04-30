@@ -325,6 +325,8 @@ export default {
     upstreamAddresses: "アップストリームアドレス",
     upstream: "アップストリーム",
     weight: "ウェイト",
+    multiUpstreamToggle: "負荷分散",
+    multiUpstreamTooltip: "同一プロバイダーの等価な複数 base URL を重みで束ねます (自前クラスタ・マルチリージョン・主待機). 90% のケースは 1 つで十分なので、ウェイトと追加ボタンは既定で非表示です.",
     advancedConfig: "詳細設定",
     aggregateReferences: "集約参照",
     groupInfo: "グループ情報",

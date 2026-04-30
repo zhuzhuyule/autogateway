@@ -76,7 +76,7 @@ export const FREE_PROVIDERS: FreeProvider[] = [
     signupUrl: "https://console.groq.com/keys",
     docsUrl: "https://console.groq.com/docs",
     channelType: "openai",
-    baseUrl: "https://api.groq.com/openai",
+    baseUrl: "https://api.groq.com/openai/v1",
     testModel: "llama-3.3-70b-versatile",
     models: [
       "llama-3.3-70b-versatile",
@@ -104,7 +104,7 @@ export const FREE_PROVIDERS: FreeProvider[] = [
     signupUrl: "https://cloud.cerebras.ai",
     docsUrl: "https://inference-docs.cerebras.ai",
     channelType: "openai",
-    baseUrl: "https://api.cerebras.ai",
+    baseUrl: "https://api.cerebras.ai/v1",
     testModel: "llama3.1-8b",
     models: ["llama3.1-8b", "llama-3.3-70b", "gpt-oss-120b", "qwen-3-235b-a22b-instruct-2507"],
     recommendedGroupName: "cerebras",
@@ -123,7 +123,7 @@ export const FREE_PROVIDERS: FreeProvider[] = [
     signupUrl: "https://openrouter.ai/keys",
     docsUrl: "https://openrouter.ai/docs",
     channelType: "openai",
-    baseUrl: "https://openrouter.ai/api",
+    baseUrl: "https://openrouter.ai/api/v1",
     testModel: "mistralai/mistral-7b-instruct:free",
     models: [
       "openrouter/auto",
@@ -172,7 +172,7 @@ export const FREE_PROVIDERS: FreeProvider[] = [
     signupUrl: "https://api.together.xyz/settings/api-keys",
     docsUrl: "https://docs.together.ai",
     channelType: "openai",
-    baseUrl: "https://api.together.xyz",
+    baseUrl: "https://api.together.xyz/v1",
     testModel: "meta-llama/Llama-3.3-70B-Instruct-Turbo-Free",
     models: [
       "meta-llama/Llama-3.3-70B-Instruct-Turbo-Free",
@@ -215,7 +215,7 @@ export const FREE_PROVIDERS: FreeProvider[] = [
     signupUrl: "https://console.mistral.ai/api-keys",
     docsUrl: "https://docs.mistral.ai",
     channelType: "openai",
-    baseUrl: "https://api.mistral.ai",
+    baseUrl: "https://api.mistral.ai/v1",
     testModel: "mistral-small-latest",
     models: [
       "mistral-small-latest",
@@ -240,7 +240,7 @@ export const FREE_PROVIDERS: FreeProvider[] = [
     signupUrl: "https://aistudio.google.com/apikey",
     docsUrl: "https://ai.google.dev/gemini-api/docs",
     channelType: "gemini",
-    baseUrl: "https://generativelanguage.googleapis.com",
+    baseUrl: "https://generativelanguage.googleapis.com/v1beta",
     testModel: "gemini-2.0-flash",
     models: ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash"],
     recommendedGroupName: "gemini",
@@ -431,7 +431,7 @@ export const FREE_PROVIDERS: FreeProvider[] = [
     signupUrl: "https://longcat.chat/platform",
     docsUrl: "https://longcat.chat/platform/docs/zh/",
     channelType: "openai",
-    baseUrl: "https://api.longcat.chat/openai",
+    baseUrl: "https://api.longcat.chat/openai/v1",
     // 模型 ID 是 PascalCase (官方文档 longcat.chat/platform/docs/zh/)
     testModel: "LongCat-Flash-Lite",
     models: [
