@@ -7,14 +7,12 @@ import {
   FREE_PROVIDERS,
   bootstrapExposedModels,
   findProviderByUpstreams,
-  isFree,
   type FreeProvider,
 } from "@/data/freeProviders";
 import type { Group, GroupConfigOption, UpstreamInfo } from "@/types/models";
 import {
   Add,
   Close,
-  CopyOutline,
   HelpCircleOutline,
   OpenOutline,
   RefreshOutline,
@@ -26,7 +24,6 @@ import {
   NCard,
   NCollapse,
   NCollapseItem,
-  NEmpty,
   NForm,
   NFormItem,
   NIcon,
@@ -43,9 +40,7 @@ import {
 import { computed, reactive, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import UrlProbeBadge from "@/components/keys/UrlProbeBadge.vue";
-import FreeBadge from "@/components/common/FreeBadge.vue";
 import type { ProbeResult } from "@/api/upstream";
-import { freeModelsRef } from "@/api/freemodels";
 import { normalizeUpstreamUrl, previewUpstreamPath } from "@/utils/upstreamUrl";
 
 interface Props {
@@ -148,12 +143,11 @@ const providerSearch = ref("");
 const providerPanelExpanded = ref<string[]>(["picker"]);
 const usedProviderIds = ref<Set<string>>(new Set());
 
-// 上游真实模型列表(从 group.available_models 加载;可手动刷新)
+// 上游真实模型列表(从 group.available_models 加载;可手动刷新).
+// 仅供 testModelOptions 下拉选项使用,UI 不再单独展示完整列表.
 const availableModels = ref<string[]>([]);
 const modelsRefreshLoading = ref(false);
 const modelsRefreshedAt = ref<string | null>(null);
-const modelsListExpanded = ref<string[]>([]);
-const modelsListSearch = ref("");
 
 // 多上游负载均衡: 默认折叠, 仅显示单 URL.
 // 编辑已有 group 时若已配置 >1 个 upstream, 自动展开.
@@ -180,72 +174,6 @@ const upstreamPreview = computed(() => {
   const ep = formData.validation_endpoint || validationEndpointPlaceholder.value || "";
   return previewUpstreamPath(first, ep);
 });
-
-const formProviderId = computed<string | undefined>(
-  () => findProviderByUpstreams(formData.upstreams)?.id
-);
-
-function modelIsFree(modelId: string): boolean {
-  return isFree(formProviderId.value, modelId) === true;
-}
-
-// 上游 /v1/models 通常只返回订阅 / 推荐的少量条目(智谱默认只暴露 7 个),
-// 而 FreeModels Registry 知道该 provider 的完整名单 — 按 upstream host 反查
-// provider id, 并集进显示列表, 让用户能看到 registry 标"免费"的模型并加入暴露/别名.
-const mergedAvailableModels = computed<string[]>(() => {
-  const fmId = formProviderId.value;
-  const env = freeModelsRef.value;
-  if (!fmId || !env?.models) {
-    return availableModels.value;
-  }
-  const set = new Set<string>(availableModels.value);
-  for (const m of env.models) {
-    if (m.provider !== fmId) {
-      continue;
-    }
-    const slash = m.modelId.indexOf("/");
-    const bare =
-      slash > 0 && m.modelId.slice(0, slash).toLowerCase() === fmId.toLowerCase()
-        ? m.modelId.slice(slash + 1)
-        : m.modelId;
-    set.add(bare);
-  }
-  return Array.from(set);
-});
-
-const filteredAvailableModels = computed(() => {
-  const q = modelsListSearch.value.trim().toLowerCase();
-  const list = mergedAvailableModels.value.filter(m => !q || m.toLowerCase().includes(q));
-  // 免费在前 + 按 id 排序
-  return list.sort((a, b) => {
-    const fa = modelIsFree(a);
-    const fb = modelIsFree(b);
-    if (fa !== fb) {
-      return fa ? -1 : 1;
-    }
-    return a.localeCompare(b);
-  });
-});
-
-function refreshedAtDisplay(iso: string | null): string {
-  if (!iso) {
-    return "";
-  }
-  try {
-    return new Date(iso).toLocaleString();
-  } catch {
-    return iso;
-  }
-}
-
-async function copyModelId(modelId: string) {
-  try {
-    await navigator.clipboard.writeText(modelId);
-    message.success(t("keys.modelIdCopied"));
-  } catch {
-    message.error(t("common.requestFailed"));
-  }
-}
 
 const testModelOptions = computed(() => {
   // 合并 freeProviders 内置示例(用于新建尚未拉取时给点提示) + 真实拉取
@@ -612,14 +540,11 @@ async function refreshModels() {
     // 后端从 v1.x 起返回 enriched objects [{id, is_free, free_tier, tier, speed, ...}]
     // 老格式是 string[], 兼容两种
     const raw = result.data?.models || [];
-    const list: string[] = raw.map((m: unknown) =>
-      typeof m === "string" ? m : ((m as { id: string }).id || "")
-    ).filter((s: string) => s);
+    const list: string[] = raw
+      .map((m: unknown) => (typeof m === "string" ? m : (m as { id: string }).id || ""))
+      .filter((s: string) => s);
     availableModels.value = list;
     modelsRefreshedAt.value = new Date().toISOString();
-    if (list.length > 0) {
-      modelsListExpanded.value = ["models"];
-    }
     message.success(t("keys.refreshModelsSuccess", { n: list.length }));
   } catch (e) {
     message.error((e as Error).message);
@@ -832,9 +757,7 @@ async function handleSubmit() {
     } else {
       // 新建模式 — 默认 specified + 自动暴露 (已知 provider 取免费集,
       // 未知 provider 仅暴露用户填的 testModel)
-      const provider = findProviderByUpstreams(submitData.upstreams) as
-        | FreeProvider
-        | undefined;
+      const provider = findProviderByUpstreams(submitData.upstreams) as FreeProvider | undefined;
       const newGroupData = {
         ...submitData,
         model_routing_mode: "specified" as const,
@@ -1043,88 +966,48 @@ async function handleSubmit() {
               </n-form-item>
             </div>
 
-            <!-- Test model and test path on the same row -->
-            <div class="form-row">
-              <n-form-item :label="t('keys.testModel')" path="test_model" class="form-item-half">
-                <template #label>
-                  <div class="form-label-with-tooltip">
-                    {{ t("keys.testModel") }}
-                    <n-tooltip trigger="hover" placement="top">
-                      <template #trigger>
-                        <n-icon :component="HelpCircleOutline" class="help-icon" />
-                      </template>
-                      {{ t("keys.testModelTooltip") }}
-                    </n-tooltip>
-                  </div>
-                </template>
-                <div style="display: flex; gap: 6px; width: 100%">
-                  <n-select
-                    v-model:value="formData.test_model"
-                    :options="testModelOptions"
-                    :placeholder="testModelPlaceholder"
-                    filterable
-                    tag
-                    clearable
-                    style="flex: 1"
-                    @update:value="() => !props.group && (userModifiedFields.test_model = true)"
-                  />
-                  <n-tooltip trigger="hover" :disabled="!!props.group">
+            <!-- 测试模型独占整行 (测试路径已移除, 走默认的 channel_type 兜底) -->
+            <n-form-item :label="t('keys.testModel')" path="test_model">
+              <template #label>
+                <div class="form-label-with-tooltip">
+                  {{ t("keys.testModel") }}
+                  <n-tooltip trigger="hover" placement="top">
                     <template #trigger>
-                      <n-button
-                        size="small"
-                        :loading="modelsRefreshLoading"
-                        :disabled="!props.group"
-                        @click="refreshModels"
-                        style="flex-shrink: 0"
-                      >
-                        <template #icon>
-                          <n-icon :component="RefreshOutline" />
-                        </template>
-                      </n-button>
+                      <n-icon :component="HelpCircleOutline" class="help-icon" />
                     </template>
-                    {{ t("keys.refreshModelsRequiresSave") }}
+                    {{ t("keys.testModelTooltip") }}
                   </n-tooltip>
                 </div>
-              </n-form-item>
-
-              <n-form-item
-                :label="t('keys.testPath')"
-                path="validation_endpoint"
-                class="form-item-half"
-                v-if="formData.channel_type !== 'gemini'"
-              >
-                <template #label>
-                  <div class="form-label-with-tooltip">
-                    {{ t("keys.testPath") }}
-                    <n-tooltip trigger="hover" placement="top">
-                      <template #trigger>
-                        <n-icon :component="HelpCircleOutline" class="help-icon" />
-                      </template>
-                      <div>
-                        {{ t("keys.testPathTooltip1") }}
-                        <br />
-                        • OpenAI: /v1/chat/completions
-                        <br />
-                        • OpenAI Response: /v1/responses
-                        <br />
-                        • Anthropic: /v1/messages
-                        <br />
-                        {{ t("keys.testPathTooltip2") }}
-                      </div>
-                    </n-tooltip>
-                  </div>
-                </template>
-                <n-input
-                  v-model:value="formData.validation_endpoint"
-                  :placeholder="
-                    validationEndpointPlaceholder || t('keys.optionalCustomValidationPath')
-                  "
+              </template>
+              <div style="display: flex; gap: 6px; width: 100%">
+                <n-select
+                  v-model:value="formData.test_model"
+                  :options="testModelOptions"
+                  :placeholder="testModelPlaceholder"
+                  filterable
+                  tag
+                  clearable
+                  style="flex: 1"
+                  @update:value="() => !props.group && (userModifiedFields.test_model = true)"
                 />
-              </n-form-item>
-
-              <!-- When gemini channel, test path is hidden, need placeholder div to keep layout -->
-              <div v-else class="form-item-half" />
-            </div>
+                <n-tooltip trigger="hover" :disabled="!!props.group">
+                  <template #trigger>
+                    <n-button
+                      size="small"
+                      :loading="modelsRefreshLoading"
+                      :disabled="!props.group"
+                      @click="refreshModels"
+                      style="flex-shrink: 0"
+                    >
+                      <template #icon>
+                        <n-icon :component="RefreshOutline" />
+                      </template>
+                    </n-button>
+                  </template>
+                  {{ t("keys.refreshModelsRequiresSave") }}
+                </n-tooltip>
+              </div>
+            </n-form-item>
 
             <!-- Proxy keys -->
             <n-form-item :label="t('keys.proxyKeys')" path="proxy_keys">
@@ -1170,73 +1053,6 @@ async function handleSubmit() {
             </n-form-item>
           </div>
 
-          <!-- Upstream available models -->
-          <div class="form-section upstream-models-section" style="margin-top: 10px">
-            <n-collapse v-model:expanded-names="modelsListExpanded">
-              <n-collapse-item name="models">
-                <template #header>
-                  <div class="upstream-models-header">
-                    <span class="section-title" style="margin: 0; padding: 0; border: none">
-                      {{ t("keys.upstreamModelsList") }}
-                    </span>
-                    <n-tag size="tiny" type="info" :bordered="false">
-                      {{ mergedAvailableModels.length }}
-                    </n-tag>
-                    <span v-if="modelsRefreshedAt" class="hint" style="margin-left: 8px">
-                      {{ t("keys.lastRefreshed", { at: refreshedAtDisplay(modelsRefreshedAt) }) }}
-                    </span>
-                  </div>
-                </template>
-
-                <div v-if="mergedAvailableModels.length === 0" class="empty-models-hint">
-                  <n-empty
-                    size="small"
-                    :description="
-                      props.group
-                        ? t('keys.upstreamModelsEmpty')
-                        : t('keys.refreshModelsRequiresSave')
-                    "
-                  />
-                </div>
-
-                <template v-else>
-                  <div class="models-toolbar">
-                    <n-input
-                      v-model:value="modelsListSearch"
-                      :placeholder="t('keys.searchModelPlaceholder')"
-                      clearable
-                      style="width: 240px"
-                    />
-                    <n-button
-                      size="small"
-                      :loading="modelsRefreshLoading"
-                      :disabled="!props.group"
-                      @click="refreshModels"
-                    >
-                      <template #icon>
-                        <n-icon :component="RefreshOutline" />
-                      </template>
-                      {{ t("common.refresh") }}
-                    </n-button>
-                  </div>
-
-                  <div class="models-grid">
-                    <div v-for="m in filteredAvailableModels" :key="m" class="model-item">
-                      <span class="model-item-id" :title="m">{{ m }} <FreeBadge v-if="modelIsFree(m)" /></span>
-                      <button
-                        class="model-item-copy"
-                        :title="t('common.copy')"
-                        @click="copyModelId(m)"
-                      >
-                        <n-icon :component="CopyOutline" :size="14" />
-                      </button>
-                    </div>
-                  </div>
-                </template>
-              </n-collapse-item>
-            </n-collapse>
-          </div>
-
           <!-- Upstream addresses -->
           <div class="form-section" style="margin-top: 10px">
             <div class="upstream-section-header">
@@ -1257,9 +1073,7 @@ async function handleSubmit() {
               v-show="multiUpstreamEnabled || index === 0"
               :key="index"
               :label="
-                multiUpstreamEnabled
-                  ? `${t('keys.upstream')} ${index + 1}`
-                  : t('keys.upstream')
+                multiUpstreamEnabled ? `${t('keys.upstream')} ${index + 1}` : t('keys.upstream')
               "
               :path="`upstreams[${index}].url`"
               :rule="{
@@ -1294,8 +1108,7 @@ async function handleSubmit() {
                       v-model:value="upstream.url"
                       :placeholder="upstreamPlaceholder"
                       @input="
-                        () =>
-                          !props.group && index === 0 && (userModifiedFields.upstream = true)
+                        () => !props.group && index === 0 && (userModifiedFields.upstream = true)
                       "
                       @blur="onUpstreamUrlBlur(index)"
                     />
@@ -1335,10 +1148,11 @@ async function handleSubmit() {
                   class="upstream-preview"
                   :title="upstreamPreview"
                 >
-                  → <span class="upstream-preview-url">{{ upstreamPreview }}</span>
+                  →
+                  <span class="upstream-preview-url">{{ upstreamPreview }}</span>
                 </div>
                 <!-- 探测状态: 仅第一个上游 -->
-                <UrlProbeBadge
+                <url-probe-badge
                   v-if="index === 0"
                   :url="upstream.url"
                   :channel-type="formData.channel_type"
@@ -1439,7 +1253,7 @@ async function handleSubmit() {
                             </template>
                             {{
                               getConfigOption(configItem.key)?.description ||
-                              t("keys.setConfigValue")
+                                t("keys.setConfigValue")
                             }}
                           </n-tooltip>
                         </div>

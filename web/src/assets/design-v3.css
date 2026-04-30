@@ -1860,7 +1860,26 @@ body.dark,
   border-radius: var(--v3-radius-md);
   border: 1px solid var(--v3-line);
   box-shadow: var(--v3-shadow-md);
-  overflow: hidden;
+  /* 不再 overflow: hidden — 否则 NSelect 等 popper 受这个 clipping context
+     影响, 弹出菜单会被 modal 边框裁掉. 圆角内容由各 child (header/content/
+     action) 自己 border-radius 控制. */
+}
+.n-modal-body-wrapper .n-card > .n-card-header,
+.n-modal .n-card > .n-card-header {
+  border-top-left-radius: var(--v3-radius-md);
+  border-top-right-radius: var(--v3-radius-md);
+}
+.n-modal-body-wrapper .n-card > .n-card__action,
+.n-modal .n-card > .n-card__action {
+  border-bottom-left-radius: var(--v3-radius-md);
+  border-bottom-right-radius: var(--v3-radius-md);
+}
+
+/* 兜底: 让所有 body-teleported popper (select / dropdown / popover / tooltip)
+   的 z-index 高于 modal. Naive 的 z-index manager 通常已处理, 这里防止
+   外部 stacking context 干扰 (e.g. v3-card 的 transform / will-change). */
+.v-binder-follower-content {
+  z-index: 5000;
 }
 .n-modal-body-wrapper .n-card > .n-card-header,
 .n-modal .n-card > .n-card-header {
