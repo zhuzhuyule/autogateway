@@ -34,6 +34,7 @@ import {
 import { NIcon, NPagination, NSpin, NTooltip, useDialog, useMessage } from "naive-ui";
 import FreeBadge from "@/components/common/FreeBadge.vue";
 import SpeedBadge from "@/components/common/SpeedBadge.vue";
+import CapabilityIcons from "@/components/common/CapabilityIcons.vue";
 import { freeModelsRef, getFreeStatus, lookupRegistry } from "@/api/freemodels";
 import { computed, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
@@ -643,6 +644,12 @@ const showTrialFilter = computed(() => {
 
 function modelFreeKind(modelId: string): "full" | "trial" | "paid" | null {
   return getFreeStatus(matchedProvider.value?.id, modelId);
+}
+
+// 取 registry 里此模型的 tags (能力分类), 找不到返回空数组
+function tagsForModel(modelId: string): string[] {
+  const reg = lookupRegistry(matchedProvider.value?.id, modelId);
+  return reg?.tags || [];
 }
 const savingMode = ref(false);
 
@@ -1778,6 +1785,7 @@ const filterCounts = computed(() => ({
                   </template>
                   {{ speedReasonFor(modelId) }}
                 </n-tooltip>
+                <CapabilityIcons :tags="tagsForModel(modelId)" :size="11" />
 
                 <span v-if="blockedSet.has(modelId)" class="v3-chip v3-chip--danger" style="flex-shrink: 0; font-size: 10px">
                   🚫 {{ t("v3.blocked") || "blocked" }}
@@ -1831,6 +1839,7 @@ const filterCounts = computed(() => ({
                   </template>
                   {{ speedReasonFor(modelId) }}
                 </n-tooltip>
+                <CapabilityIcons :tags="tagsForModel(modelId)" :size="11" />
 
                 <span v-if="blockedSet.has(modelId)" class="v3-chip v3-chip--danger" style="flex-shrink: 0; font-size: 10px">
                   🚫 {{ t("v3.blocked") || "blocked" }}
@@ -1875,6 +1884,7 @@ const filterCounts = computed(() => ({
                   </template>
                   {{ speedReasonFor(modelId) }}
                 </n-tooltip>
+                <CapabilityIcons :tags="tagsForModel(modelId)" :size="11" />
 
                 <span v-if="blockedSet.has(modelId)" class="v3-chip v3-chip--danger" style="flex-shrink: 0; font-size: 10px">
                   🚫 {{ t("v3.blocked") || "blocked" }}
