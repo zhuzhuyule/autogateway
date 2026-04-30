@@ -34,7 +34,7 @@ import {
 import { NIcon, NPagination, NSpin, NTooltip, useDialog, useMessage } from "naive-ui";
 import FreeBadge from "@/components/common/FreeBadge.vue";
 import SpeedBadge from "@/components/common/SpeedBadge.vue";
-import { getFreeStatus, lookupRegistry } from "@/api/freemodels";
+import { freeModelsRef, getFreeStatus, lookupRegistry } from "@/api/freemodels";
 import { computed, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRouter } from "vue-router";
@@ -427,6 +427,33 @@ function parseAvailableModels(raw: unknown): string[] {
   return [];
 }
 
+// 上游 registry 知道但用户 group 没拉到的同 provider 模型 — 取并集.
+// 上游 /v1/models 通常只返回 key 已订阅 / 推荐的少量模型 (如智谱只返回旗舰,
+// 不返回 GLM-Flash 系列), 但 FreeModels Registry 里有完整名单. 合并显示让
+// 用户能看到 registry 标了"免费"的模型并加入暴露/别名.
+function mergeWithRegistry(localList: string[]): string[] {
+  const env = freeModelsRef.value;
+  const fmId = matchedProvider.value?.id;
+  if (!env?.models || !fmId) {
+    return localList;
+  }
+  const set = new Set<string>(localList);
+  for (const m of env.models) {
+    if (m.provider !== fmId) {
+      continue;
+    }
+    // registry modelId 多带 "<provider>/" 前缀 — 剥掉跟 group available_models
+    // 的裸 id 对齐.
+    const slash = m.modelId.indexOf("/");
+    const bare =
+      slash > 0 && m.modelId.slice(0, slash).toLowerCase() === fmId.toLowerCase()
+        ? m.modelId.slice(slash + 1)
+        : m.modelId;
+    set.add(bare);
+  }
+  return Array.from(set).sort();
+}
+
 const groupModels = computed<string[]>(() => {
   if (isAggregate.value) {
     // Union of sub-groups' available_models
@@ -441,16 +468,16 @@ const groupModels = computed<string[]>(() => {
   }
   const raw = (props.group as unknown as { available_models?: unknown })?.available_models;
   const cached = parseAvailableModels(raw);
-  if (cached.length) {
-    return cached;
+  let base = cached;
+  if (!base.length) {
+    // Fallback:无 /v1/models 端点的 provider (e.g. LongCat),老分组 cache 为空时
+    // 用 provider 静态清单兜底,避免空 UI。
+    const p = matchedProvider.value;
+    if (p?.staticModels) {
+      base = [...p.models, ...(p.paidModels ?? [])];
+    }
   }
-  // Fallback:无 /v1/models 端点的 provider (e.g. LongCat),老分组 cache 为空时
-  // 用 provider 静态清单兜底,避免空 UI。
-  const p = matchedProvider.value;
-  if (p?.staticModels) {
-    return [...p.models, ...(p.paidModels ?? [])];
-  }
-  return cached;
+  return mergeWithRegistry(base);
 });
 
 // Aggregate-only stats
