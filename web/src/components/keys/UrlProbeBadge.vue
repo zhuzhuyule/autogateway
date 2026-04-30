@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch } from "vue";
+import { computed, ref, watch } from "vue";
 import { upstreamApi, type ProbeResult } from "@/api/upstream";
 
 const props = defineProps<{ url: string; channelType?: string }>();
@@ -9,6 +9,35 @@ type State = "idle" | "probing" | "ok" | "fail";
 const state = ref<State>("idle");
 const detail = ref<ProbeResult | null>(null);
 let timer: number | undefined;
+
+// 品牌名规范化: openai → OpenAI, anthropic → Anthropic, gemini → Gemini.
+const CHANNEL_LABELS: Record<string, string> = {
+  openai: "OpenAI",
+  "openai-response": "OpenAI Responses",
+  anthropic: "Anthropic",
+  gemini: "Gemini",
+};
+function channelLabel(raw: string | undefined): string {
+  if (!raw) {
+    return "";
+  }
+  return CHANNEL_LABELS[raw.toLowerCase()] || raw;
+}
+
+// 版本号大写: /v1 → V1, /v1beta → V1beta.
+function versionLabel(raw: string | undefined): string {
+  if (!raw) {
+    return "";
+  }
+  return raw.replace(/^\/v/, "V");
+}
+
+const detectedLabel = computed(() => {
+  if (!detail.value) {
+    return "";
+  }
+  return `${channelLabel(detail.value.channel_type)} ${versionLabel(detail.value.version_prefix)}`;
+});
 
 watch(
   () => [props.url, props.channelType] as const,
@@ -47,7 +76,7 @@ watch(
     <template v-if="state === 'idle'">&nbsp;</template>
     <template v-else-if="state === 'probing'">… probing</template>
     <template v-else-if="state === 'ok' && detail">
-      ✓ {{ detail.channel_type }} ({{ detail.version_prefix }}) · {{ detail.latency_ms }}ms
+      ✓ {{ detectedLabel }} · {{ detail.latency_ms }}ms
     </template>
     <template v-else>⚠ unknown</template>
   </span>

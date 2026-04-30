@@ -321,6 +321,7 @@ export default {
     weight: "权重",
     multiUpstreamToggle: "多上游负载均衡",
     multiUpstreamTooltip: "同一家 provider 的多个等价 base URL,按权重分流(自建集群/多副本/主备). 90% 场景一个就够,默认隐藏权重和添加按钮.",
+    requestPathLabel: "请求路径",
     advancedConfig: "高级配置",
     aggregateReferences: "聚合引用",
     groupInfo: "分组信息",

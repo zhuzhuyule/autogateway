@@ -1175,14 +1175,16 @@ async function handleSubmit() {
                     </n-button>
                   </div>
                 </div>
-                <!-- 路径预览: 第一个上游 + 有 URL 时显示 -->
+                <!-- 路径预览: 第一个上游 + 有 URL 时显示, 代码窗口风格 -->
                 <div
                   v-if="index === 0 && upstreamPreview"
-                  class="upstream-preview"
+                  class="upstream-preview-code"
                   :title="upstreamPreview"
                 >
-                  →
-                  <span class="upstream-preview-url">{{ upstreamPreview }}</span>
+                  <span class="upstream-preview-label">
+                    {{ t("keys.requestPathLabel") }}
+                  </span>
+                  <code class="upstream-preview-url">{{ upstreamPreview }}</code>
                 </div>
                 <!-- 探测状态: 仅第一个上游 -->
                 <url-probe-badge
@@ -1579,6 +1581,12 @@ async function handleSubmit() {
 
 .form-section {
   margin-top: 20px;
+}
+/* 第一个 form-section 不要顶部空白 — 上方就是 modal header line */
+.v3-modal-body > .form-section:first-child,
+.v3-modal-body > form > .form-section:first-child,
+.group-form > .form-section:first-child {
+  margin-top: 0;
 }
 
 .section-title {
@@ -2005,17 +2013,35 @@ async function handleSubmit() {
   align-self: flex-start;
 }
 
-/* 上游 URL + 测试路径拼接预览 */
-.upstream-preview {
-  font: 500 11px/1.6 var(--v3-mono);
+/* 上游 URL 拼接预览 — 代码窗口样式 */
+.upstream-preview-code {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  padding: 6px 10px;
+  background: var(--v3-surface-2, #f8fafc);
+  border: 1px solid var(--v3-line, #e5e7eb);
+  border-left: 3px solid var(--v3-accent, #4f46e5);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.upstream-preview-label {
+  flex-shrink: 0;
+  font: 500 11px/1.4 var(--v3-sans);
   color: var(--v3-ink-3, #94a3b8);
-  margin-top: 4px;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+.upstream-preview-url {
+  font: 500 12px/1.4 var(--v3-mono);
+  color: var(--v3-ink-1, #1f2937);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-.upstream-preview-url {
-  color: var(--v3-ink-2, #475569);
+  flex: 1;
+  min-width: 0;
+  background: transparent;
 }
 
 /* 上游地址行布局 */
