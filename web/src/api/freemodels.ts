@@ -73,49 +73,98 @@ function bareModelId(idWithMaybePrefix: string, provider?: string): string {
     }
     return idWithMaybePrefix; // 首段是模型作者名 (e.g. "bytedance/", "google/") — 保留
   }
-  // 不知 provider, 保守:仅当首段是已知 provider 名时剥
-  if (PROVIDER_ID_ALIASES[head] || isKnownProviderId(head)) {
+  // 不知 provider, 保守:仅当首段命中桥接表时剥
+  if (isKnownProviderId(head) || LOCALID_TO_BRIDGE.has(head)) {
     return idWithMaybePrefix.slice(slash + 1);
   }
   return idWithMaybePrefix;
 }
 
-// FreeModels 上游已知 9 家 provider id, 用于不知 provider 时的前缀判定
-const KNOWN_FREEMODELS_PROVIDERS = new Set([
-  "bigmodel",
-  "cerebras",
-  "gitee",
-  "google",
-  "groq",
-  "longcat",
-  "nvidia",
-  "openrouter",
-  "xunfei",
-]);
-function isKnownProviderId(s: string): boolean {
-  return KNOWN_FREEMODELS_PROVIDERS.has(s);
+// =============================================================================
+// PROVIDER_BRIDGE — 上游 FreeModels 9 家 ↔ 本地 freeProviders.ts ↔ upstream hosts
+// =============================================================================
+// 单一可信源:每个 entry 同时把 FreeModels (上游) provider id、我们本地
+// freeProviders id、以及上游 host (用于反查) 绑在一起。 expandProviderAliases /
+// findFreeModelsProvider / isKnownProviderId 都从此表派生, 不再各自维护别名表。
+//
+// 9 家 FreeModels 项目收录的 provider, 跟我们 freeProviders.ts 一一对应:
+//   bigmodel    ↔ zhipu             ↔ open.bigmodel.cn
+//   cerebras    ↔ cerebras          ↔ api.cerebras.ai
+//   gitee       ↔ gitee-ai          ↔ ai.gitee.com
+//   google      ↔ google-aistudio   ↔ generativelanguage.googleapis.com
+//   groq        ↔ groq              ↔ api.groq.com
+//   longcat     ↔ longcat           ↔ api.longcat.chat
+//   nvidia      ↔ nvidia-nim        ↔ integrate.api.nvidia.com
+//   openrouter  ↔ openrouter        ↔ openrouter.ai
+//   xunfei      ↔ xfyun             ↔ maas-api.cn-huabei-1.xf-yun.com /
+//                                     spark-api-open.xf-yun.com
+//
+// 同名 4 家:cerebras / groq / longcat / openrouter
+// 异名 5 家:bigmodel ↔ zhipu / gitee ↔ gitee-ai / google ↔ google-aistudio /
+//          nvidia ↔ nvidia-nim / xunfei ↔ xfyun
+interface ProviderBridge {
+  /** FreeModels 项目用的 id (registry.provider 字段值) */
+  fmId: string;
+  /** 我们 freeProviders.ts 用的 id (group 反查命中此 id) */
+  localId: string;
+  /** 上游真实 hostname, 用于通过 group.upstreams[0].url 反查 fmId */
+  hosts: string[];
 }
 
-// FreeModels 上游 provider id ↔ 我们 freeProviders.ts 内 id 别名映射.
-// 上游用 9 家精简命名 (bigmodel / gitee / google ...), 我们用 30+ 家更细 (zhipu / gitee-ai / google-aistudio ...).
-// 反查 + 跨 provider aliases 解析时用此 map 同名互通.
-const PROVIDER_ID_ALIASES: Record<string, string[]> = {
-  bigmodel: ["zhipu", "bigmodel"],
-  gitee: ["gitee-ai", "gitee"],
-  google: ["google-aistudio", "google"],
-  nvidia: ["nvidia-nim", "nvidia"],
-  xunfei: ["xfyun", "xunfei"],
-  zhipu: ["bigmodel", "zhipu"],
-  "gitee-ai": ["gitee", "gitee-ai"],
-  "google-aistudio": ["google", "google-aistudio"],
-  "nvidia-nim": ["nvidia", "nvidia-nim"],
-  xfyun: ["xunfei", "xfyun"],
-};
+const PROVIDER_BRIDGE: ProviderBridge[] = [
+  { fmId: "bigmodel", localId: "zhipu", hosts: ["open.bigmodel.cn"] },
+  { fmId: "cerebras", localId: "cerebras", hosts: ["api.cerebras.ai"] },
+  { fmId: "gitee", localId: "gitee-ai", hosts: ["ai.gitee.com"] },
+  { fmId: "google", localId: "google-aistudio", hosts: ["generativelanguage.googleapis.com"] },
+  { fmId: "groq", localId: "groq", hosts: ["api.groq.com"] },
+  { fmId: "longcat", localId: "longcat", hosts: ["api.longcat.chat"] },
+  { fmId: "nvidia", localId: "nvidia-nim", hosts: ["integrate.api.nvidia.com", "api.nvcf.nvidia.com"] },
+  { fmId: "openrouter", localId: "openrouter", hosts: ["openrouter.ai"] },
+  { fmId: "xunfei", localId: "xfyun", hosts: ["maas-api.cn-huabei-1.xf-yun.com", "spark-api-open.xf-yun.com"] },
+];
 
-/** 把任意 provider id 展开成它的所有同名候选 (含自身). */
+const FMID_TO_BRIDGE = new Map(PROVIDER_BRIDGE.map(b => [b.fmId.toLowerCase(), b]));
+const LOCALID_TO_BRIDGE = new Map(PROVIDER_BRIDGE.map(b => [b.localId.toLowerCase(), b]));
+
+function isKnownProviderId(s: string): boolean {
+  return FMID_TO_BRIDGE.has(s.toLowerCase());
+}
+
+/** 通过 hostname 反查 FreeModels provider 桥接信息. host 大小写不敏感, 子串匹配. */
+export function findBridgeByHost(host: string | undefined): ProviderBridge | null {
+  if (!host) {
+    return null;
+  }
+  const lower = host.toLowerCase();
+  for (const b of PROVIDER_BRIDGE) {
+    if (b.hosts.some(h => lower.includes(h))) {
+      return b;
+    }
+  }
+  return null;
+}
+
+/** 通过 provider id (任意一边) 反查桥接信息. */
+export function findBridgeById(providerId: string | undefined): ProviderBridge | null {
+  if (!providerId) {
+    return null;
+  }
+  const lower = providerId.toLowerCase();
+  return FMID_TO_BRIDGE.get(lower) || LOCALID_TO_BRIDGE.get(lower) || null;
+}
+
+/**
+ * 把任意 provider id 展开成它跨命名空间的所有候选 (含自身), 用于 lookup 时
+ * 同时尝试 FreeModels id 和本地 id. 不在桥接表里的 (e.g. together / mistral)
+ * 返回 [自身].
+ */
 export function expandProviderAliases(providerId: string): string[] {
   const lower = providerId.toLowerCase();
-  return PROVIDER_ID_ALIASES[lower] || [lower];
+  const bridge = findBridgeById(lower);
+  if (bridge) {
+    return [bridge.fmId, bridge.localId];
+  }
+  return [lower];
 }
 
 // Indexed lookup tables — 必须是 Vue computed 才能让所有 caller (render / watch /
