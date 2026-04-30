@@ -1635,8 +1635,7 @@ const filterCounts = computed(() => ({
                 {{ t("common.all") || "All" }}
               </button>
               <button class="v3-btn v3-btn--sm" :class="{ 'v3-btn--accent': availFilter === 'free' }" @click="availFilter = 'free'">
-                <FreeBadge />
-                {{ t("v3.free") || "免费" }}
+                🆓 {{ t("v3.freeText") || "免费" }}
               </button>
               <button
                 v-if="showTrialFilter"

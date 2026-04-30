@@ -859,6 +859,8 @@ export default {
     tierFromRegistry: "✓ Source: FreeModels registry",
     tierDefault: "Default",
     free: "free",
+    freeText: "Free",
+    noModelsMatching: "No matching models",
     multiModel: "Multi-model",
     highQuota: "High quota",
     nProviders: "{n} providers",

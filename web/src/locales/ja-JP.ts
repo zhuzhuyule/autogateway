@@ -857,6 +857,8 @@ export default {
     tierFromRegistry: "✓ データ元: FreeModels レジストリ",
     tierDefault: "デフォルト",
     free: "無料",
+    freeText: "無料",
+    noModelsMatching: "一致するモデルがありません",
     multiModel: "マルチモデル",
     highQuota: "高クォータ",
     nProviders: "{n} Provider",

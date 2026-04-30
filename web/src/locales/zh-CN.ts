@@ -836,6 +836,8 @@ export default {
     tierFromRegistry: "✓ 数据源：FreeModels 注册表",
     tierDefault: "默认",
     free: "🆓",
+    freeText: "免费",
+    noModelsMatching: "没有匹配的模型",
     multiModel: "多模型",
     highQuota: "高配额",
     nProviders: "{n} 个 Provider",
