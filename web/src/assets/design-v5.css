@@ -650,6 +650,36 @@
   opacity: 0.5;
   transform: scale(0.98);
 }
+.v5-modelcard--selected {
+  border-color: var(--v3-accent);
+  background: var(--v3-accent-soft, oklch(from var(--v3-accent) 96% 0.05 h));
+  box-shadow: 0 0 0 1px var(--v3-accent);
+}
+.v5-modelcard--selected:hover {
+  border-color: var(--v3-accent);
+}
+
+/* 多选批量操作 floating bar */
+.v5-bulk-bar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  margin: 0 0 8px;
+  background: var(--v3-accent-soft, oklch(from var(--v3-accent) 96% 0.05 h));
+  border: 1px solid var(--v3-accent);
+  border-radius: var(--v3-radius);
+  font: 500 12px/1.2 var(--v3-sans);
+  color: var(--v3-accent);
+}
+.v5-bulk-bar__count {
+  font: 600 12px/1.2 var(--v3-mono);
+  margin-right: 6px;
+}
 
 /* Section heading inside Models tab */
 .v5-section-head {

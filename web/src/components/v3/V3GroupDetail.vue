@@ -716,6 +716,98 @@ async function removeFromExposed(modelId: string) {
 }
 
 // 黑名单 toggle:加入 blocked_models 后,即使在 exposed 或 alias 里也不会被路由
+// === 多选 + 批量操作 ===========================================================
+// selectedModels 跟踪用户在 specified 已暴露 / 上游全部 / passthrough 全部 区
+// 勾选的 modelId. 整张卡片 click toggle.
+const selectedModels = ref<Set<string>>(new Set());
+function toggleSelected(modelId: string) {
+  const s = new Set(selectedModels.value);
+  if (s.has(modelId)) {
+    s.delete(modelId);
+  } else {
+    s.add(modelId);
+  }
+  selectedModels.value = s;
+}
+function isSelected(modelId: string): boolean {
+  return selectedModels.value.has(modelId);
+}
+function clearSelection() {
+  selectedModels.value = new Set();
+}
+
+async function bulkAddToExposed() {
+  const toAdd = Array.from(selectedModels.value).filter(m => !exposedSet.value.has(m));
+  if (!toAdd.length) {
+    return;
+  }
+  const next = [...exposedModels.value, ...toAdd];
+  exposedModels.value = next;
+  await persistGroupPatch({ exposed_models: next });
+  message.success(t("v5.bulkAddedExposed", { n: toAdd.length }) || `已加入 ${toAdd.length} 个`);
+  clearSelection();
+}
+
+async function bulkRemoveFromExposed() {
+  const toRemove = selectedModels.value;
+  if (!toRemove.size) {
+    return;
+  }
+  const next = exposedModels.value.filter(m => !toRemove.has(m));
+  const removed = exposedModels.value.length - next.length;
+  if (!removed) {
+    return;
+  }
+  exposedModels.value = next;
+  await persistGroupPatch({ exposed_models: next });
+  message.success(t("v5.bulkRemovedExposed", { n: removed }) || `已移除 ${removed} 个`);
+  clearSelection();
+}
+
+async function bulkToggleBlock(addNotRemove: boolean) {
+  const targets = selectedModels.value;
+  if (!targets.size) {
+    return;
+  }
+  const cur = new Set(blockedModels.value);
+  let changed = 0;
+  for (const m of targets) {
+    if (addNotRemove && !cur.has(m)) {
+      cur.add(m);
+      changed += 1;
+    } else if (!addNotRemove && cur.has(m)) {
+      cur.delete(m);
+      changed += 1;
+    }
+  }
+  if (!changed) {
+    return;
+  }
+  const next = Array.from(cur);
+  blockedModels.value = next;
+  await persistGroupPatch({ blocked_models: next });
+  const key = addNotRemove ? "v5.bulkBlocked" : "v5.bulkUnblocked";
+  const fb = addNotRemove ? `已加入黑名单 ${changed} 个` : `已解除拉黑 ${changed} 个`;
+  message.success(t(key, { n: changed }) || fb);
+  clearSelection();
+}
+
+// 选中至少一个 还未暴露 → 显示"加入暴露"
+const selectedHasUnexposed = computed(() =>
+  Array.from(selectedModels.value).some(m => !exposedSet.value.has(m))
+);
+// 选中至少一个 已暴露 → 显示"从暴露移除"
+const selectedHasExposed = computed(() =>
+  Array.from(selectedModels.value).some(m => exposedSet.value.has(m))
+);
+// 选中至少一个 已拉黑 → 显示"解除拉黑";否则只显示"加入黑名单"
+const selectedHasBlocked = computed(() =>
+  Array.from(selectedModels.value).some(m => blockedSet.value.has(m))
+);
+const selectedHasUnblocked = computed(() =>
+  Array.from(selectedModels.value).some(m => !blockedSet.value.has(m))
+);
+
 async function toggleBlock(modelId: string) {
   const isBlocked = blockedSet.value.has(modelId);
   const next = isBlocked
@@ -1525,6 +1617,48 @@ const filterCounts = computed(() => ({
           </div>
         </div>
 
+        <!-- 批量操作 floating toolbar (selectedModels.size > 0 时显示) -->
+        <div
+          v-if="selectedModels.size > 0"
+          class="v5-bulk-bar"
+        >
+          <span class="v5-bulk-bar__count">
+            {{ t("v5.bulkSelected", { n: selectedModels.size }) || `已选 ${selectedModels.size} 个` }}
+          </span>
+          <button
+            v-if="!isAggregate && routingMode === 'specified' && selectedHasUnexposed"
+            class="v3-btn v3-btn--sm v3-btn--accent"
+            @click="bulkAddToExposed"
+          >
+            + {{ t("v5.bulkAddExposed") || "批量加入暴露" }}
+          </button>
+          <button
+            v-if="!isAggregate && routingMode === 'specified' && selectedHasExposed"
+            class="v3-btn v3-btn--sm"
+            @click="bulkRemoveFromExposed"
+          >
+            <n-icon :component="CloseOutline" :size="11" />
+            {{ t("v5.bulkRemoveExposed") || "批量移除暴露" }}
+          </button>
+          <button
+            v-if="selectedHasUnblocked"
+            class="v3-btn v3-btn--sm v3-btn--danger"
+            @click="bulkToggleBlock(true)"
+          >
+            {{ t("v5.bulkBlock") || "批量加入黑名单" }}
+          </button>
+          <button
+            v-if="selectedHasBlocked"
+            class="v3-btn v3-btn--sm"
+            @click="bulkToggleBlock(false)"
+          >
+            {{ t("v5.bulkUnblock") || "批量解除拉黑" }}
+          </button>
+          <button class="v3-btn v3-btn--sm v3-btn--ghost" @click="clearSelection">
+            {{ t("v5.bulkClear") || "取消选择" }}
+          </button>
+        </div>
+
         <!-- =============================================== -->
         <!-- SPECIFIED MODE: top "已暴露" + bottom "上游全部" -->
         <!-- =============================================== -->
@@ -1543,8 +1677,10 @@ const filterCounts = computed(() => ({
               :class="{
                 'v5-modelcard--dragging': dragIdx === exposedModels.indexOf(modelId),
                 'v5-modelcard--blocked': blockedSet.has(modelId),
+                'v5-modelcard--selected': isSelected(modelId),
               }"
               draggable="true"
+              @click="toggleSelected(modelId)"
               @dragstart="onExposedDragStart(exposedModels.indexOf(modelId))"
               @dragover.prevent
               @drop="onExposedDrop(exposedModels.indexOf(modelId))"
@@ -1559,11 +1695,7 @@ const filterCounts = computed(() => ({
                   </template>
                   {{ speedReasonFor(modelId) }}
                 </n-tooltip>
-                <FreeBadge
-                  v-if="freeVariantFor(modelId)"
-                  :variant="freeVariantFor(modelId) === 'trial' ? 'trial' : 'full'"
-                  :size="11"
-                />
+                <FreeBadge v-if="isFreeModel(modelId)" />
 
                 <span v-if="blockedSet.has(modelId)" class="v3-chip v3-chip--danger" style="flex-shrink: 0; font-size: 10px">
                   🚫 {{ t("v3.blocked") || "blocked" }}
@@ -1603,7 +1735,9 @@ const filterCounts = computed(() => ({
               :class="{
                 'v5-modelcard--inexposed': exposedSet.has(modelId),
                 'v5-modelcard--blocked': blockedSet.has(modelId),
+                'v5-modelcard--selected': isSelected(modelId),
               }"
+              @click="toggleSelected(modelId)"
             >
               <div class="v5-modelcard__row">
                 <code class="v5-modelcard__name">{{ modelId }}</code>
@@ -1615,11 +1749,7 @@ const filterCounts = computed(() => ({
                   </template>
                   {{ speedReasonFor(modelId) }}
                 </n-tooltip>
-                <FreeBadge
-                  v-if="freeVariantFor(modelId)"
-                  :variant="freeVariantFor(modelId) === 'trial' ? 'trial' : 'full'"
-                  :size="11"
-                />
+                <FreeBadge v-if="isFreeModel(modelId)" />
 
                 <span v-if="blockedSet.has(modelId)" class="v3-chip v3-chip--danger" style="flex-shrink: 0; font-size: 10px">
                   🚫 {{ t("v3.blocked") || "blocked" }}
@@ -1648,7 +1778,11 @@ const filterCounts = computed(() => ({
               v-for="modelId in filteredAvailable"
               :key="modelId"
               class="v5-modelcard"
-              :class="{ 'v5-modelcard--blocked': blockedSet.has(modelId) }"
+              :class="{
+                'v5-modelcard--blocked': blockedSet.has(modelId),
+                'v5-modelcard--selected': isSelected(modelId),
+              }"
+              @click="toggleSelected(modelId)"
             >
               <div class="v5-modelcard__row">
                 <code class="v5-modelcard__name">{{ modelId }}</code>
@@ -1660,11 +1794,7 @@ const filterCounts = computed(() => ({
                   </template>
                   {{ speedReasonFor(modelId) }}
                 </n-tooltip>
-                <FreeBadge
-                  v-if="freeVariantFor(modelId)"
-                  :variant="freeVariantFor(modelId) === 'trial' ? 'trial' : 'full'"
-                  :size="11"
-                />
+                <FreeBadge v-if="isFreeModel(modelId)" />
 
                 <span v-if="blockedSet.has(modelId)" class="v3-chip v3-chip--danger" style="flex-shrink: 0; font-size: 10px">
                   🚫 {{ t("v3.blocked") || "blocked" }}
