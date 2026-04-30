@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"encoding/json"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -14,12 +15,12 @@ import (
 
 // AliasSuggestion is one suggestion row. `Kind` discriminates the payload:
 //   - "single": one unrecognized model — legacy shape, fields Model/Count/LastSeen.
-//   - "family": several unrecognized models share a `model_family` (looked up
-//     in FreeModelsRegistry). UI offers a one-click action to create a single
-//     alias whose targets are the in-group siblings of that family.
+//   - "family": several models (logs + group siblings) share a coarse-grained
+//     family key derived from their model id. UI offers a one-click action
+//     to create a single alias whose targets are all those models.
 //
-// Nesting/sub-fields are explicitly `omitempty` so the wire shape stays
-// compact for either kind. The frontend switches on Kind.
+// Sub-fields use `omitempty` so the wire shape stays compact for either kind.
+// The frontend switches on Kind.
 type AliasSuggestion struct {
 	Kind     string    `json:"kind"`
 	Model    string    `json:"model,omitempty"`
@@ -43,31 +44,44 @@ type FamilyModel struct {
 	InGroupIDs []uint     `json:"in_group_ids,omitempty"`
 }
 
-// AliasSuggestionService scans request_logs for models the gateway didn't
-// know and weren't already aliased, then optionally enriches with
-// model_family info to recommend bulk-alias actions.
+// AliasSuggestionService scans request_logs for unrecognized models and
+// recommends bulk-alias actions by grouping them under coarse-grained
+// family keys derived heuristically from the model id (CDN's
+// `model_family` field is too granular — `gemini-2.5-flash-lite` and
+// `gemini-2.5-pro` get distinct families upstream, defeating aggregation).
 type AliasSuggestionService struct {
-	db       *gorm.DB
-	registry *FreeModelsRegistry // optional; nil → service emits legacy single-only suggestions
+	db *gorm.DB
 }
 
-// NewAliasSuggestionService constructs the service. `registry` may be nil
-// (tests, or before registry has finished its first fetch) — when nil the
-// service degrades to legacy single-suggestion behavior.
-func NewAliasSuggestionService(db *gorm.DB, registry *FreeModelsRegistry) *AliasSuggestionService {
-	return &AliasSuggestionService{db: db, registry: registry}
+func NewAliasSuggestionService(db *gorm.DB) *AliasSuggestionService {
+	return &AliasSuggestionService{db: db}
 }
 
-// minFamilyDistinct / minFamilyHits are the thresholds before a family
-// bucket is promoted to a `kind=family` suggestion. Below either threshold
-// each model is emitted as its own `kind=single` row, preserving today's UX.
-const (
-	minFamilyDistinct = 2
-	minFamilyHits     = 3
-)
+// minFamilyMembers — the family must hold at least this many distinct model
+// names (logs ∪ group siblings combined) to be promoted to a `kind=family`
+// suggestion. Anything below is emitted as `kind=single`.
+const minFamilyMembers = 2
+
+type seedEntry struct {
+	model    string
+	count    int64
+	lastSeen time.Time
+}
+
+type familyBucket struct {
+	family   string
+	seeds    []seedEntry
+	total    int64
+	lastSeen time.Time
+}
+
+type groupModelMatch struct {
+	model    string
+	groupIDs map[uint]struct{}
+}
 
 // Suggest returns up to ~20 unmatched models, optionally bucketed by
-// model_family. Ordering: family suggestions first (by total hits desc),
+// derived family. Ordering: family suggestions first (by total hits desc),
 // then leftover single suggestions (by hits desc).
 func (s *AliasSuggestionService) Suggest(ctx context.Context, lookback time.Duration) ([]AliasSuggestion, error) {
 	since := time.Now().Add(-lookback)
@@ -109,11 +123,6 @@ func (s *AliasSuggestionService) Suggest(ctx context.Context, lookback time.Dura
 		skip[a] = true
 	}
 
-	type seedEntry struct {
-		model    string
-		count    int64
-		lastSeen time.Time
-	}
 	seeds := make([]seedEntry, 0, len(rows))
 	for _, r := range rows {
 		if skip[r.Model] {
@@ -130,74 +139,59 @@ func (s *AliasSuggestionService) Suggest(ctx context.Context, lookback time.Dura
 		return nil, nil
 	}
 
-	// Without registry we fall back to the legacy single-only shape.
-	if s.registry == nil {
-		out := make([]AliasSuggestion, 0, len(seeds))
-		for _, e := range seeds {
-			out = append(out, AliasSuggestion{Kind: "single", Model: e.model, Count: e.count, LastSeen: e.lastSeen})
-		}
-		return out, nil
-	}
-
-	// 1) bucket seeds by family.
-	type bucket struct {
-		family string
-		seeds  []seedEntry
-		total  int64
-	}
-	buckets := map[string]*bucket{}
-	leftovers := make([]seedEntry, 0, len(seeds)) // family lookup miss → fall back to single
+	// 1) Bucket seeds by derived family. Empty family → leftover (single only).
+	buckets := map[string]*familyBucket{}
+	leftovers := make([]seedEntry, 0, len(seeds))
 	for _, e := range seeds {
-		fam := familyForModel(s.registry, e.model)
+		fam := deriveFamily(e.model)
 		if fam == "" {
 			leftovers = append(leftovers, e)
 			continue
 		}
 		b, ok := buckets[fam]
 		if !ok {
-			b = &bucket{family: fam}
+			b = &familyBucket{family: fam}
 			buckets[fam] = b
 		}
 		b.seeds = append(b.seeds, e)
 		b.total += e.count
+		if e.lastSeen.After(b.lastSeen) {
+			b.lastSeen = e.lastSeen
+		}
 	}
 
-	// 2) promote buckets meeting threshold; demote others back to leftovers.
-	type promoted struct {
-		fam       string
-		seeds     []seedEntry
-		total     int64
-		lastSeen  time.Time
-		distinct  int
-	}
-	var families []promoted
-	for fam, b := range buckets {
-		distinct := len(uniqueModels(b.seeds))
-		if distinct < minFamilyDistinct || b.total < minFamilyHits {
-			leftovers = append(leftovers, b.seeds...)
-			continue
-		}
-		var maxLastSeen time.Time
-		for _, e := range b.seeds {
-			if e.lastSeen.After(maxLastSeen) {
-				maxLastSeen = e.lastSeen
-			}
-		}
-		families = append(families, promoted{fam: fam, seeds: b.seeds, total: b.total, lastSeen: maxLastSeen, distinct: distinct})
-	}
-
-	// 3) for each promoted family, scan user's groups for in-group siblings.
-	familyToGroupModels, err := s.scanGroupsByFamily(ctx, families)
+	// 2) Scan all non-aggregate groups once, indexing models by derived family.
+	//    We always scan — even families with a single seed may pick up siblings.
+	familyToGroupModels, err := s.scanGroupsByFamily(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	// 4) detect existing aliases for these family names.
+	// 3) Promote buckets where total distinct (logs ∪ siblings) ≥ threshold.
+	families := make([]*familyBucket, 0, len(buckets))
+	for _, b := range buckets {
+		distinct := len(distinctModelNames(b.seeds))
+		// add group-side siblings whose name isn't already in the seed list
+		seen := distinctModelNames(b.seeds)
+		for name := range familyToGroupModels[b.family] {
+			if _, dup := seen[name]; !dup {
+				distinct++
+				seen[name] = struct{}{}
+			}
+		}
+		if distinct < minFamilyMembers {
+			leftovers = append(leftovers, b.seeds...)
+			continue
+		}
+		families = append(families, b)
+	}
+
+	// 4) Detect existing aliases for these family names.
 	existingAlias := map[string]bool{}
 	if len(families) > 0 {
 		famNames := make([]string, 0, len(families))
 		for _, f := range families {
-			famNames = append(famNames, f.fam)
+			famNames = append(famNames, f.family)
 		}
 		var aliasNames []string
 		if err := s.db.WithContext(ctx).
@@ -212,23 +206,23 @@ func (s *AliasSuggestionService) Suggest(ctx context.Context, lookback time.Dura
 		}
 	}
 
-	// 5) assemble output: family rows ordered by total desc, then single rows.
+	// 5) Assemble: family rows ordered by total desc, then single rows.
 	sort.Slice(families, func(i, j int) bool { return families[i].total > families[j].total })
 
 	out := make([]AliasSuggestion, 0, len(families)+len(leftovers))
 	for _, f := range families {
-		fm := buildFamilyModels(f.seeds, familyToGroupModels[f.fam])
-		s := AliasSuggestion{
+		fm := buildFamilyModels(f.seeds, familyToGroupModels[f.family])
+		row := AliasSuggestion{
 			Kind:     "family",
-			Family:   f.fam,
+			Family:   f.family,
 			Models:   fm,
 			Count:    f.total,
 			LastSeen: f.lastSeen,
 		}
-		if existingAlias[f.fam] {
-			s.ExistingAlias = f.fam
+		if existingAlias[f.family] {
+			row.ExistingAlias = f.family
 		}
-		out = append(out, s)
+		out = append(out, row)
 	}
 	sort.Slice(leftovers, func(i, j int) bool { return leftovers[i].count > leftovers[j].count })
 	for _, e := range leftovers {
@@ -237,12 +231,7 @@ func (s *AliasSuggestionService) Suggest(ctx context.Context, lookback time.Dura
 	return out, nil
 }
 
-// uniqueModels returns the unique model name set inside a seed slice.
-func uniqueModels(seeds []struct {
-	model    string
-	count    int64
-	lastSeen time.Time
-}) map[string]struct{} {
+func distinctModelNames(seeds []seedEntry) map[string]struct{} {
 	out := map[string]struct{}{}
 	for _, e := range seeds {
 		out[e.model] = struct{}{}
@@ -250,56 +239,116 @@ func uniqueModels(seeds []struct {
 	return out
 }
 
-// familyForModel returns the registry's `model_family` for a bare model id
-// (case-insensitive lookup). Empty string when the registry has no entry.
-func familyForModel(reg *FreeModelsRegistry, modelID string) string {
-	if reg == nil || modelID == "" {
+// variantTokens are sub-segments that, once seen (after the brand prefix),
+// terminate the family key. They mark a *variant* of the family rather than
+// part of the family name itself.
+//
+// Why these specifically: empirically these are the words that distinguish
+// sibling SKUs from the same release line — `gemini-2.5-flash` vs
+// `gemini-2.5-pro`, `claude-sonnet-4` vs `claude-haiku-4`. Without them
+// every variant ends up in its own bucket, defeating aggregation.
+var variantTokens = map[string]struct{}{
+	// size class
+	"lite": {}, "mini": {}, "nano": {}, "tiny": {},
+	"small": {}, "medium": {}, "large": {}, "xl": {}, "xxl": {},
+	"pro": {}, "plus": {}, "max": {}, "ultra": {},
+	// modality / behaviour
+	"flash": {}, "fast": {}, "turbo": {}, "thinking": {}, "reasoner": {},
+	"vision": {}, "image": {}, "video": {}, "audio": {},
+	"tts": {}, "embed": {}, "embedding": {}, "rerank": {},
+	"chat": {}, "instruct": {}, "code": {}, "coder": {},
+	// release stage
+	"preview": {}, "experimental": {}, "exp": {}, "beta": {}, "rc": {},
+	"free": {}, "trial": {},
+	// claude family (sibling SKUs differ only by these words)
+	"haiku": {}, "sonnet": {}, "opus": {},
+}
+
+// sizeRe matches parameter-size markers like "120b", "20b", "7b", "1.5b".
+var sizeRe = regexp.MustCompile(`^[0-9]+(?:\.[0-9]+)?[bm]$`)
+
+// datelikeRe matches release-date / version markers tacked onto the end:
+// "20240620", "2025-09", "09-2025", "v3", "rev2", etc.
+var datelikeRe = regexp.MustCompile(`^(?:[0-9]{6,8}|[0-9]{4}|[vr][0-9]+|rev[0-9]+)$`)
+
+// deriveFamily computes a coarse family key from a bare model id by
+// stripping provider prefix, parenthesised tails, ":free"-style qualifiers,
+// then walking dash-segments left to right and stopping at the first
+// variant/size/date token. Empty input → empty output.
+//
+// Examples (also covered by tests):
+//
+//	gemini-2.5-flash-lite        -> gemini-2.5
+//	gemini-2.5-flash             -> gemini-2.5
+//	gemini-2.5-pro               -> gemini-2.5
+//	gemini-2.0-flash             -> gemini-2.0
+//	gpt-oss-120b                 -> gpt-oss
+//	gpt-oss-20b                  -> gpt-oss
+//	gpt-4o-mini                  -> gpt-4o
+//	claude-sonnet-4-5-20251022   -> claude
+//	claude-haiku-4               -> claude
+//	qwen-2.5-72b-instruct        -> qwen-2.5
+//	openai/gpt-oss-20b:free      -> gpt-oss
+//	deepseek-r1                  -> deepseek-r1
+//	openrouter/auto              -> auto
+func deriveFamily(modelID string) string {
+	s := strings.ToLower(strings.TrimSpace(modelID))
+	if s == "" {
 		return ""
 	}
-	if m := reg.Lookup("", modelID); m != nil {
-		return strings.TrimSpace(m.ModelFamily)
+	if i := strings.Index(s, "("); i >= 0 {
+		s = strings.TrimSpace(s[:i])
 	}
-	return ""
+	if i := strings.Index(s, ":"); i >= 0 {
+		s = s[:i]
+	}
+	if i := strings.LastIndex(s, "/"); i >= 0 {
+		s = s[i+1:]
+	}
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	parts := strings.Split(s, "-")
+	out := make([]string, 0, len(parts))
+	for i, p := range parts {
+		if p == "" {
+			continue
+		}
+		if i > 0 && isVariantToken(p) {
+			break
+		}
+		out = append(out, p)
+	}
+	return strings.Join(out, "-")
+}
+
+func isVariantToken(p string) bool {
+	if _, ok := variantTokens[p]; ok {
+		return true
+	}
+	if sizeRe.MatchString(p) {
+		return true
+	}
+	if datelikeRe.MatchString(p) {
+		return true
+	}
+	return false
 }
 
 // scanGroupsByFamily walks all non-aggregate groups and indexes their
-// available/exposed models by family — but only families we already care
-// about (the promoted buckets). Returns family → [{ModelName, GroupIDs…}].
-type groupModelMatch struct {
-	model    string
-	groupIDs map[uint]struct{}
-}
-
-func (s *AliasSuggestionService) scanGroupsByFamily(ctx context.Context, families []struct {
-	fam       string
-	seeds     []struct {
-		model    string
-		count    int64
-		lastSeen time.Time
-	}
-	total    int64
-	lastSeen time.Time
-	distinct int
-}) (map[string]map[string]*groupModelMatch, error) {
-	if len(families) == 0 || s.registry == nil {
-		return nil, nil
-	}
-	wanted := map[string]struct{}{}
-	for _, f := range families {
-		wanted[f.fam] = struct{}{}
-	}
+// available/exposed models by derived family. Returns family → model → match.
+func (s *AliasSuggestionService) scanGroupsByFamily(ctx context.Context) (map[string]map[string]*groupModelMatch, error) {
 	var groups []models.Group
 	if err := s.db.WithContext(ctx).
-		Select("id", "group_type", "available_models", "exposed_models").
+		Select("id, group_type, available_models, exposed_models").
 		Where("group_type <> ?", "aggregate").
 		Find(&groups).Error; err != nil {
 		return nil, err
 	}
-	out := map[string]map[string]*groupModelMatch{} // family → model → match
+	out := map[string]map[string]*groupModelMatch{}
 	for _, g := range groups {
 		modelSet := map[string]struct{}{}
-		// AvailableModels (passthrough source) and ExposedModels (specified
-		// whitelist) — union both so we don't miss either mode.
 		for _, raw := range []json.RawMessage{json.RawMessage(g.AvailableModels), json.RawMessage(g.ExposedModels)} {
 			if len(raw) == 0 {
 				continue
@@ -315,11 +364,8 @@ func (s *AliasSuggestionService) scanGroupsByFamily(ctx context.Context, familie
 			}
 		}
 		for m := range modelSet {
-			fam := familyForModel(s.registry, m)
+			fam := deriveFamily(m)
 			if fam == "" {
-				continue
-			}
-			if _, want := wanted[fam]; !want {
 				continue
 			}
 			famMap := out[fam]
@@ -339,17 +385,13 @@ func (s *AliasSuggestionService) scanGroupsByFamily(ctx context.Context, familie
 }
 
 // buildFamilyModels merges seed models (FromLogs=true) and in-group siblings
-// (FromLogs=false) into a stable, de-duplicated, name-sorted list.
-func buildFamilyModels(seeds []struct {
-	model    string
-	count    int64
-	lastSeen time.Time
-}, groupMatches map[string]*groupModelMatch) []FamilyModel {
+// (FromLogs=false) into a stable, de-duplicated, sorted list. FromLogs first
+// (by count desc), then siblings (by name).
+func buildFamilyModels(seeds []seedEntry, groupMatches map[string]*groupModelMatch) []FamilyModel {
 	byName := map[string]*FamilyModel{}
 	for _, e := range seeds {
 		ls := e.lastSeen
-		fm := &FamilyModel{Name: e.model, Count: e.count, LastSeen: &ls, FromLogs: true}
-		byName[e.model] = fm
+		byName[e.model] = &FamilyModel{Name: e.model, Count: e.count, LastSeen: &ls, FromLogs: true}
 	}
 	for name, match := range groupMatches {
 		fm, ok := byName[name]
@@ -369,8 +411,6 @@ func buildFamilyModels(seeds []struct {
 		out = append(out, *fm)
 	}
 	sort.Slice(out, func(i, j int) bool {
-		// FromLogs ones first (the user actually requested them), then by
-		// name. Within FromLogs, higher count first.
 		if out[i].FromLogs != out[j].FromLogs {
 			return out[i].FromLogs
 		}
@@ -382,7 +422,7 @@ func buildFamilyModels(seeds []struct {
 	return out
 }
 
-// parseLogTimestamp tolerates SQLite (text) vs MySQL/Postgres (proper time).
+// parseLogTimestamp tolerates SQLite (text) vs MySQL/Postgres (time.Time).
 func parseLogTimestamp(s string) time.Time {
 	for _, layout := range []string{
 		time.RFC3339Nano,
