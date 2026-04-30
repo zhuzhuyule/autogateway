@@ -20,7 +20,7 @@ const RULES: Rule[] = [
   // Google AI Studio — AIza + 35 alphanum chars (always 39 total)
   {
     test: k => /^AIza[A-Za-z0-9_-]{35}$/.test(k),
-    providerId: "google-aistudio",
+    providerId: "google",
     confidence: "high",
     hint: "AIza 前缀 · 39 位",
   },
@@ -69,7 +69,7 @@ const RULES: Rule[] = [
   // NVIDIA NIM
   {
     test: k => k.startsWith("nvapi-"),
-    providerId: "nvidia-nim",
+    providerId: "nvidia",
     confidence: "high",
     hint: "nvapi- 前缀",
   },
@@ -97,14 +97,14 @@ const RULES: Rule[] = [
   // 讯飞星辰 MaaS — APIKey:APISecret（冒号分隔，各 16-44 位字母数字）
   {
     test: k => /^[A-Za-z0-9]{16,44}:[A-Za-z0-9]{16,64}$/.test(k),
-    providerId: "xfyun",
+    providerId: "xunfei",
     confidence: "high",
     hint: "APIKey:APISecret 格式（讯飞星辰）",
   },
   // Gitee AI — 全大写字母+数字，38-42位
   {
     test: k => /^[A-Z0-9]{38,42}$/.test(k),
-    providerId: "gitee-ai",
+    providerId: "gitee",
     confidence: "high",
     hint: "全大写字母+数字，约40位（Gitee AI）",
   },
@@ -118,19 +118,19 @@ const RULES: Rule[] = [
 ];
 
 const PROVIDER_NAMES: Record<string, string> = {
-  "google-aistudio": "Google AI Studio",
+  google: "Google AI Studio",
   anthropic: "Anthropic",
   openrouter: "OpenRouter",
   openai: "OpenAI",
   groq: "Groq Cloud",
   huggingface: "Hugging Face",
   "github-models": "GitHub Models",
-  "nvidia-nim": "NVIDIA NIM",
+  nvidia: "NVIDIA NIM",
   cerebras: "Cerebras",
   cohere: "Cohere",
   longcat: "美团 LongCat",
-  xfyun: "讯飞星辰",
-  "gitee-ai": "Gitee AI",
+  xunfei: "讯飞星辰",
+  gitee: "Gitee AI",
 };
 
 /** Detect provider from a single key string. Returns null if unrecognised. */

@@ -233,7 +233,7 @@ export const FREE_PROVIDERS: FreeProvider[] = [
     verifiedAt: "2026-04",
   },
   {
-    id: "google-aistudio",
+    id: "google",
     name: "Google AI Studio",
     freeTier: "免费档(每模型独立配额)",
     description: "Gemini 2.0/2.5 Flash,原生多模态",
@@ -322,7 +322,7 @@ export const FREE_PROVIDERS: FreeProvider[] = [
     verifiedAt: "2026-04",
   },
   {
-    id: "zhipu",
+    id: "bigmodel",
     name: "智谱 AI (Z AI)",
     freeTier: "GLM-Flash 系列永久免费",
     description: "GLM-4-Flash 文本+视觉,无需绑卡",
@@ -338,7 +338,7 @@ export const FREE_PROVIDERS: FreeProvider[] = [
     verifiedAt: "2026-04",
   },
   {
-    id: "nvidia-nim",
+    id: "nvidia",
     name: "NVIDIA NIM",
     freeTier: "100+ 模型,无每日 Token 上限",
     description: "加入 NVIDIA Developer Program 免费,DeepSeek / Nemotron / Llama",
@@ -451,7 +451,7 @@ export const FREE_PROVIDERS: FreeProvider[] = [
     verifiedAt: "2026-04",
   },
   {
-    id: "xfyun",
+    id: "xunfei",
     name: "讯飞星辰",
     freeTier: "永久免费 (Qwen3.5-2B / Qwen3-1.7B / Hunyuan-MT-7B)",
     description: "科大讯飞 MaaS,65+ 模型,Key 格式 APIKey:APISecret",
@@ -507,7 +507,7 @@ export const FREE_PROVIDERS: FreeProvider[] = [
     verifiedAt: "2026-04",
   },
   {
-    id: "gitee-ai",
+    id: "gitee",
     name: "Gitee AI",
     freeTier: "永久免费小模型 + 注册体验额度",
     description: "模力方舟 Serverless API,Qwen3 / GLM-Flash / DeepSeek-Distill",
@@ -758,18 +758,18 @@ export const FREE_MODELS: FreeModel[] = [
 
   // Google AI Studio
   {
-    providerId: "google-aistudio",
+    providerId: "google",
     modelId: "gemini-2.5-flash",
     tier: "balanced",
     notes: "原生多模态,1M 上下文",
   },
   {
-    providerId: "google-aistudio",
+    providerId: "google",
     modelId: "gemini-2.5-flash-lite",
     tier: "fast",
     notes: "1M 上下文",
   },
-  { providerId: "google-aistudio", modelId: "gemini-2.0-flash", tier: "fast", notes: "原生多模态" },
+  { providerId: "google", modelId: "gemini-2.0-flash", tier: "fast", notes: "原生多模态" },
 
   // Cohere
   { providerId: "cohere", modelId: "command-r7b-12-2024", tier: "fast" },
@@ -804,18 +804,18 @@ export const FREE_MODELS: FreeModel[] = [
   { providerId: "huggingface", modelId: "microsoft/Phi-3.5-mini-instruct", tier: "fast" },
 
   // Zhipu AI (GLM)
-  { providerId: "zhipu", modelId: "GLM-4-Flash", tier: "fast", notes: "免费旗舰" },
-  { providerId: "zhipu", modelId: "GLM-4V-Flash", tier: "fast", notes: "视觉+文本" },
-  { providerId: "zhipu", modelId: "GLM-Z1-Flash", tier: "balanced", notes: "推理增强" },
+  { providerId: "bigmodel", modelId: "GLM-4-Flash", tier: "fast", notes: "免费旗舰" },
+  { providerId: "bigmodel", modelId: "GLM-4V-Flash", tier: "fast", notes: "视觉+文本" },
+  { providerId: "bigmodel", modelId: "GLM-Z1-Flash", tier: "balanced", notes: "推理增强" },
 
   // NVIDIA NIM
-  { providerId: "nvidia-nim", modelId: "deepseek-ai/deepseek-r1", tier: "max", notes: "推理增强" },
-  { providerId: "nvidia-nim", modelId: "nvidia/llama-3.1-nemotron-ultra-253b-v1", tier: "max" },
-  { providerId: "nvidia-nim", modelId: "nvidia/nemotron-3-super-120b-a12b", tier: "max" },
-  { providerId: "nvidia-nim", modelId: "nvidia/nemotron-3-nano-30b-a3b", tier: "balanced" },
-  { providerId: "nvidia-nim", modelId: "meta/llama-3.1-405b-instruct", tier: "max" },
-  { providerId: "nvidia-nim", modelId: "qwen/qwen2.5-72b-instruct", tier: "balanced" },
-  { providerId: "nvidia-nim", modelId: "google/gemma-4-31b", tier: "balanced" },
+  { providerId: "nvidia", modelId: "deepseek-ai/deepseek-r1", tier: "max", notes: "推理增强" },
+  { providerId: "nvidia", modelId: "nvidia/llama-3.1-nemotron-ultra-253b-v1", tier: "max" },
+  { providerId: "nvidia", modelId: "nvidia/nemotron-3-super-120b-a12b", tier: "max" },
+  { providerId: "nvidia", modelId: "nvidia/nemotron-3-nano-30b-a3b", tier: "balanced" },
+  { providerId: "nvidia", modelId: "meta/llama-3.1-405b-instruct", tier: "max" },
+  { providerId: "nvidia", modelId: "qwen/qwen2.5-72b-instruct", tier: "balanced" },
+  { providerId: "nvidia", modelId: "google/gemma-4-31b", tier: "balanced" },
 
   // SiliconFlow
   { providerId: "siliconflow", modelId: "Qwen/Qwen3-8B", tier: "fast" },
@@ -906,37 +906,37 @@ export const FREE_MODELS: FreeModel[] = [
 
   // 讯飞星辰 — 仅含 inferencePrice in/out 都为 0 且属于"文本生成"类
   // (源:list-v2 接口枚举,2026-04 复核;OCR/embedding/SD/rerank/MT 走单独端点不在此列)
-  { providerId: "xfyun", modelId: "xop35qwen2b", tier: "fast", notes: "Qwen3.5-2B 永久免费" },
-  { providerId: "xfyun", modelId: "test_ent", tier: "fast", notes: "Qwen3-1.7B 永久免费" },
-  { providerId: "xfyun", modelId: "xophunyuan7bmt", tier: "fast", notes: "Hunyuan-MT-7B 永久免费" },
+  { providerId: "xunfei", modelId: "xop35qwen2b", tier: "fast", notes: "Qwen3.5-2B 永久免费" },
+  { providerId: "xunfei", modelId: "test_ent", tier: "fast", notes: "Qwen3-1.7B 永久免费" },
+  { providerId: "xunfei", modelId: "xophunyuan7bmt", tier: "fast", notes: "Hunyuan-MT-7B 永久免费" },
 
   // Gitee AI (永久免费 text-generation,源自 /api/pay/.../services?type=serverless)
-  { providerId: "gitee-ai", modelId: "internlm3-8b-instruct", tier: "fast", notes: "InternLM3-8B · 永久免费" },
-  { providerId: "gitee-ai", modelId: "Qwen3-8B", tier: "fast", notes: "永久免费" },
-  { providerId: "gitee-ai", modelId: "Qwen3-4B", tier: "fast", notes: "永久免费" },
-  { providerId: "gitee-ai", modelId: "Qwen3-0.6B", tier: "fast", notes: "极速小模型" },
-  { providerId: "gitee-ai", modelId: "Qwen2-7B-Instruct", tier: "fast", notes: "永久免费" },
+  { providerId: "gitee", modelId: "internlm3-8b-instruct", tier: "fast", notes: "InternLM3-8B · 永久免费" },
+  { providerId: "gitee", modelId: "Qwen3-8B", tier: "fast", notes: "永久免费" },
+  { providerId: "gitee", modelId: "Qwen3-4B", tier: "fast", notes: "永久免费" },
+  { providerId: "gitee", modelId: "Qwen3-0.6B", tier: "fast", notes: "极速小模型" },
+  { providerId: "gitee", modelId: "Qwen2-7B-Instruct", tier: "fast", notes: "永久免费" },
   {
-    providerId: "gitee-ai",
+    providerId: "gitee",
     modelId: "DeepSeek-R1-Distill-Qwen-14B",
     tier: "balanced",
     notes: "推理蒸馏 · 永久免费",
   },
   {
-    providerId: "gitee-ai",
+    providerId: "gitee",
     modelId: "DeepSeek-R1-Distill-Qwen-7B",
     tier: "fast",
     notes: "推理蒸馏 7B",
   },
   {
-    providerId: "gitee-ai",
+    providerId: "gitee",
     modelId: "DeepSeek-R1-Distill-Qwen-1.5B",
     tier: "fast",
     notes: "推理蒸馏 1.5B 极速",
   },
-  { providerId: "gitee-ai", modelId: "GLM-4.7-Flash", tier: "fast", notes: "30B SOTA · 免费" },
-  { providerId: "gitee-ai", modelId: "GLM-4-9B-0414", tier: "fast", notes: "智谱 9B" },
-  { providerId: "gitee-ai", modelId: "glm-4-9b-chat", tier: "fast", notes: "智谱 9B chat" },
+  { providerId: "gitee", modelId: "GLM-4.7-Flash", tier: "fast", notes: "30B SOTA · 免费" },
+  { providerId: "gitee", modelId: "GLM-4-9B-0414", tier: "fast", notes: "智谱 9B" },
+  { providerId: "gitee", modelId: "glm-4-9b-chat", tier: "fast", notes: "智谱 9B chat" },
 
   // AIHubMix
   { providerId: "aihubmix", modelId: "gpt-4o-mini", tier: "fast" },

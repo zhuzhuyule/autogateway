@@ -386,7 +386,7 @@ function onSearchInput() {
 function refreshAll() {
   loadStats();
   loadKeys();
-  message.success(t("common.refresh") || "Refreshed");
+  message.success(t("common.refresh"));
 }
 
 // === Models tab ===
@@ -517,13 +517,12 @@ function speedReasonFor(modelId: string): string {
   const inf = inferSpeed(modelId);
   const sourceLabel =
     inf.source === "registry"
-      ? t("v3.tierFromRegistry") || "✓ FreeModels"
+      ? t("v3.tierFromRegistry")
       : inf.source === "preset"
-        ? t("v3.tierFromPreset") || "✓ 预设清单"
+        ? t("v3.tierFromPreset")
         : inf.source === "keyword"
-          ? t("v3.tierFromKeyword") || "推断"
-          : t("v3.tierDefault") || "默认";
-  return `${sourceLabel}: ${inf.reason}`;
+          ? t("v3.tierFromKeyword")
+          : t("v3.tierDefault");  return `${sourceLabel}: ${inf.reason}`;
 }
 
 function isFreeModel(modelId: string): boolean {
@@ -1199,7 +1198,7 @@ const filterCounts = computed(() => ({
                 <n-icon :component="PencilOutline" :size="13" />
               </button>
             </template>
-            {{ t("common.edit") || "Edit" }}
+            {{ t("common.edit") }}
           </n-tooltip>
           <n-tooltip v-if="!isAggregate">
             <template #trigger>
@@ -1479,7 +1478,7 @@ const filterCounts = computed(() => ({
                         <n-icon :component="CheckmarkCircle" :size="14" />
                       </button>
                     </template>
-                    {{ t("common.save") || "Save" }}
+                    {{ t("common.save") }}
                   </n-tooltip>
                   <n-tooltip>
                     <template #trigger>
@@ -1487,7 +1486,7 @@ const filterCounts = computed(() => ({
                         <n-icon :component="CloseOutline" :size="14" />
                       </button>
                     </template>
-                    {{ t("common.cancel") || "Cancel" }}
+                    {{ t("common.cancel") }}
                   </n-tooltip>
                 </template>
 
@@ -1635,7 +1634,7 @@ const filterCounts = computed(() => ({
                 {{ t("common.all") || "All" }}
               </button>
               <button class="v3-btn v3-btn--sm" :class="{ 'v3-btn--accent': availFilter === 'free' }" @click="availFilter = 'free'">
-                🆓 {{ t("v3.freeText") || "免费" }}
+                🆓 {{ t("v3.freeText") }}
               </button>
               <button
                 v-if="showTrialFilter"
@@ -1753,7 +1752,7 @@ const filterCounts = computed(() => ({
           </div>
           <div v-else class="v5-empty-mini">
             <span v-if="exposedModels.length === 0">{{ t("v3.noExposedModels") || "暂无已暴露模型,从下方加入" }}</span>
-            <span v-else>{{ t("v3.noModelsMatching") || "No models match your current filters." }}</span>
+            <span v-else>{{ t("v3.noModelsMatching") }}</span>
           </div>
 
           <div class="v5-section-head" style="margin-top: 16px">
@@ -1798,7 +1797,7 @@ const filterCounts = computed(() => ({
             </div>
           </div>
           <div v-else class="v5-empty-mini">
-            <span>{{ groupModels.length === 0 ? (t("v3.upstreamEmpty") || "上游模型列表为空,请先刷新") : (t("v3.noModelsMatching") || "No models match.") }}</span>
+            <span>{{ groupModels.length === 0 ? (t("v3.upstreamEmpty") || "上游模型列表为空,请先刷新") : t("v3.noModelsMatching") }}</span>
           </div>
         </template>
 
@@ -1853,7 +1852,7 @@ const filterCounts = computed(() => ({
             <div class="v5-empty__title">{{ t("v5.noModelsTitle") }}</div>
             <div class="v5-empty__sub">
               <template v-if="modelSearch || availFilter !== 'all'">
-                {{ t("v3.noModelsMatching") || "No models match your current filters." }}
+                {{ t("v3.noModelsMatching") }}
               </template>
               <template v-else>{{ t("v5.noModelsSub") }}</template>
             </div>
@@ -1862,7 +1861,7 @@ const filterCounts = computed(() => ({
               {{ t("v5.openGroupSettings") }}
             </button>
             <button v-if="modelSearch || availFilter !== 'all'" class="v3-btn" style="margin-top: 8px" @click="() => { modelSearch = ''; availFilter = 'all'; }">
-              {{ t("v3.clearFilters") || "Clear filters" }}
+              {{ t("v3.clearFilters") }}
             </button>
           </div>
         </template>
@@ -1875,7 +1874,7 @@ const filterCounts = computed(() => ({
           <div class="v5-toolbar__spacer">
             <button v-if="!group.is_system" class="v3-btn v3-btn--sm" @click="showEditGroup = true">
               <n-icon :component="PencilOutline" :size="11" />
-              {{ t("common.edit") || "Edit" }}
+              {{ t("common.edit") }}
             </button>
           </div>
         </div>

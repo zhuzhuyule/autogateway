@@ -74,97 +74,35 @@ function bareModelId(idWithMaybePrefix: string, provider?: string): string {
     return idWithMaybePrefix; // 首段是模型作者名 (e.g. "bytedance/", "google/") — 保留
   }
   // 不知 provider, 保守:仅当首段命中桥接表时剥
-  if (isKnownProviderId(head) || LOCALID_TO_BRIDGE.has(head)) {
+  if (isKnownProviderId(head)) {
     return idWithMaybePrefix.slice(slash + 1);
   }
   return idWithMaybePrefix;
 }
 
 // =============================================================================
-// PROVIDER_BRIDGE — 上游 FreeModels 9 家 ↔ 本地 freeProviders.ts ↔ upstream hosts
+// 9 家 FreeModels 上游 provider id, 跟本地 freeProviders.ts 已统一为同名:
+// bigmodel / cerebras / gitee / google / groq / longcat / nvidia / openrouter / xunfei
+// 因此不需要别名映射表,id 直通即可.
 // =============================================================================
-// 单一可信源:每个 entry 同时把 FreeModels (上游) provider id、我们本地
-// freeProviders id、以及上游 host (用于反查) 绑在一起。 expandProviderAliases /
-// findFreeModelsProvider / isKnownProviderId 都从此表派生, 不再各自维护别名表。
-//
-// 9 家 FreeModels 项目收录的 provider, 跟我们 freeProviders.ts 一一对应:
-//   bigmodel    ↔ zhipu             ↔ open.bigmodel.cn
-//   cerebras    ↔ cerebras          ↔ api.cerebras.ai
-//   gitee       ↔ gitee-ai          ↔ ai.gitee.com
-//   google      ↔ google-aistudio   ↔ generativelanguage.googleapis.com
-//   groq        ↔ groq              ↔ api.groq.com
-//   longcat     ↔ longcat           ↔ api.longcat.chat
-//   nvidia      ↔ nvidia-nim        ↔ integrate.api.nvidia.com
-//   openrouter  ↔ openrouter        ↔ openrouter.ai
-//   xunfei      ↔ xfyun             ↔ maas-api.cn-huabei-1.xf-yun.com /
-//                                     spark-api-open.xf-yun.com
-//
-// 同名 4 家:cerebras / groq / longcat / openrouter
-// 异名 5 家:bigmodel ↔ zhipu / gitee ↔ gitee-ai / google ↔ google-aistudio /
-//          nvidia ↔ nvidia-nim / xunfei ↔ xfyun
-interface ProviderBridge {
-  /** FreeModels 项目用的 id (registry.provider 字段值) */
-  fmId: string;
-  /** 我们 freeProviders.ts 用的 id (group 反查命中此 id) */
-  localId: string;
-  /** 上游真实 hostname, 用于通过 group.upstreams[0].url 反查 fmId */
-  hosts: string[];
-}
-
-const PROVIDER_BRIDGE: ProviderBridge[] = [
-  { fmId: "bigmodel", localId: "zhipu", hosts: ["open.bigmodel.cn"] },
-  { fmId: "cerebras", localId: "cerebras", hosts: ["api.cerebras.ai"] },
-  { fmId: "gitee", localId: "gitee-ai", hosts: ["ai.gitee.com"] },
-  { fmId: "google", localId: "google-aistudio", hosts: ["generativelanguage.googleapis.com"] },
-  { fmId: "groq", localId: "groq", hosts: ["api.groq.com"] },
-  { fmId: "longcat", localId: "longcat", hosts: ["api.longcat.chat"] },
-  { fmId: "nvidia", localId: "nvidia-nim", hosts: ["integrate.api.nvidia.com", "api.nvcf.nvidia.com"] },
-  { fmId: "openrouter", localId: "openrouter", hosts: ["openrouter.ai"] },
-  { fmId: "xunfei", localId: "xfyun", hosts: ["maas-api.cn-huabei-1.xf-yun.com", "spark-api-open.xf-yun.com"] },
-];
-
-const FMID_TO_BRIDGE = new Map(PROVIDER_BRIDGE.map(b => [b.fmId.toLowerCase(), b]));
-const LOCALID_TO_BRIDGE = new Map(PROVIDER_BRIDGE.map(b => [b.localId.toLowerCase(), b]));
-
+const KNOWN_FREEMODELS_PROVIDERS = new Set([
+  "bigmodel",
+  "cerebras",
+  "gitee",
+  "google",
+  "groq",
+  "longcat",
+  "nvidia",
+  "openrouter",
+  "xunfei",
+]);
 function isKnownProviderId(s: string): boolean {
-  return FMID_TO_BRIDGE.has(s.toLowerCase());
+  return KNOWN_FREEMODELS_PROVIDERS.has(s.toLowerCase());
 }
 
-/** 通过 hostname 反查 FreeModels provider 桥接信息. host 大小写不敏感, 子串匹配. */
-export function findBridgeByHost(host: string | undefined): ProviderBridge | null {
-  if (!host) {
-    return null;
-  }
-  const lower = host.toLowerCase();
-  for (const b of PROVIDER_BRIDGE) {
-    if (b.hosts.some(h => lower.includes(h))) {
-      return b;
-    }
-  }
-  return null;
-}
-
-/** 通过 provider id (任意一边) 反查桥接信息. */
-export function findBridgeById(providerId: string | undefined): ProviderBridge | null {
-  if (!providerId) {
-    return null;
-  }
-  const lower = providerId.toLowerCase();
-  return FMID_TO_BRIDGE.get(lower) || LOCALID_TO_BRIDGE.get(lower) || null;
-}
-
-/**
- * 把任意 provider id 展开成它跨命名空间的所有候选 (含自身), 用于 lookup 时
- * 同时尝试 FreeModels id 和本地 id. 不在桥接表里的 (e.g. together / mistral)
- * 返回 [自身].
- */
+/** 历史包袱:仍有少数 caller 调 expandProviderAliases. 既然 ID 统一了, 直接返回 [自身]. */
 export function expandProviderAliases(providerId: string): string[] {
-  const lower = providerId.toLowerCase();
-  const bridge = findBridgeById(lower);
-  if (bridge) {
-    return [bridge.fmId, bridge.localId];
-  }
-  return [lower];
+  return [providerId.toLowerCase()];
 }
 
 // Indexed lookup tables — 必须是 Vue computed 才能让所有 caller (render / watch /
