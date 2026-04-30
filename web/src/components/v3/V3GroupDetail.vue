@@ -367,7 +367,7 @@ watch(
     page.value = 1;
     statusFilter.value = "all";
     search.value = "";
-    tab.value = "keys";
+    // 不重置 tab — 保留用户上一次选中的 tab (跨 group 持久化, 见 readPersistedTab).
     confirmingDeleteId.value = null;
     loadStats();
     loadAliases();
