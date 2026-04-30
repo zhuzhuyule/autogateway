@@ -42,6 +42,7 @@ import { useI18n } from "vue-i18n";
 import UrlProbeBadge from "@/components/keys/UrlProbeBadge.vue";
 import type { ProbeResult } from "@/api/upstream";
 import { normalizeUpstreamUrl, previewUpstreamPath } from "@/utils/upstreamUrl";
+import { freeModelsRef, lookupRegistry } from "@/api/freemodels";
 
 interface Props {
   show: boolean;
@@ -175,22 +176,55 @@ const upstreamPreview = computed(() => {
   return previewUpstreamPath(first, ep);
 });
 
+// 上游 /v1/models 通常只回少量订阅模型 (智谱默认 7 条), 而 FreeModels Registry
+// 知道该 provider 完整名单. 按 upstream host 反查 provider id, 把 registry 里
+// 同 provider 的模型并集进来 — 否则下拉选项远比 Catalog 卡片视图少.
 const testModelOptions = computed(() => {
-  // 合并 freeProviders 内置示例(用于新建尚未拉取时给点提示) + 真实拉取
   const merged = new Set<string>();
   if (availableModels.value.length === 0 && !props.group) {
-    // 创建模式且未拉取过,从 channel_type 默认值给一个占位
     const placeholder = formData.test_model;
     if (placeholder) {
       merged.add(placeholder);
     }
   }
   availableModels.value.forEach(m => merged.add(m));
+
+  // 合并 registry 同 provider 模型
+  const fmId = findProviderByUpstreams(formData.upstreams)?.id;
+  const env = freeModelsRef.value;
+  if (fmId && env?.models) {
+    for (const m of env.models) {
+      if (m.provider !== fmId) {
+        continue;
+      }
+      const slash = m.modelId.indexOf("/");
+      const bare =
+        slash > 0 && m.modelId.slice(0, slash).toLowerCase() === fmId.toLowerCase()
+          ? m.modelId.slice(slash + 1)
+          : m.modelId;
+      merged.add(bare);
+    }
+  }
+
   // 当前已选值始终保留为合法选项
   if (formData.test_model) {
     merged.add(formData.test_model);
   }
-  return Array.from(merged).map(id => ({ label: id, value: id }));
+
+  // 免费在前 + 按 id 排序, 让用户一眼看到能用的免费模型
+  return Array.from(merged)
+    .sort((a, b) => {
+      const fa = lookupRegistry(fmId, a)?.isFree === true;
+      const fb = lookupRegistry(fmId, b)?.isFree === true;
+      if (fa !== fb) {
+        return fa ? -1 : 1;
+      }
+      return a.localeCompare(b);
+    })
+    .map(id => {
+      const isFree = lookupRegistry(fmId, id)?.isFree === true;
+      return { label: isFree ? `${id} 🆓` : id, value: id };
+    });
 });
 
 const filteredProviders = computed<FreeProvider[]>(() => {
@@ -979,7 +1013,7 @@ async function handleSubmit() {
                   </n-tooltip>
                 </div>
               </template>
-              <div style="display: flex; gap: 6px; width: 100%">
+              <div style="display: flex; align-items: center; gap: 6px; width: 100%">
                 <n-select
                   v-model:value="formData.test_model"
                   :options="testModelOptions"
@@ -993,7 +1027,6 @@ async function handleSubmit() {
                 <n-tooltip trigger="hover" :disabled="!!props.group">
                   <template #trigger>
                     <n-button
-                      size="small"
                       :loading="modelsRefreshLoading"
                       :disabled="!props.group"
                       @click="refreshModels"
