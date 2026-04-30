@@ -456,17 +456,104 @@ function mergeWithRegistry(localList: string[]): string[] {
   return Array.from(set).sort();
 }
 
+// 子分组对聚合的真实贡献:
+//   - exposed_models 非空 → 视为白名单 (无视 mode), 与 GroupInfoCard 行为一致
+//   - 否则用 available_models
+//   - 都减 blocked_models
+function effectiveModelsFor(g: Group): string[] {
+  const exposed = parseAvailableModels(
+    (g as unknown as { exposed_models?: unknown }).exposed_models
+  );
+  const list = exposed.length > 0
+    ? exposed
+    : parseAvailableModels((g as unknown as { available_models?: unknown }).available_models);
+  const blocked = new Set(
+    parseAvailableModels((g as unknown as { blocked_models?: unknown }).blocked_models)
+  );
+  return blocked.size === 0 ? list : list.filter(m => !blocked.has(m));
+}
+
+// 系统聚合 (default-openai/anthropic/gemini) 走 chat completions, 子分组上游
+// /v1/models 把 image/audio/embedding/rerank/upscale/tts 等也缓存进了
+// available_models — 在聚合视图里展示就是误导, 客户端调过去 100% 报错.
+// 这里用关键词启发式过滤. unknown 默认放行避免误伤.
+const NON_CHAT_PATTERNS: RegExp[] = [
+  /(^|[\W_-])tts([\W_-]|$)/i,
+  /(^|[\W_-])asr([\W_-]|$)/i,
+  /(^|[\W_-])stt([\W_-]|$)/i,
+  /whisper/i,
+  /embedding/i,
+  /(^|[\W_-])embed([\W_-]|$)/i,
+  /rerank/i,
+  /upscal/i,
+  /(^|[\W_-])(4x|8x)[\W_-]/i,
+  /esrgan/i,
+  /animesharp/i,
+  /(^|[\W_-])sd([\W_-]|$)/i,
+  /sdxl/i,
+  /flux/i,
+  /dall[\W_-]?e/i,
+  /stable[\W_-]?diffusion/i,
+  /controlnet/i,
+  /animatediff/i,
+  /(^|[\W_-])lcm([\W_-]|$)/i,
+  /kandinsky/i,
+  /kolors/i,
+  /hunyuan[\W_-]?image/i,
+  /qwen[\W_-]?image/i,
+  /cogview/i,
+  /(^|[\W_-])wan[\W_-]/i,
+  /playground[\W_-]?v/i,
+  /musicgen/i,
+  /audiogen/i,
+  /audiofly/i,
+  /animefly/i,
+  /ace[\W_-]?step/i,
+  /(^|[\W_-])suno([\W_-]|$)/i,
+  /kokoro/i,
+  /(^|[\W_-])vits([\W_-]|$)/i,
+  /sadtalker/i,
+  /clip[\W_-]/i,
+  /(^|[\W_-])moderation([\W_-]|$)/i,
+];
+
+function isLikelyChatModel(id: string): boolean {
+  for (const p of NON_CHAT_PATTERNS) {
+    if (p.test(id)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+const isSystemAggregate = computed<boolean>(() => {
+  const role = (props.group as unknown as { system_role?: string } | null | undefined)
+    ?.system_role;
+  return role === "default-openai" || role === "default-anthropic" || role === "default-gemini";
+});
+
 const groupModels = computed<string[]>(() => {
   if (isAggregate.value) {
-    // Union of sub-groups' available_models
-    const set = new Set<string>();
+    const chatOnly = isSystemAggregate.value;
+    // key = trim + lowercase 归一化, value 保留首个出现的原始 ID 作展示;
+    // 同一 model id 大小写或带空白不一致也合并成一行.
+    const map = new Map<string, string>();
     for (const sg of subGroups.value) {
-      const raw = (sg.group as unknown as { available_models?: unknown })?.available_models;
-      for (const m of parseAvailableModels(raw)) {
-        set.add(m);
+      for (const raw of effectiveModelsFor(sg.group)) {
+        const id = (raw || "").trim();
+        if (!id) {
+          continue;
+        }
+        if (chatOnly && !isLikelyChatModel(id)) {
+          continue;
+        }
+        const key = id.toLowerCase();
+        if (!map.has(key)) {
+          map.set(key, id);
+        }
       }
     }
-    return Array.from(set).sort();
+    return Array.from(map.values()).sort();
   }
   const raw = (props.group as unknown as { available_models?: unknown })?.available_models;
   const cached = parseAvailableModels(raw);
