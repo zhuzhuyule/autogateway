@@ -852,7 +852,6 @@ export default {
     complex: "高度",
     trial: "体験",
     slow: "遅い",
-    paid: "有料",
     tierFromPreset: "✓ プリセット",
     tierFromKeyword: "推論",
     tierFromRegistry: "✓ データ元: FreeModels レジストリ",

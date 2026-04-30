@@ -854,7 +854,6 @@ export default {
     complex: "Complex",
     trial: "trial",
     slow: "slow",
-    paid: "paid",
     tierFromPreset: "✓ Preset list",
     tierFromKeyword: "Inferred",
     tierFromRegistry: "✓ Source: FreeModels registry",

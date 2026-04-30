@@ -169,13 +169,22 @@ func (r *FreeModelsRegistry) replaceIndex(env freeModelsEnvelope) {
 	for i := range env.Models {
 		m := &env.Models[i]
 		// Normalize: 把 provider-原生信号映射到统一字段, 让 frontend 不必懂各家细节.
-		// gitee 的"体验模式"在原始 JSON 里是 freeTier="none" + isExperienceable=true (root),
-		// 我们规范化成标准的 freeTier=trial + isFree=true, 跟其它 provider 的 trial 对齐.
+		// 上游 FreeModels 自身存在不一致 (e.g. groq/openrouter 等 124 个模型
+		// billingMode=free 但 freeTier=trial), 这里按权威信号重写:
+		//
+		//   1. billingMode=="free"             → freeTier="full" (完全免费, 覆盖错误的 trial)
+		//   2. isExperienceable=true           → freeTier="trial" (gitee 体验模式, 覆盖 1)
+		//   3. metadata.isFullyFree=true       → freeTier="full" (兜底)
+		//
+		// 优先级 2 > 1: gitee 既可能 billingMode=pay+isExperienceable=true (付费模型给体验),
+		// 也可能 billingMode=free+isExperienceable=true (理论上不存在但谨慎处理).
+		if m.BillingMode == "free" {
+			m.IsFree = true
+			m.FreeTier = "full"
+		}
 		if m.IsExperienceable {
-			m.IsFree = true // 体验额度 = 用户可免费使用 (受配额)
-			if m.FreeTier == "" || m.FreeTier == "none" {
-				m.FreeTier = "trial"
-			}
+			m.IsFree = true
+			m.FreeTier = "trial" // gitee 体验额度优先级最高
 		}
 		if m.Metadata != nil {
 			if fully, ok := m.Metadata["isFullyFree"].(bool); ok && fully {
