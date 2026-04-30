@@ -79,7 +79,29 @@ const showEditGroup = ref(false);
 const showCopyGroup = ref(false);
 const showAliasModal = ref(false);
 const aliasModalModel = ref<string>("");
-const tab = ref<"keys" | "models" | "settings">("keys");
+// Tab 选择跨分组持久化: 用户在 group A 切到"模型",换到 group B 默认仍是"模型".
+// 存 localStorage; 非法值直接降级到 "keys".
+type GroupDetailTab = "keys" | "models" | "settings";
+const TAB_STORAGE_KEY = "v3-group-detail-tab";
+function readPersistedTab(): GroupDetailTab {
+  try {
+    const raw = localStorage.getItem(TAB_STORAGE_KEY);
+    if (raw === "keys" || raw === "models" || raw === "settings") {
+      return raw;
+    }
+  } catch {
+    /* ignore */
+  }
+  return "keys";
+}
+const tab = ref<GroupDetailTab>(readPersistedTab());
+watch(tab, v => {
+  try {
+    localStorage.setItem(TAB_STORAGE_KEY, v);
+  } catch {
+    /* ignore */
+  }
+});
 const faviconFailed = ref(false);
 
 // Aggregate-specific
