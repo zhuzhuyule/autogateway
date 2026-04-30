@@ -74,9 +74,12 @@ const pickerSearch = ref("");
 const pickerActiveGroupId = ref<number | null>(null);
 const pickerTargetAlias = ref<string>("");
 
-function openPicker(alias: string) {
+function openPicker(alias: string, seedPicks?: PendingPick[]) {
   pickerTargetAlias.value = alias;
   pickerSearch.value = "";
+  // Stage seeds BEFORE flipping pickerOpen — the open-watcher resets
+  // pendingPicks on every open, so seed-after-open would be wiped out.
+  pendingPicksSeed.value = seedPicks || null;
   pickerOpen.value = true;
   if (!pickerActiveGroupId.value && groups.value.length) {
     pickerActiveGroupId.value = groups.value.find(g => g.group_type !== "aggregate")?.id || null;
@@ -177,6 +180,7 @@ interface PendingPick {
   modelId: string;
 }
 const pendingPicks = ref<PendingPick[]>([]);
+const pendingPicksSeed = ref<PendingPick[] | null>(null);
 const pickerSubmitting = ref(false);
 
 const pendingKeySet = computed(
@@ -215,7 +219,10 @@ function removePending(p: PendingPick) {
 
 watch(pickerOpen, open => {
   if (open) {
-    pendingPicks.value = [];
+    // Seed-on-open path lets family suggestions pre-populate the cart
+    // without the user clicking each model. Seed is consumed once.
+    pendingPicks.value = pendingPicksSeed.value ? [...pendingPicksSeed.value] : [];
+    pendingPicksSeed.value = null;
   }
 });
 
@@ -421,7 +428,49 @@ async function loadSuggestions() {
 }
 
 function onClickSuggestion(s: AliasSuggestion) {
-  openPicker(s.model);
+  if (s.kind === "family") {
+    onClickFamilySuggestion(s);
+    return;
+  }
+  if (s.model) {
+    openPicker(s.model);
+  }
+}
+
+/**
+ * Family suggestion → open picker pre-populated with every (group, model)
+ * pair the backend told us about. We use `existing_alias` as the target
+ * name when present (== "append to existing"); otherwise the family name
+ * becomes a new alias.
+ */
+function onClickFamilySuggestion(s: AliasSuggestion) {
+  const alias = (s.existing_alias || s.family || "").trim();
+  if (!alias || !s.models?.length) {
+    return;
+  }
+  const seeds: PendingPick[] = [];
+  const seen = new Set<string>();
+  for (const fm of s.models) {
+    const ids = fm.in_group_ids || [];
+    for (const gid of ids) {
+      const groupName = groupNameById.value[gid] || groups.value.find(g => g.id === gid)?.name || "";
+      // Don't seed picks that would duplicate a row that already exists
+      // for this alias+group+model — the API treats those as conflicts.
+      const dup = rows.value.some(
+        r => r.alias === alias && r.group_id === gid && r.real_model === fm.name
+      );
+      if (dup) {
+        continue;
+      }
+      const key = `${gid}:${fm.name}`;
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      seeds.push({ groupId: gid, groupName, modelId: fm.name });
+    }
+  }
+  openPicker(alias, seeds);
 }
 
 function dismissSuggestions() {
@@ -599,16 +648,54 @@ function saveSettingsThrottled() {
         </button>
       </div>
       <div class="v5-suggest-banner__list">
-        <button
-          v-for="s in suggestions"
-          :key="s.model"
-          class="v5-suggest-chip"
-          @click="onClickSuggestion(s)"
-          :title="`Last seen ${s.last_seen}`"
-        >
-          {{ s.model }}
-          <span class="v5-suggest-count">×{{ s.count }}</span>
-        </button>
+        <template v-for="(s, idx) in suggestions" :key="s.kind === 'family' ? `f:${s.family}` : `s:${s.model}-${idx}`">
+          <!-- Family suggestion: one click pre-fills the picker with every
+               (group, model) sibling the backend found, target alias = family
+               name (or existing_alias when an alias by that name already
+               exists → "append" rather than "create"). -->
+          <n-tooltip v-if="s.kind === 'family'" trigger="hover" placement="top">
+            <template #trigger>
+              <button class="v5-suggest-chip v5-suggest-chip--family" @click="onClickSuggestion(s)">
+                <span class="v5-suggest-chip__family">{{ s.family }}</span>
+                <span class="v5-suggest-chip__sub">
+                  {{ t("v5.suggestFamilyMeta", { n: (s.models || []).length, hits: s.count }) }}
+                </span>
+                <span
+                  class="v5-suggest-chip__pill"
+                  :class="s.existing_alias ? 'v5-suggest-chip__pill--append' : 'v5-suggest-chip__pill--new'"
+                >
+                  {{ s.existing_alias ? t("v5.suggestFamilyAppend") : t("v5.suggestFamilyCreate") }}
+                </span>
+              </button>
+            </template>
+            <div style="font: 500 11px var(--v3-sans); margin-bottom: 4px">
+              {{ s.existing_alias
+                ? t("v5.suggestFamilyTooltipAppend", { alias: s.existing_alias })
+                : t("v5.suggestFamilyTooltipCreate", { alias: s.family }) }}
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 2px">
+              <div v-for="m in s.models || []" :key="m.name" style="font: 11px var(--v3-mono)">
+                <span>{{ m.name }}</span>
+                <span v-if="m.count" style="color: var(--v3-ink-4); margin-left: 4px">×{{ m.count }}</span>
+                <span v-if="(m.in_group_ids || []).length" style="color: var(--v3-accent); margin-left: 4px">
+                  · {{ t("v5.suggestFamilyInGroups", { n: (m.in_group_ids || []).length }) }}
+                </span>
+                <span v-else-if="!m.from_logs" style="color: var(--v3-ink-4); margin-left: 4px">·</span>
+              </div>
+            </div>
+          </n-tooltip>
+
+          <!-- Single suggestion: legacy chip. -->
+          <button
+            v-else
+            class="v5-suggest-chip"
+            @click="onClickSuggestion(s)"
+            :title="s.last_seen ? `Last seen ${s.last_seen}` : ''"
+          >
+            {{ s.model }}
+            <span class="v5-suggest-count">×{{ s.count }}</span>
+          </button>
+        </template>
       </div>
     </div>
 
@@ -1689,5 +1776,40 @@ function saveSettingsThrottled() {
 .v5-suggest-count {
   margin-left: 4px;
   color: var(--v3-ink-3);
+}
+.v5-suggest-chip--family {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 5px 10px;
+  border-color: oklch(from var(--v3-accent) l c h / 0.4);
+  background: oklch(from var(--v3-accent) l c h / 0.04);
+}
+.v5-suggest-chip--family:hover {
+  border-color: var(--v3-accent);
+  background: oklch(from var(--v3-accent) l c h / 0.08);
+}
+.v5-suggest-chip__family {
+  font: 600 12px/1 var(--v3-mono);
+  color: var(--v3-accent);
+}
+.v5-suggest-chip__sub {
+  font: 500 10.5px/1 var(--v3-mono);
+  color: var(--v3-ink-3);
+}
+.v5-suggest-chip__pill {
+  font: 600 9.5px/1 var(--v3-sans);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 2px 5px;
+  border-radius: 3px;
+}
+.v5-suggest-chip__pill--new {
+  color: var(--v3-ok);
+  background: oklch(from var(--v3-ok) l c h / 0.12);
+}
+.v5-suggest-chip__pill--append {
+  color: var(--v3-warn);
+  background: oklch(from var(--v3-warn) l c h / 0.12);
 }
 </style>

@@ -160,33 +160,96 @@ interface AggregatedModel {
 }
 
 // 子分组对聚合的真实贡献:
-//  - specified 模式 → 用户显式 exposed_models 白名单 (而非上游 available_models 全量)
-//  - passthrough 模式 → 上游 available_models
-//  - 两种模式都剔除 blocked_models 黑名单
-// 这样系统聚合 (default-openai 等) 不会把透传子分组里"碰巧也支持 GPT-x" 的旁路模型
-// 全部展示,只显示用户主动加入的模型.
+//  - exposed_models 非空 → 视为白名单 (无论 mode), 这样用户切到 specified 之前
+//    只要勾了几个模型, 聚合就立刻显示这几个, 而不是上游全量
+//  - 否则回落到 available_models (上游 /v1/models 缓存)
+//  - 最后剔除 blocked_models 黑名单
+// 与后端 router_engine/selector.go:347 的语义偏宽松: backend 只在 mode=specified
+// 时才按 exposed_models 过滤; 这里 UI 偏向"展示用户语义上希望暴露的模型".
 function effectiveModelsFor(group: Group): string[] {
-  const mode = (group as unknown as { model_routing_mode?: string }).model_routing_mode;
-  const source =
-    mode === "specified"
-      ? (group as unknown as { exposed_models?: unknown }).exposed_models
-      : (group as unknown as { available_models?: unknown }).available_models;
-  const list = parseAvailable(source);
+  const exposed = parseAvailable(
+    (group as unknown as { exposed_models?: unknown }).exposed_models
+  );
+  const list = exposed.length > 0
+    ? exposed
+    : parseAvailable((group as unknown as { available_models?: unknown }).available_models);
   const blocked = new Set(
     parseAvailable((group as unknown as { blocked_models?: unknown }).blocked_models)
   );
   return blocked.size === 0 ? list : list.filter(m => !blocked.has(m));
 }
 
+// 系统聚合 (default-openai / default-anthropic / default-gemini) 走 chat
+// completions 路径, 子分组上游 /v1/models 里的图像/音频/嵌入/重排/超分/TTS 等
+// 非 chat 模型在这里展示出来就是误导 — 客户端调过去 100% 报错. 这里用关键词
+// 启发式剔除. unknown 模型默认放行 (避免误伤). 仅作展示过滤, 不影响后端路由.
+const NON_CHAT_PATTERNS = [
+  /(^|[\W_-])tts([\W_-]|$)/i,
+  /(^|[\W_-])asr([\W_-]|$)/i,
+  /(^|[\W_-])stt([\W_-]|$)/i,
+  /whisper/i,
+  /embedding/i,
+  /(^|[\W_-])embed([\W_-]|$)/i,
+  /rerank/i,
+  /upscal/i, // upscale / upscaler
+  /(^|[\W_-])(4x|8x)[\W_-]/i,
+  /esrgan/i,
+  /animesharp/i,
+  /(^|[\W_-])sd([\W_-]|$)/i, // sd / sd3 / sdxl
+  /sdxl/i,
+  /flux/i,
+  /dall[\W_-]?e/i,
+  /stable[\W_-]?diffusion/i,
+  /controlnet/i,
+  /animatediff/i,
+  /(^|[\W_-])lcm([\W_-]|$)/i,
+  /kandinsky/i,
+  /kolors/i,
+  /hunyuan[\W_-]?image/i,
+  /qwen[\W_-]?image/i,
+  /cogview/i,
+  /(^|[\W_-])wan[\W_-]/i, // wan-2.x video
+  /playground[\W_-]?v/i,
+  /musicgen/i,
+  /audiogen/i,
+  /audiofly/i,
+  /animefly/i,
+  /ace[\W_-]?step/i,
+  /(^|[\W_-])suno([\W_-]|$)/i,
+  /kokoro/i,
+  /(^|[\W_-])vits([\W_-]|$)/i,
+  /sadtalker/i,
+  /clip[\W_-]/i,
+  /(^|[\W_-])moderation([\W_-]|$)/i,
+];
+
+function isLikelyChatModel(id: string): boolean {
+  for (const p of NON_CHAT_PATTERNS) {
+    if (p.test(id)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function isSystemAggregate(group: Group | null | undefined): boolean {
+  const role = (group as unknown as { system_role?: string } | null | undefined)?.system_role;
+  return role === "default-openai" || role === "default-anthropic" || role === "default-gemini";
+}
+
 const aggregateModels = computed<AggregatedModel[]>(() => {
   if (!props.subGroups || props.subGroups.length === 0) {
     return [];
   }
+  const chatOnly = isSystemAggregate(props.group);
   const map = new Map<string, Set<string>>();
   for (const sg of props.subGroups) {
     const list = effectiveModelsFor(sg.group);
     const label = sg.group.display_name || sg.group.name;
     for (const m of list) {
+      if (chatOnly && !isLikelyChatModel(m)) {
+        continue;
+      }
       if (!map.has(m)) {
         map.set(m, new Set());
       }

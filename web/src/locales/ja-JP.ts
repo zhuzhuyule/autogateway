@@ -975,6 +975,13 @@ export default {
     // Aliases ビュー — 未識別モデル提案バナー
     suggestionsTitle: "最近のリクエストで未知のモデルを検出 — クリックでエイリアスを作成",
     suggestionsDismiss: "このセッション中は非表示",
+    // Family 提案 (model_family を共有する未識別モデル ≥2 個で発火)
+    suggestFamilyMeta: "{n} 個のモデル · ×{hits}",
+    suggestFamilyCreate: "新規",
+    suggestFamilyAppend: "追加",
+    suggestFamilyTooltipCreate: "エイリアス「{alias}」を作成し、以下のモデルを一括登録",
+    suggestFamilyTooltipAppend: "既存エイリアス「{alias}」へ一括追加",
+    suggestFamilyInGroups: "{n} グループ",
     bulkSelected: "{n} 件選択中",
     bulkAddExposed: "公開に追加",
     bulkRemoveExposed: "公開から削除",

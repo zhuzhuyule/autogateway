@@ -994,6 +994,13 @@ export default {
     // Aliases 视图 — 未识别模型建议横幅
     suggestionsTitle: "近期请求中检测到未识别模型 — 点击为其建立别名",
     suggestionsDismiss: "本次会话不再提示",
+    // Family 聚合建议 (>=2 个未识别 model 共享 model_family 时触发)
+    suggestFamilyMeta: "{n} 个模型 · ×{hits}",
+    suggestFamilyCreate: "新建",
+    suggestFamilyAppend: "追加",
+    suggestFamilyTooltipCreate: "一键创建别名 “{alias}” 并聚合下列模型",
+    suggestFamilyTooltipAppend: "一键追加到现有别名 “{alias}”",
+    suggestFamilyInGroups: "{n} 个分组",
     // 多选批量操作 toolbar
     bulkSelected: "已选 {n} 个",
     bulkAddExposed: "批量加入暴露",

@@ -36,10 +36,37 @@ export interface RoutingSettings {
   ComplexThreshold: number;
 }
 
+/**
+ * One suggestion row. `kind` discriminates the payload:
+ * - "single": a single unrecognized model — fields {model, count, last_seen}
+ * - "family": several models share a registry model_family —
+ *   the UI offers a one-click "create one alias for the whole family" action.
+ *
+ * Server-side promotion thresholds (>=2 distinct models AND >=3 hits) live
+ * in `internal/services/alias_suggestion_service.go`; below threshold, each
+ * model is emitted as its own `kind=single` row.
+ */
 export interface AliasSuggestion {
-  model: string;
+  kind: "single" | "family";
+  // single-mode (also populated in family-mode for the aggregate hit count)
+  model?: string;
   count: number;
-  last_seen: string;
+  last_seen?: string;
+
+  // family-mode only
+  family?: string;
+  models?: AliasSuggestionFamilyModel[];
+  /** alias name if a same-named alias already exists — UI offers "append to existing" instead of "create" */
+  existing_alias?: string;
+}
+
+export interface AliasSuggestionFamilyModel {
+  name: string;
+  count?: number;
+  last_seen?: string;
+  from_logs: boolean;
+  /** groups currently exposing this model — candidates for becoming alias targets */
+  in_group_ids?: number[];
 }
 
 export const RESERVED_ALIASES = ["simple", "medium", "complex"] as const;

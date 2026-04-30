@@ -1018,6 +1018,13 @@ export default {
     // Aliases view — unrecognized-model suggestion banner
     suggestionsTitle: "Detected unknown models in recent requests — click to alias",
     suggestionsDismiss: "Hide for this session",
+    // Family suggestions (>=2 unknown models sharing a model_family)
+    suggestFamilyMeta: "{n} models · ×{hits}",
+    suggestFamilyCreate: "Create",
+    suggestFamilyAppend: "Append",
+    suggestFamilyTooltipCreate: "One-click: create alias \"{alias}\" with the models below",
+    suggestFamilyTooltipAppend: "One-click: append to existing alias \"{alias}\"",
+    suggestFamilyInGroups: "{n} group(s)",
     bulkSelected: "{n} selected",
     bulkAddExposed: "Add to exposed",
     bulkRemoveExposed: "Remove from exposed",
