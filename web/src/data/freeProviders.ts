@@ -37,6 +37,13 @@ export interface FreeProvider {
   testModel: string;
   models: string[];
   paidModels?: string[];
+  /**
+   * 上游用 obfuscated model ID(讯飞:xop35qwen2b 这类),但管理后台想给用户
+   * 看人类友好的名字(Qwen3.5-2B)。这里只放映射 — `models` / `paidModels` /
+   * `available_models` / chat completions 请求都仍用 ID,展示层调
+   * displayModelName(provider, id) 拿到友好名,查不到就回落到 ID。
+   */
+  modelNames?: Record<string, string>;
   recommendedGroupName: string;
   recommendedDisplayName: string;
   upstreamHosts: string[];
@@ -504,6 +511,49 @@ export const FREE_PROVIDERS: FreeProvider[] = [
     recommendedGroupName: "xfyun",
     recommendedDisplayName: "讯飞星辰",
     upstreamHosts: ["maas-api.cn-huabei-1.xf-yun.com"],
+    // 讯飞 MaaS 的 model 字段是 obfuscated ID,展示时还原成人类可读名
+    // 数据源:maas.xfyun.cn/api/v1/gpt-finetune/model/base/list-v2 的 serviceName
+    modelNames: {
+      // 永久免费
+      xop35qwen2b: "Qwen3.5-2B",
+      test_ent: "Qwen3-1.7B",
+      xophunyuan7bmt: "Hunyuan-MT-7B",
+      // 多模态
+      xopqwen36v35b: "Qwen3-VL-235B-A22B-Instruct",
+      xopqwen35397b: "Qwen3-235B-A22B-Instruct",
+      xopkimik25: "Kimi-K2-Instruct-0905",
+      xopqwen35v35b: "Qwen3-VL-30B-A3B-Instruct",
+      // 旗舰文本
+      xopglm51: "GLM-4.6",
+      xopglm5: "GLM-4.5",
+      xopglm47blth2: "GLM-4.5-Air",
+      xopkimik2blth: "Kimi-K2-Thinking",
+      xopkimik2blins: "Kimi-K2-Instruct",
+      xopdeepseekv32: "DeepSeek-V3.2-Exp",
+      xdeepseekv3: "DeepSeek-V3",
+      xdeepseekr1: "DeepSeek-R1",
+      xminimaxm25: "MiniMax-M2",
+      // Qwen3 系列
+      xop3qwen235b2507: "Qwen3-235B-A22B-Instruct-2507",
+      xop3qwen235b: "Qwen3-235B-A22B",
+      xop3qwen32b: "Qwen3-32B",
+      xop3qwen30b2507: "Qwen3-30B-A3B-Instruct-2507",
+      xop3qwen30b: "Qwen3-30B-A3B",
+      xop3qwen14b: "Qwen3-14B",
+      xop3qwen8b: "Qwen3-8B",
+      xop3qwen4b: "Qwen3-4B",
+      xop3qwen0b6: "Qwen3-0.6B",
+      xop3qwencodernext: "Qwen3-Coder-Next",
+      xop3qwen80bnext: "Qwen3-Next-80B-A3B-Instruct",
+      // Flash + Distill
+      xopglmv47flash: "GLM-4-Flash",
+      xdeepseekr1qwen32b: "DeepSeek-R1-Distill-Qwen-32B",
+      xdeepseekr1qwen14b: "DeepSeek-R1-Distill-Qwen-14B",
+      xdeepseekr1qwen7b: "DeepSeek-R1-Distill-Qwen-7B",
+      xdeepseekr1llama8b: "DeepSeek-R1-Distill-Llama-8B",
+      // QwQ
+      xopqwenqwq32b: "QwQ-32B",
+    },
     verifiedAt: "2026-04",
   },
   {
@@ -1068,3 +1118,40 @@ export function bootstrapExposedModels(
   }
   return Array.from(set);
 }
+
+/**
+ * 把 provider 的 obfuscated model ID 还原成人类可读名 (讯飞专用 — 其他 provider
+ * 没有这层映射, 直接 fallthrough 返回原 ID).
+ *
+ * 仅用于 UI 展示。`available_models` / chat completions 请求体 / 测试模型探活
+ * 都仍然使用原始 ID — 上游 API 不认 friendly name。
+ *
+ * 当 provider 已知时优先用 provider 自带的 modelNames; 不知道 provider 时 (比如
+ * 聚合分组里跨子分组并集后丢失了源信息), 走 GLOBAL_MODEL_NAMES 全局兜底 — 因为
+ * 各 provider 的 modelNames key 是 obfuscated ID, 跨 provider 撞名概率极低.
+ */
+export function displayModelName(
+  provider: FreeProvider | undefined,
+  modelId: string
+): string {
+  if (provider?.modelNames?.[modelId]) {
+    return provider.modelNames[modelId];
+  }
+  return GLOBAL_MODEL_NAMES[modelId] || modelId;
+}
+
+const GLOBAL_MODEL_NAMES: Record<string, string> = (() => {
+  const out: Record<string, string> = {};
+  for (const p of FREE_PROVIDERS) {
+    if (!p.modelNames) {
+      continue;
+    }
+    for (const [id, name] of Object.entries(p.modelNames)) {
+      // 后写入的不会覆盖前面 (撞 key 极少, 但保护一下确定性)
+      if (!(id in out)) {
+        out[id] = name;
+      }
+    }
+  }
+  return out;
+})();

@@ -74,21 +74,17 @@ func (ch *AnthropicChannel) ExtractModel(c *gin.Context, bodyBytes []byte) strin
 }
 
 // ValidateKey checks if the given API key is valid by making a messages request.
-func (ch *AnthropicChannel) ValidateKey(ctx context.Context, apiKey *models.APIKey, group *models.Group) (bool, error) {
+func (ch *AnthropicChannel) ValidateKey(ctx context.Context, apiKey *models.APIKey, group *models.Group) ValidateResult {
 	upstreamURL := ch.getUpstreamURL()
 	if upstreamURL == nil {
-		return false, fmt.Errorf("no upstream URL configured for channel %s", ch.Name)
+		return ValidateResult{Err: fmt.Errorf("no upstream URL configured for channel %s", ch.Name)}
 	}
 
-	// Parse validation endpoint to extract path and query parameters
 	endpointURL, err := url.Parse(ch.ValidationEndpoint)
 	if err != nil {
-		return false, fmt.Errorf("failed to parse validation endpoint: %w", err)
+		return ValidateResult{Err: fmt.Errorf("failed to parse validation endpoint: %w", err)}
 	}
-
-	// Build final URL with path and query parameters
-	finalURL := *upstreamURL
-	finalURL.Path = strings.TrimRight(finalURL.Path, "/") + endpointURL.Path
+	finalURL := ch.JoinUpstreamURL(upstreamURL, endpointURL.Path)
 	finalURL.RawQuery = endpointURL.RawQuery
 	reqURL := finalURL.String()
 
@@ -102,12 +98,12 @@ func (ch *AnthropicChannel) ValidateKey(ctx context.Context, apiKey *models.APIK
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
-		return false, fmt.Errorf("failed to marshal validation payload: %w", err)
+		return ValidateResult{URL: reqURL, Err: fmt.Errorf("failed to marshal validation payload: %w", err)}
 	}
 
 	req, err := http.NewRequestWithContext(ctx, "POST", reqURL, bytes.NewBuffer(body))
 	if err != nil {
-		return false, fmt.Errorf("failed to create validation request: %w", err)
+		return ValidateResult{URL: reqURL, Err: fmt.Errorf("failed to create validation request: %w", err)}
 	}
 	req.Header.Set("x-api-key", apiKey.KeyValue)
 	req.Header.Set("anthropic-version", "2023-06-01")
@@ -121,23 +117,28 @@ func (ch *AnthropicChannel) ValidateKey(ctx context.Context, apiKey *models.APIK
 
 	resp, err := ch.HTTPClient.Do(req)
 	if err != nil {
-		return false, fmt.Errorf("failed to send validation request: %w", err)
+		return ValidateResult{URL: reqURL, Err: fmt.Errorf("failed to send validation request: %w", err)}
 	}
 	defer resp.Body.Close()
 
 	// Any 2xx status code indicates the key is valid.
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		return true, nil
+		return ValidateResult{IsValid: true, StatusCode: resp.StatusCode, URL: reqURL}
 	}
 
-	// For non-200 responses, parse the body to provide a more specific error reason.
-	errorBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return false, fmt.Errorf("key is invalid (status %d), but failed to read error body: %w", resp.StatusCode, err)
+	errorBody, readErr := io.ReadAll(resp.Body)
+	if readErr != nil {
+		return ValidateResult{
+			StatusCode: resp.StatusCode,
+			URL:        reqURL,
+			Err:        fmt.Errorf("key is invalid (status %d), but failed to read error body: %w", resp.StatusCode, readErr),
+		}
 	}
 
-	// Use the new parser to extract a clean error message.
 	parsedError := app_errors.ParseUpstreamError(errorBody)
-
-	return false, fmt.Errorf("[status %d] %s", resp.StatusCode, parsedError)
+	return ValidateResult{
+		StatusCode: resp.StatusCode,
+		URL:        reqURL,
+		Err:        fmt.Errorf("[status %d at %s] %s", resp.StatusCode, reqURL, parsedError),
+	}
 }

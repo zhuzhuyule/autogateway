@@ -10,7 +10,6 @@ import (
 	"autogateway/internal/utils"
 	"io"
 	"net/http"
-	"net/url"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -97,18 +96,21 @@ func (ch *GeminiChannel) ExtractModel(c *gin.Context, bodyBytes []byte) string {
 }
 
 // ValidateKey checks if the given API key is valid by making a generateContent request.
-func (ch *GeminiChannel) ValidateKey(ctx context.Context, apiKey *models.APIKey, group *models.Group) (bool, error) {
+func (ch *GeminiChannel) ValidateKey(ctx context.Context, apiKey *models.APIKey, group *models.Group) ValidateResult {
 	upstreamURL := ch.getUpstreamURL()
 	if upstreamURL == nil {
-		return false, fmt.Errorf("no upstream URL configured for channel %s", ch.Name)
+		return ValidateResult{Err: fmt.Errorf("no upstream URL configured for channel %s", ch.Name)}
 	}
 
-	// Safely join the path segments
-	reqURL, err := url.JoinPath(upstreamURL.String(), "v1beta", "models", ch.TestModel+":generateContent")
-	if err != nil {
-		return false, fmt.Errorf("failed to create gemini validation path: %w", err)
-	}
-	reqURL += "?key=" + apiKey.KeyValue
+	// 走 JoinUpstreamURL 与代理路径同一拼接逻辑, 避免 baseUrl=/v1beta 再拼
+	// /v1beta/models/... 变成双 /v1beta/v1beta 全协议 404.
+	finalURL := ch.JoinUpstreamURL(upstreamURL, "/v1beta/models/"+ch.TestModel+":generateContent")
+	// logURL 在追加 ?key=... 之前抓取, 所以日志/错误消息不会泄露 API key.
+	logURL := finalURL.String()
+	q := finalURL.Query()
+	q.Set("key", apiKey.KeyValue)
+	finalURL.RawQuery = q.Encode()
+	reqURL := finalURL.String()
 
 	payload := gin.H{
 		"contents": []gin.H{
@@ -122,12 +124,12 @@ func (ch *GeminiChannel) ValidateKey(ctx context.Context, apiKey *models.APIKey,
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
-		return false, fmt.Errorf("failed to marshal validation payload: %w", err)
+		return ValidateResult{URL: logURL, Err: fmt.Errorf("failed to marshal validation payload: %w", err)}
 	}
 
 	req, err := http.NewRequestWithContext(ctx, "POST", reqURL, bytes.NewBuffer(body))
 	if err != nil {
-		return false, fmt.Errorf("failed to create validation request: %w", err)
+		return ValidateResult{URL: logURL, Err: fmt.Errorf("failed to create validation request: %w", err)}
 	}
 	req.Header.Set("Content-Type", "application/json")
 
@@ -139,25 +141,30 @@ func (ch *GeminiChannel) ValidateKey(ctx context.Context, apiKey *models.APIKey,
 
 	resp, err := ch.HTTPClient.Do(req)
 	if err != nil {
-		return false, fmt.Errorf("failed to send validation request: %w", err)
+		return ValidateResult{URL: logURL, Err: fmt.Errorf("failed to send validation request: %w", err)}
 	}
 	defer resp.Body.Close()
 
 	// Any 2xx status code indicates the key is valid.
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		return true, nil
+		return ValidateResult{IsValid: true, StatusCode: resp.StatusCode, URL: logURL}
 	}
 
-	// For non-200 responses, parse the body to provide a more specific error reason.
-	errorBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return false, fmt.Errorf("key is invalid (status %d), but failed to read error body: %w", resp.StatusCode, err)
+	errorBody, readErr := io.ReadAll(resp.Body)
+	if readErr != nil {
+		return ValidateResult{
+			StatusCode: resp.StatusCode,
+			URL:        logURL,
+			Err:        fmt.Errorf("key is invalid (status %d), but failed to read error body: %w", resp.StatusCode, readErr),
+		}
 	}
 
-	// Use the new parser to extract a clean error message.
 	parsedError := app_errors.ParseUpstreamError(errorBody)
-
-	return false, fmt.Errorf("[status %d] %s", resp.StatusCode, parsedError)
+	return ValidateResult{
+		StatusCode: resp.StatusCode,
+		URL:        logURL,
+		Err:        fmt.Errorf("[status %d at %s] %s", resp.StatusCode, logURL, parsedError),
+	}
 }
 
 // ApplyModelRedirect overrides the default implementation for Gemini channel.

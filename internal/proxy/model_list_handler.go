@@ -50,5 +50,56 @@ func (ps *ProxyServer) handleModelListResponse(c *gin.Context, resp *http.Respon
 		return
 	}
 
+	if ps.aliasService != nil {
+		aliasNames, err := ps.aliasService.ListEnabledAliasNames(c.Request.Context())
+		if err != nil {
+			logrus.WithError(err).Warn("Failed to load aliases for model list")
+		} else {
+			appendAliasModels(response, aliasNames)
+		}
+	}
+
 	c.JSON(http.StatusOK, response)
+}
+
+func appendAliasModels(response map[string]any, aliasNames []string) {
+	if len(aliasNames) == 0 {
+		return
+	}
+
+	data, ok := response["data"].([]any)
+	if !ok {
+		return
+	}
+
+	seen := make(map[string]struct{}, len(data)+len(aliasNames))
+	for _, item := range data {
+		modelObj, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		modelID, ok := modelObj["id"].(string)
+		if !ok || modelID == "" {
+			continue
+		}
+		seen[modelID] = struct{}{}
+	}
+
+	for _, alias := range aliasNames {
+		if alias == "" {
+			continue
+		}
+		if _, exists := seen[alias]; exists {
+			continue
+		}
+		data = append(data, map[string]any{
+			"id":       alias,
+			"object":   "model",
+			"created":  0,
+			"owned_by": "autogateway-alias",
+		})
+		seen[alias] = struct{}{}
+	}
+
+	response["data"] = data
 }

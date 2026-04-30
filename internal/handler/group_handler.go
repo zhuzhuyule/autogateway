@@ -109,6 +109,82 @@ func (s *Server) CreateGroup(c *gin.Context) {
 	response.Success(c, s.newGroupResponse(group))
 }
 
+// TestGroupModelRequest 是 POST /api/groups/:id/test-model 的载荷.
+// model 必须与 group 的 available_models 中暴露的某个具体型号匹配.
+type TestGroupModelRequest struct {
+	Model string `json:"model" binding:"required"`
+}
+
+// TestGroupModel 用一个活跃 key 对指定 model 发起一次最小载荷的探活, 验证
+// 该模型在该分组下是否能 200 通过. aggregate 分组会先按 model 选一个能命中的
+// sub-group, 再用 sub-group 自己的 channel/key 跑测试. 测试不影响所选 key 的
+// active/invalid 状态 — 模型不存在和 key 失效语义不同.
+func (s *Server) TestGroupModel(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		response.ErrorI18nFromAPIError(c, app_errors.ErrBadRequest, "validation.invalid_group_id")
+		return
+	}
+
+	var req TestGroupModelRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Error(c, app_errors.NewAPIError(app_errors.ErrInvalidJSON, err.Error()))
+		return
+	}
+	modelName := strings.TrimSpace(req.Model)
+	if modelName == "" {
+		response.ErrorI18nFromAPIError(c, app_errors.ErrValidation, "validation.test_model_required")
+		return
+	}
+
+	groupDB, ok := s.findGroupByID(c, uint(id))
+	if !ok {
+		return
+	}
+
+	group, err := s.GroupManager.GetGroupByName(groupDB.Name)
+	if err != nil {
+		response.ErrorI18nFromAPIError(c, app_errors.ErrResourceNotFound, "validation.group_not_found")
+		return
+	}
+
+	targetGroup := group
+	if group.GroupType == "aggregate" {
+		subName, selErr := s.SubGroupManager.SelectSubGroupForModel(group, modelName)
+		if selErr != nil {
+			response.Error(c, app_errors.NewAPIError(app_errors.ErrValidation, selErr.Error()))
+			return
+		}
+		if subName == "" {
+			response.ErrorI18nFromAPIError(c, app_errors.ErrValidation, "validation.no_sub_group_for_model")
+			return
+		}
+		resolved, resolveErr := s.GroupManager.GetGroupByName(subName)
+		if resolveErr != nil {
+			response.ErrorI18nFromAPIError(c, app_errors.ErrResourceNotFound, "validation.group_not_found")
+			return
+		}
+		targetGroup = resolved
+	}
+
+	result, err := s.KeyService.TestModelConnectivity(targetGroup, modelName)
+	if err != nil {
+		response.Error(c, app_errors.NewAPIError(app_errors.ErrInternalServer, err.Error()))
+		return
+	}
+
+	response.Success(c, gin.H{
+		"is_valid":         result.IsValid,
+		"status_code":      result.StatusCode,
+		"url":              result.URL,
+		"error":            result.Error,
+		"duration_ms":      result.DurationMs,
+		"model":            result.Model,
+		"resolved_group":   targetGroup.Name,
+		"is_via_aggregate": group.GroupType == "aggregate",
+	})
+}
+
 // RefreshGroupModels triggers an upstream /v1/models fetch and caches the result.
 func (s *Server) RefreshGroupModels(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))

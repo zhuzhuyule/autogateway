@@ -407,8 +407,6 @@ export default {
     trial: "体験",
     slow: "遅い",
     tierFromRegistry: "✓ データ元: FreeModels レジストリ",
-    suggestionsTitle: "最近のリクエストで未知のモデルを検出 — クリックでエイリアスを作成",
-    suggestionsDismiss: "このセッション中は非表示",
     modelRedirectPolicy: "未設定モデルポリシー",
     modelRedirectPolicyTooltip:
       "リダイレクトルールで設定されていないモデルのリクエストをどう処理するか選択",
@@ -514,6 +512,7 @@ export default {
     copyFailed: "{type}のコピーに失敗しました",
     retryRequest: "リトライリクエスト",
     finalRequest: "最終リクエスト",
+    testRequest: "キー検証",
     time: "時間",
     requestType: "リクエストタイプ",
     responseType: "レスポンスタイプ",
@@ -953,6 +952,8 @@ export default {
     aliasAddBtn: "新規別名",
     aliasAddSub: "グループ + モデル + 重みを指定",
     aliasAddMember: "メンバー追加",
+    aliasClickToCopy: "クリックで別名をコピー",
+    aliasCopied: "別名 {alias} をコピーしました",
     aliasAddIncomplete: "別名、グループ、モデル名は必須です。",
     aliasNameLabel: "別名",
     aliasNamePlaceholder: "例: gpt-4 / smart-coder",
@@ -971,6 +972,9 @@ export default {
     aliasDeleteConfirm: "別名プールから {alias} → {model} を削除しますか?",
   },
   v5: {
+    // Aliases ビュー — 未識別モデル提案バナー
+    suggestionsTitle: "最近のリクエストで未知のモデルを検出 — クリックでエイリアスを作成",
+    suggestionsDismiss: "このセッション中は非表示",
     bulkSelected: "{n} 件選択中",
     bulkAddExposed: "公開に追加",
     bulkRemoveExposed: "公開から削除",

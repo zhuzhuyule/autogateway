@@ -25,6 +25,7 @@ import {
   LockClosedOutline,
   OpenOutline,
   PencilOutline,
+  PulseOutline,
   RefreshOutline,
   RemoveCircleOutline,
   SearchOutline,
@@ -582,6 +583,55 @@ function isFreeModel(modelId: string): boolean {
 // 注: freeVariantFor 已被简化的 FreeBadge 替代 (v3.free 单一显示),
 // 但 isFreeModel 仍用于过滤 (free/paid 列表). 保留下行 export 给可能的
 // 其它消费者; 当前文件内部不再调用 (避免 TS6133 unused 错).
+
+// === Per-model 连通性测试 ===
+// 调用 POST /api/groups/:id/test-model, 后端用一个活跃 key 跑一次最小载荷的
+// ValidateKey (aggregate 会先解析到 sub-group). 测试不会标记 key invalid.
+const testingModels = ref<Set<string>>(new Set());
+type ModelTestState = { ok: boolean; ms: number; statusCode: number; error?: string; resolved?: string; viaAgg?: boolean };
+const modelTestResults = ref<Record<string, ModelTestState>>({});
+
+function modelTestState(modelId: string): ModelTestState | undefined {
+  return modelTestResults.value[modelId];
+}
+
+async function testModel(modelId: string) {
+  if (!props.group?.id) {
+    return;
+  }
+  if (testingModels.value.has(modelId)) {
+    return;
+  }
+  testingModels.value.add(modelId);
+  try {
+    const res = await keysApi.testGroupModel(props.group.id, modelId);
+    modelTestResults.value = {
+      ...modelTestResults.value,
+      [modelId]: {
+        ok: res.is_valid,
+        ms: res.duration_ms,
+        statusCode: res.status_code,
+        error: res.is_valid ? undefined : res.error || `HTTP ${res.status_code}`,
+        resolved: res.resolved_group,
+        viaAgg: res.is_via_aggregate,
+      },
+    };
+    if (res.is_valid) {
+      message.success(t("v3.modelTestOk", { model: modelId, ms: res.duration_ms }));
+    } else {
+      message.error(t("v3.modelTestFail", { model: modelId, err: res.error || `HTTP ${res.status_code}` }));
+    }
+  } catch (e) {
+    const err = (e as Error).message || String(e);
+    modelTestResults.value = {
+      ...modelTestResults.value,
+      [modelId]: { ok: false, ms: 0, statusCode: 0, error: err },
+    };
+    message.error(err);
+  } finally {
+    testingModels.value.delete(modelId);
+  }
+}
 
 // tab 角标:specified 模式展示白名单数量(强调已暴露这件事);
 // passthrough / 聚合分组展示上游全量数。
@@ -1775,8 +1825,32 @@ const filterCounts = computed(() => ({
               @dragover.prevent
               @drop="onExposedDrop(exposedModels.indexOf(modelId))"
             >
-              <div class="v5-modelcard__row">
-                <code class="v5-modelcard__name">{{ modelId }} <FreeBadge v-if="isFreeModel(modelId)" /></code>
+              <div class="v5-modelcard__row" style="align-items: center; gap: 6px">
+                <code class="v5-modelcard__name" style="flex: 1; min-width: 0">{{ modelId }} <FreeBadge v-if="isFreeModel(modelId)" /></code>
+                <n-tooltip trigger="hover" placement="top">
+                  <template #trigger>
+                    <button
+                      class="v5-modelcard__test"
+                      :class="{
+                        'v5-modelcard__test--testing': testingModels.has(modelId),
+                        'v5-modelcard__test--ok': modelTestState(modelId)?.ok === true,
+                        'v5-modelcard__test--bad': modelTestState(modelId)?.ok === false,
+                      }"
+                      :disabled="testingModels.has(modelId)"
+                      @click.stop="testModel(modelId)"
+                    >
+                      <n-icon :component="testingModels.has(modelId) ? RefreshOutline : PulseOutline" :size="12" />
+                    </button>
+                  </template>
+                  <template v-if="testingModels.has(modelId)">{{ t("v3.testModelTesting") }}</template>
+                  <template v-else-if="modelTestState(modelId)?.ok === true">
+                    {{ t("v3.modelTestOk", { model: modelId, ms: modelTestState(modelId)?.ms }) }}
+                  </template>
+                  <template v-else-if="modelTestState(modelId)?.ok === false">
+                    {{ t("v3.modelTestFail", { model: modelId, err: modelTestState(modelId)?.error }) }}
+                  </template>
+                  <template v-else>{{ t("v3.testModel") }}</template>
+                </n-tooltip>
               </div>
               <div class="v5-modelcard__row" style="margin-top: 6px; align-items: center; gap: 6px">
                 <n-tooltip trigger="hover" placement="top">
@@ -1829,8 +1903,32 @@ const filterCounts = computed(() => ({
               }"
               @click="toggleSelected(modelId)"
             >
-              <div class="v5-modelcard__row">
-                <code class="v5-modelcard__name">{{ modelId }} <FreeBadge v-if="isFreeModel(modelId)" /></code>
+              <div class="v5-modelcard__row" style="align-items: center; gap: 6px">
+                <code class="v5-modelcard__name" style="flex: 1; min-width: 0">{{ modelId }} <FreeBadge v-if="isFreeModel(modelId)" /></code>
+                <n-tooltip trigger="hover" placement="top">
+                  <template #trigger>
+                    <button
+                      class="v5-modelcard__test"
+                      :class="{
+                        'v5-modelcard__test--testing': testingModels.has(modelId),
+                        'v5-modelcard__test--ok': modelTestState(modelId)?.ok === true,
+                        'v5-modelcard__test--bad': modelTestState(modelId)?.ok === false,
+                      }"
+                      :disabled="testingModels.has(modelId)"
+                      @click.stop="testModel(modelId)"
+                    >
+                      <n-icon :component="testingModels.has(modelId) ? RefreshOutline : PulseOutline" :size="12" />
+                    </button>
+                  </template>
+                  <template v-if="testingModels.has(modelId)">{{ t("v3.testModelTesting") }}</template>
+                  <template v-else-if="modelTestState(modelId)?.ok === true">
+                    {{ t("v3.modelTestOk", { model: modelId, ms: modelTestState(modelId)?.ms }) }}
+                  </template>
+                  <template v-else-if="modelTestState(modelId)?.ok === false">
+                    {{ t("v3.modelTestFail", { model: modelId, err: modelTestState(modelId)?.error }) }}
+                  </template>
+                  <template v-else>{{ t("v3.testModel") }}</template>
+                </n-tooltip>
               </div>
               <div class="v5-modelcard__row" style="margin-top: 6px; align-items: center; gap: 6px">
                 <n-tooltip trigger="hover" placement="top">
@@ -1874,8 +1972,32 @@ const filterCounts = computed(() => ({
               }"
               @click="toggleSelected(modelId)"
             >
-              <div class="v5-modelcard__row">
-                <code class="v5-modelcard__name">{{ modelId }} <FreeBadge v-if="isFreeModel(modelId)" /></code>
+              <div class="v5-modelcard__row" style="align-items: center; gap: 6px">
+                <code class="v5-modelcard__name" style="flex: 1; min-width: 0">{{ modelId }} <FreeBadge v-if="isFreeModel(modelId)" /></code>
+                <n-tooltip trigger="hover" placement="top">
+                  <template #trigger>
+                    <button
+                      class="v5-modelcard__test"
+                      :class="{
+                        'v5-modelcard__test--testing': testingModels.has(modelId),
+                        'v5-modelcard__test--ok': modelTestState(modelId)?.ok === true,
+                        'v5-modelcard__test--bad': modelTestState(modelId)?.ok === false,
+                      }"
+                      :disabled="testingModels.has(modelId)"
+                      @click.stop="testModel(modelId)"
+                    >
+                      <n-icon :component="testingModels.has(modelId) ? RefreshOutline : PulseOutline" :size="12" />
+                    </button>
+                  </template>
+                  <template v-if="testingModels.has(modelId)">{{ t("v3.testModelTesting") }}</template>
+                  <template v-else-if="modelTestState(modelId)?.ok === true">
+                    {{ t("v3.modelTestOk", { model: modelId, ms: modelTestState(modelId)?.ms }) }}
+                  </template>
+                  <template v-else-if="modelTestState(modelId)?.ok === false">
+                    {{ t("v3.modelTestFail", { model: modelId, err: modelTestState(modelId)?.error }) }}
+                  </template>
+                  <template v-else>{{ t("v3.testModel") }}</template>
+                </n-tooltip>
               </div>
               <div class="v5-modelcard__row" style="margin-top: 6px; align-items: center; gap: 6px">
                 <n-tooltip trigger="hover" placement="top">

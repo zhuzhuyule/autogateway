@@ -620,6 +620,50 @@
   background: var(--v3-info-soft);
 }
 
+/* per-model 连通性测试图标. 默认中性, 测过一次后根据结果着色让用户一眼看到状态. */
+.v5-modelcard__test {
+  flex-shrink: 0;
+  background: transparent;
+  border: 1px solid var(--v3-line);
+  color: var(--v3-ink-3);
+  cursor: pointer;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  transition: all 120ms;
+}
+.v5-modelcard__test:hover:not(:disabled) {
+  border-color: var(--v3-accent);
+  color: var(--v3-accent);
+  background: var(--v3-accent-soft, oklch(from var(--v3-accent) 96% 0.05 h));
+}
+.v5-modelcard__test:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+.v5-modelcard__test--testing :deep(svg),
+.v5-modelcard__test--testing svg {
+  animation: v5-spin 800ms linear infinite;
+}
+.v5-modelcard__test--ok {
+  border-color: oklch(from var(--v3-success) l c h / 0.5);
+  color: var(--v3-success);
+  background: oklch(from var(--v3-success) l c h / 0.08);
+}
+.v5-modelcard__test--bad {
+  border-color: oklch(from var(--v3-danger) l c h / 0.5);
+  color: var(--v3-danger);
+  background: oklch(from var(--v3-danger) l c h / 0.08);
+}
+@keyframes v5-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
 /* ===== Blocked model state (orthogonal to mode) ===== */
 .v5-modelcard--blocked {
   border-color: var(--v3-danger);

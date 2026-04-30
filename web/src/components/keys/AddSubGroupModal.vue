@@ -326,6 +326,20 @@ const canAddMore = computed(() => {
   border-radius: var(--v3-radius);
 }
 
+/* 让 NForm-item 不再贡献顶部/底部 feedback 空间, 以保证整行视觉垂直居中 */
+.v3-sub-group-item :deep(.n-form-item) {
+  display: flex;
+  align-items: center;
+}
+
+.v3-sub-group-item :deep(.n-form-item-blank) {
+  min-height: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+  display: flex;
+  align-items: center;
+}
+
 .v3-sub-group-index {
   width: 24px;
   height: 24px;
@@ -335,6 +349,7 @@ const canAddMore = computed(() => {
   font: 600 11px/24px var(--v3-mono);
   text-align: center;
   flex-shrink: 0;
+  align-self: center;
 }
 
 .v3-sub-group-select {

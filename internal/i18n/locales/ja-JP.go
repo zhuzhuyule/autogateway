@@ -68,6 +68,7 @@ var MessagesJaJP = map[string]string{
 	"validation.sub_groups_required":     "集約グループには少なくとも1つのサブグループが必要です",
 	"validation.invalid_sub_group_id":    "無効なサブグループID",
 	"validation.sub_group_not_found":     "1つ以上のサブグループが見つかりません",
+	"validation.no_sub_group_for_model":  "リクエストされたモデルに対応するサブグループが利用できません",
 	"validation.sub_group_cannot_be_aggregate": "サブグループは集約グループにできません",
 	"validation.sub_group_channel_mismatch": "すべてのサブグループは同じチャンネルタイプを使用する必要があります",
 	"validation.sub_group_validation_endpoint_mismatch": "サブグループのエンドポイントが一致していません。集約グループには、リクエストの転送を成功させるため統一されたアップストリームパスが必要です",

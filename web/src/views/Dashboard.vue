@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { getDashboardStats, getGroupList, getTopModels, type TopModelStat } from "@/api/dashboard";
 import { keysApi } from "@/api/keys";
+import { settingsApi } from "@/api/settings";
 import EncryptionMismatchAlert from "@/components/EncryptionMismatchAlert.vue";
 import LineChart from "@/components/LineChart.vue";
 import SecurityAlert from "@/components/SecurityAlert.vue";
@@ -217,14 +218,16 @@ const kpis = computed<KpiSpec[]>(() => {
 
 const baseUrl = computed(() => `${window.location.protocol}//${window.location.host}`);
 
-function aggRequestPath(group: Group): string {
+// 系统聚合复制用的根 URL — 与下方 endpoints 数组保持一致, 复制到 /vN 即可,
+// 不带 /proxy 前缀, 也不附 chat/completions 等具体端点路径 (用户只想要 baseUrl).
+function aggRootPath(group: Group): string {
   if (group.channel_type === "anthropic") {
-    return "/proxy/anthropic/v1/messages";
+    return "/anthropic/v1";
   }
   if (group.channel_type === "gemini") {
-    return "/proxy/gemini/v1beta/models/*:generateContent";
+    return "/gemini/v1beta";
   }
-  return "/proxy/openai/v1/chat/completions";
+  return "/openai/v1";
 }
 
 // Favicon support for aggregate cards
@@ -279,7 +282,33 @@ const systemAggregates = computed(() => {
 });
 
 async function copyAggregateUrl(group: Group) {
-  await copyText(`${baseUrl.value}${aggRequestPath(group)}`);
+  await copyText(`${baseUrl.value}${aggRootPath(group)}`);
+}
+
+// 头部"复制 AUTH_KEY"按钮 — 拉系统设置里的全局代理密钥 (proxy_keys),
+// 这是用户在调用 /openai /anthropic /gemini 端点时要带的 Bearer.
+// 之前误把字面量 'AUTH_KEY' 写进了剪贴板. 多个密钥逗号分隔时, 复制第一条.
+async function copyAuthKey() {
+  try {
+    const cats = await settingsApi.getSettings();
+    let raw = "";
+    for (const cat of cats) {
+      const hit = cat.settings.find(s => s.key === "proxy_keys");
+      if (hit) {
+        raw = String(hit.value ?? "");
+        break;
+      }
+    }
+    const first = raw.split(",").map(s => s.trim()).filter(Boolean)[0] || "";
+    if (!first) {
+      message.error(t("auth.noAuthKeyFound"));
+      return;
+    }
+    await copyText(first);
+  } catch (e) {
+    console.error("copy proxy_keys failed", e);
+    message.error("Copy failed");
+  }
 }
 
 interface TopModelRow {
@@ -471,7 +500,7 @@ const endpoints = computed(() => {
 async function copyText(value: string) {
   const ok = await copyToClipboard(value);
   if (ok) {
-    message.success(t("common.copySuccess") || "Copied");
+    message.success(t("common.copySuccess"));
   } else {
     message.error("Copy failed");
   }
@@ -509,7 +538,7 @@ async function copyText(value: string) {
           ，所有 Provider。
         </div>
         <div class="v5-qs__quickbtns" @click.stop>
-          <button class="v3-btn v3-btn--primary v3-btn--sm" @click="copyText('AUTH_KEY')">
+          <button class="v3-btn v3-btn--primary v3-btn--sm" @click="copyAuthKey">
             <n-icon :component="CopyOutline" :size="12" />
             复制 AUTH_KEY
           </button>

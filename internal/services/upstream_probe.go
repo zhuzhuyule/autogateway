@@ -6,10 +6,16 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
 )
+
+// probeVersionTailRe 匹配 baseUrl 末尾的版本段, 如 /v1 / /v1beta / /v2 — 在
+// 拼 probe path 前剥掉, 避免 https://ai.gitee.com/v1 + /v1/models 拼成
+// https://ai.gitee.com/v1/v1/models 全协议 404.
+var probeVersionTailRe = regexp.MustCompile(`/v\d+(?:beta\d*)?$`)
 
 // ProbeResult is what /api/upstream/probe returns.
 type ProbeResult struct {
@@ -33,7 +39,10 @@ var probeClient = &http.Client{Timeout: 3 * time.Second}
 // 应通过 prefer 显式优先返回该协议结果, 而不是沿用全局 rank 把 anthropic 先于
 // openai 错误地匹配上去.
 func ProbeUpstream(ctx context.Context, rawURL, prefer string) (*ProbeResult, error) {
-	u, err := url.Parse(strings.TrimRight(rawURL, "/"))
+	// "#" 是用户级 escape 标记 (持久化进库), 探测时不参与, 否则 url.Parse 会把 "#"
+	// 后内容当 fragment 丢掉后拼出 ".../foo//v1/models" 的双斜杠.
+	cleaned := strings.TrimRight(strings.TrimRight(rawURL, "#"), "/")
+	u, err := url.Parse(cleaned)
 	if err != nil {
 		return nil, fmt.Errorf("invalid url: %w", err)
 	}
@@ -41,6 +50,9 @@ func ProbeUpstream(ctx context.Context, rawURL, prefer string) (*ProbeResult, er
 		return nil, fmt.Errorf("only http/https probing is allowed, got %q", u.Scheme)
 	}
 	base := u.String()
+	// 剥掉 baseUrl 末尾的版本段 (/v1, /v1beta, /v2 ...), 让每个协议 probe 自己
+	// 拼回需要的版本前缀, 避免双 /v1 等错误. NormalizedURL 仍返回用户原始 base.
+	probeBase := probeVersionTailRe.ReplaceAllString(base, "")
 
 	type attempt struct {
 		channel string
@@ -63,7 +75,7 @@ func ProbeUpstream(ctx context.Context, rawURL, prefer string) (*ProbeResult, er
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			results <- runOne(probeCtx, base, a.channel, a.path, a.header)
+			results <- runOne(probeCtx, probeBase, a.channel, a.path, a.header)
 		}()
 	}
 	go func() { wg.Wait(); close(results) }()
@@ -73,6 +85,7 @@ func ProbeUpstream(ctx context.Context, rawURL, prefer string) (*ProbeResult, er
 		if r.err != nil || r.res == nil {
 			continue
 		}
+		r.res.NormalizedURL = base
 		hits[r.res.ChannelType] = r.res
 	}
 	if prefer != "" && hits[prefer] != nil {
@@ -88,7 +101,10 @@ func ProbeUpstream(ctx context.Context, rawURL, prefer string) (*ProbeResult, er
 			return hits[ch], nil
 		}
 	}
-	return nil, fmt.Errorf("no known upstream protocol responded at %s", base)
+	// 没有任何协议命中 — 不是错误, 而是"未识别". 返回 200 + 空 channel_type,
+	// 让前端 UI 显示 ⚠ unknown, 避免 dev tools 红色 502 + 全局 toast.
+	// 真异常 (无效 URL / 非法 scheme) 仍走 error 路径返回给上层.
+	return &ProbeResult{NormalizedURL: base}, nil
 }
 
 func runOne(ctx context.Context, base, channel, path string, headers map[string]string) outcome {

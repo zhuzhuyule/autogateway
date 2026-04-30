@@ -9,6 +9,17 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// ValidateResult is the outcome of a ValidateKey upstream call. It carries
+// enough metadata for callers to construct a request_logs entry (visible in
+// the Logs live-tail UI with errorContains filter). URL must not contain
+// secrets — Gemini takes care to capture the URL before appending ?key=...
+type ValidateResult struct {
+	IsValid    bool
+	StatusCode int    // upstream HTTP status; 0 if the call failed before getting a response
+	URL        string // final upstream URL, secrets stripped
+	Err        error
+}
+
 // ChannelProxy defines the interface for different API channel proxies.
 type ChannelProxy interface {
 	// BuildUpstreamURL constructs the target URL for the upstream service.
@@ -32,8 +43,10 @@ type ChannelProxy interface {
 	// ExtractModel extracts the model name from the request.
 	ExtractModel(c *gin.Context, bodyBytes []byte) string
 
-	// ValidateKey checks if the given API key is valid.
-	ValidateKey(ctx context.Context, apiKey *models.APIKey, group *models.Group) (bool, error)
+	// ValidateKey checks if the given API key is valid and returns the
+	// upstream call metadata so callers (KeyValidator) can persist a
+	// RequestLog row visible in the live tail UI.
+	ValidateKey(ctx context.Context, apiKey *models.APIKey, group *models.Group) ValidateResult
 
 	// ApplyModelRedirect applies model redirection based on the group's redirect rules.
 	ApplyModelRedirect(req *http.Request, bodyBytes []byte, group *models.Group) ([]byte, error)

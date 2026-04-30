@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import { upstreamApi, type ProbeResult } from "@/api/upstream";
+import { normalizeUpstreamUrl } from "@/utils/upstreamUrl";
 
 const props = defineProps<{ url: string; channelType?: string }>();
 const emit = defineEmits<{ (e: "detected", res: ProbeResult): void }>();
@@ -56,8 +57,19 @@ watch(
         // openai-response 在后端 probe 里没有独立分支, 退化成 openai.
         const prefer =
           props.channelType === "openai-response" ? "openai" : props.channelType || undefined;
-        const res = await upstreamApi.probe(next, prefer);
+        // 用户输入可能仍带 # escape 标记 (input 显式保留), probe 前统一去 #
+        // 后再 normalize, 避免 backend 收到 …/foo/# → url.Parse 丢 # 后拼出
+        // …/foo//v1/models 的双斜杠.
+        const stripped = next.replace(/\/+#$/, "").replace(/#$/, "");
+        const probeUrl = normalizeUpstreamUrl(stripped);
+        const res = await upstreamApi.probe(probeUrl, prefer);
         const payload = (res as unknown as { data: ProbeResult }).data;
+        // backend 在所有协议都未命中时返回 200 + 空 channel_type, 当作 fail 展示
+        if (!payload?.channel_type) {
+          state.value = "fail";
+          detail.value = null;
+          return;
+        }
         state.value = "ok";
         detail.value = payload;
         emit("detected", payload);

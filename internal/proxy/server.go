@@ -18,6 +18,7 @@ import (
 	"autogateway/internal/keypool"
 	"autogateway/internal/models"
 	"autogateway/internal/response"
+	"autogateway/internal/router_engine"
 	"autogateway/internal/services"
 	"autogateway/internal/utils"
 
@@ -33,6 +34,8 @@ type ProxyServer struct {
 	settingsManager   *config.SystemSettingsManager
 	channelFactory    *channel.Factory
 	requestLogService *services.RequestLogService
+	aliasService      *services.AliasService
+	selector          *router_engine.Selector
 	encryptionSvc     encryption.Service
 }
 
@@ -44,6 +47,8 @@ func NewProxyServer(
 	settingsManager *config.SystemSettingsManager,
 	channelFactory *channel.Factory,
 	requestLogService *services.RequestLogService,
+	aliasService *services.AliasService,
+	selector *router_engine.Selector,
 	encryptionSvc encryption.Service,
 ) (*ProxyServer, error) {
 	return &ProxyServer{
@@ -53,6 +58,8 @@ func NewProxyServer(
 		settingsManager:   settingsManager,
 		channelFactory:    channelFactory,
 		requestLogService: requestLogService,
+		aliasService:      aliasService,
+		selector:          selector,
 		encryptionSvc:     encryptionSvc,
 	}, nil
 }
@@ -158,6 +165,7 @@ func (ps *ProxyServer) executeRequestWithRetry(
 	apiKey, err := ps.keyProvider.SelectKey(group.ID)
 	if err != nil {
 		logrus.Errorf("Failed to select a key for group %s on attempt %d: %v", group.Name, retryCount+1, err)
+		ps.markRoutingCandidate(c, http.StatusServiceUnavailable)
 		response.Error(c, app_errors.NewAPIError(app_errors.ErrNoKeysAvailable, err.Error()))
 		ps.logRequest(c, originalGroup, group, nil, startTime, http.StatusServiceUnavailable, err, isStream, "", channelHandler, bodyBytes, models.RequestTypeFinal)
 		return
@@ -229,8 +237,19 @@ func (ps *ProxyServer) executeRequestWithRetry(
 		defer resp.Body.Close()
 	}
 
-	// Unified error handling for retries. Exclude 404 from being a retryable error.
-	if err != nil || (resp != nil && resp.StatusCode >= 400 && resp.StatusCode != http.StatusNotFound) {
+	if err == nil && resp != nil && resp.StatusCode >= 200 && resp.StatusCode < 400 &&
+		shouldValidateJSONSuccess(c.Request.URL.Path, isStream) {
+		if validationErr := validateJSONSuccessResponse(resp); validationErr != nil {
+			err = validationErr
+		}
+	}
+
+	// Unified error handling for retries. 404 is normally passed through for
+	// direct requests, but alias-routed candidates should still be marked as
+	// failed so future alias selections can avoid unsupported destinations.
+	isRetryableHTTPError := resp != nil && resp.StatusCode >= 400 &&
+		(resp.StatusCode != http.StatusNotFound || ps.hasRoutingCandidate(c))
+	if err != nil || isRetryableHTTPError {
 		if err != nil && app_errors.IsIgnorableError(err) {
 			logrus.Debugf("Client-side ignorable error for key %s, aborting retries: %v", utils.MaskAPIKey(apiKey.KeyValue), err)
 			ps.logRequest(c, originalGroup, group, apiKey, startTime, 499, err, isStream, upstreamURL, channelHandler, bodyBytes, models.RequestTypeFinal)
@@ -260,6 +279,8 @@ func (ps *ProxyServer) executeRequestWithRetry(
 			parsedError = app_errors.ParseUpstreamError(errorBody)
 			logrus.Debugf("Request failed with status %d (attempt %d/%d) for key %s. Parsed Error: %s", statusCode, retryCount+1, cfg.MaxRetries, utils.MaskAPIKey(apiKey.KeyValue), parsedError)
 		}
+
+		ps.markRoutingCandidate(c, statusCode)
 
 		// 使用解析后的错误信息更新密钥状态
 		ps.keyProvider.UpdateStatus(apiKey, group, false, parsedError)
@@ -332,6 +353,7 @@ func (ps *ProxyServer) executeRequestWithRetry(
 
 	// ps.keyProvider.UpdateStatus(apiKey, group, true) // 请求成功不再重置成功次数，减少IO消耗
 	logrus.Debugf("Request for group %s succeeded on attempt %d with key %s", group.Name, retryCount+1, utils.MaskAPIKey(apiKey.KeyValue))
+	ps.markRoutingCandidate(c, resp.StatusCode)
 
 	// 通知熔断器:该子分组本次请求成功(若是聚合请求)
 	if originalGroup.GroupType == "aggregate" && group.Name != originalGroup.Name {
@@ -357,6 +379,30 @@ func (ps *ProxyServer) executeRequestWithRetry(
 	}
 
 	ps.logRequest(c, originalGroup, group, apiKey, startTime, resp.StatusCode, nil, isStream, upstreamURL, channelHandler, bodyBytes, models.RequestTypeFinal)
+}
+
+func (ps *ProxyServer) markRoutingCandidate(c *gin.Context, statusCode int) {
+	if ps.selector == nil {
+		return
+	}
+	raw, ok := c.Get("router_engine.candidate")
+	if !ok {
+		return
+	}
+	candidate, ok := raw.(*router_engine.Candidate)
+	if !ok || candidate == nil {
+		return
+	}
+	ps.selector.MarkResponse(*candidate, statusCode)
+}
+
+func (ps *ProxyServer) hasRoutingCandidate(c *gin.Context) bool {
+	raw, ok := c.Get("router_engine.candidate")
+	if !ok {
+		return false
+	}
+	candidate, ok := raw.(*router_engine.Candidate)
+	return ok && candidate != nil
 }
 
 // logRequest is a helper function to create and record a request log.

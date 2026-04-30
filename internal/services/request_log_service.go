@@ -272,7 +272,10 @@ func (s *RequestLogService) writeLogsToDB(logs []*models.RequestLog) error {
 			GroupID uint
 		}]struct{ Success, Failure int64 })
 		for _, log := range logs {
-			if log.RequestType == models.RequestTypeRetry {
+			// retry/test 类型不计入 hourly 业务统计:
+			// - retry 是单次业务请求内部的重试, 主条目已计数
+			// - test 是 ValidateKey 探活, 不属于业务流量
+			if log.RequestType == models.RequestTypeRetry || log.RequestType == models.RequestTypeTest {
 				continue
 			}
 			hourlyTime := log.Timestamp.Truncate(time.Hour)

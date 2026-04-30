@@ -5,6 +5,7 @@ import {
   FREE_PROVIDERS,
   FREE_MODELS,
   bootstrapExposedModels,
+  displayModelName,
   type FreeProvider,
 } from "@/data/freeProviders";
 import type { Group } from "@/types/models";
@@ -490,10 +491,13 @@ async function testAndSave() {
                 'v3-msel__chip--paid': !m.isFree,
               }"
               @click="selectedModel = m.id"
+              :title="m.id"
             >
-              <span class="v3-msel__chip-id">{{ m.id }}</span>
-              <FreeBadge v-if="m.isFree" compact />
-              <span v-else class="v3-msel__chip-badge v3-msel__chip-badge--paid">paid</span>
+              <span class="v3-msel__chip-id">
+                {{ displayModelName(picked ?? undefined, m.id) }}
+                <FreeBadge v-if="m.isFree" />
+              </span>
+              <span v-if="!m.isFree" class="v3-msel__chip-badge v3-msel__chip-badge--paid">paid</span>
               <span v-if="m.tier" class="v3-msel__chip-tier">{{ m.tier }}</span>
             </button>
           </div>

@@ -404,7 +404,7 @@ async function fetchCatalog() {
       </span>
       <span style="color: var(--v3-line); margin: 0 4px">|</span>
       <span class="v3-pill" :class="{ 'v3-pill--active': freeOnly }" @click="freeOnly = !freeOnly">
-        <FreeBadge compact :size="11" />
+        <FreeBadge />
         <span style="margin-left: 4px">{{ t("modelcatalog.freeOnly") || "Free only" }}</span>
       </span>
       <span
@@ -466,15 +466,10 @@ async function fetchCatalog() {
             </span>
           </div>
           <div>
-            <div class="v3-model-row__name">{{ row.id }}</div>
+            <div class="v3-model-row__name">{{ row.id }} <FreeBadge v-if="row.freeVariant" /></div>
             <div
               style="display: flex; gap: 6px; margin-top: 5px; align-items: center; flex-wrap: wrap"
             >
-              <FreeBadge
-                v-if="row.freeVariant"
-                :variant="row.freeVariant"
-                :size="11"
-              />
               <SpeedBadge v-if="row.speed" :speed="row.speed" :size="11" />
               <span v-if="row.contextHint" class="v3-chip">ctx {{ row.contextHint }}</span>
               <span v-if="row.hasTools" class="v3-chip">tools</span>

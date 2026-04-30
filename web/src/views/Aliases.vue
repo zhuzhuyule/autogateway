@@ -12,6 +12,7 @@ import type { Group } from "@/types/models";
 import { getGroupDisplayName } from "@/utils/display";
 import { V3_PROVIDER_DIR, pavClass } from "@/data/v3Catalog";
 import { findProviderByUpstreams, isFree } from "@/data/freeProviders";
+import { copy } from "@/utils/clipboard";
 import {
   AddOutline,
   BanOutline,
@@ -80,6 +81,12 @@ function openPicker(alias: string) {
   if (!pickerActiveGroupId.value && groups.value.length) {
     pickerActiveGroupId.value = groups.value.find(g => g.group_type !== "aggregate")?.id || null;
   }
+}
+
+// 点击别名标题快捷复制 — 外部 client 用这个名字作为 chat completions 的 model 字段。
+async function copyAlias(alias: string) {
+  await copy(alias);
+  message.success(t("v3.aliasCopied", { alias }));
 }
 
 function parseModelArray(raw: unknown): string[] {
@@ -431,21 +438,21 @@ const tiers = computed(() => {
   return [
     {
       id: "simple",
-      title: t("v3.fast") || "Simple",
+      title: t("v3.simple"),
       icon: FlashOutline,
       class: "v3-tier--simple",
       models: grouped.value.find(g => g.alias === "simple")?.members || [],
     },
     {
       id: "medium",
-      title: t("v3.balanced") || "Balanced",
+      title: t("v3.medium"),
       icon: PulseOutline,
       class: "v3-tier--medium",
       models: grouped.value.find(g => g.alias === "medium")?.members || [],
     },
     {
       id: "complex",
-      title: t("v3.max") || "Complex",
+      title: t("v3.complex"),
       icon: CubeOutline,
       class: "v3-tier--complex",
       models: grouped.value.find(g => g.alias === "complex")?.members || [],
@@ -725,7 +732,17 @@ function saveSettingsThrottled() {
         <div class="v3-tier__band" />
         <div class="v3-tier__head">
           <div class="v3-tier__head-main" style="align-items: center">
-            <div class="v3-tier__title">{{ tier.title }}</div>
+            <div
+              class="v3-tier__title v3-tier__title--copyable"
+              role="button"
+              tabindex="0"
+              :title="t('v3.aliasClickToCopy')"
+              @click="copyAlias(tier.id)"
+              @keydown.enter.prevent="copyAlias(tier.id)"
+              @keydown.space.prevent="copyAlias(tier.id)"
+            >
+              {{ tier.title }}
+            </div>
             <div class="v3-tier__rule" style="margin-top: 0">
               <span style="opacity: 0.7; font-weight: 500; margin-right: 4px">{{ tier.id }}</span>
               · {{ tier.models.length }}
@@ -805,7 +822,17 @@ function saveSettingsThrottled() {
           <div class="v3-tier__band" />
           <div class="v3-tier__head">
             <div class="v3-tier__head-main" style="align-items: center">
-              <div class="v3-tier__title">{{ grp.alias }}</div>
+              <div
+                class="v3-tier__title v3-tier__title--copyable"
+                role="button"
+                tabindex="0"
+                :title="t('v3.aliasClickToCopy')"
+                @click="copyAlias(grp.alias)"
+                @keydown.enter.prevent="copyAlias(grp.alias)"
+                @keydown.space.prevent="copyAlias(grp.alias)"
+              >
+                {{ grp.alias }}
+              </div>
               <div class="v3-tier__rule" style="margin-top: 0">
                 <span
                   v-if="grp.isReserved"
@@ -1333,6 +1360,24 @@ function saveSettingsThrottled() {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.v3-tier__title--copyable {
+  cursor: pointer;
+  user-select: none;
+  border-radius: 4px;
+  padding: 1px 4px;
+  margin: -1px -4px;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
+}
+.v3-tier__title--copyable:hover {
+  background: var(--v3-ink-7, rgba(127, 127, 127, 0.08));
+  color: var(--v3-accent, var(--v3-ink));
+}
+.v3-tier__title--copyable:focus-visible {
+  outline: 2px solid var(--v3-accent, currentColor);
+  outline-offset: 2px;
 }
 .v3-tier__rule {
   font: 600 10px var(--v3-mono);

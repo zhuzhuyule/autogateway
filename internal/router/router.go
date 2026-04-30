@@ -173,6 +173,7 @@ func registerProtectedAPIRoutes(
 		groups.GET("/:id/stats", serverHandler.GetGroupStats)
 		groups.POST("/:id/copy", serverHandler.CopyGroup)
 		groups.POST("/:id/refresh-models", serverHandler.RefreshGroupModels)
+		groups.POST("/:id/test-model", serverHandler.TestGroupModel)
 
 		groups.GET("/:id/sub-groups", serverHandler.GetSubGroups)
 		groups.POST("/:id/sub-groups", serverHandler.AddSubGroups)

@@ -311,6 +311,12 @@ func (s *KeyService) ListKeysInGroupQuery(groupID uint, statusFilter string, sea
 	return query
 }
 
+// TestModelConnectivity 对 group 内指定 model 做一次 ValidateKey 探活, 不修改
+// 所选 key 的 active/invalid 状态. 调用方应已把 aggregate 解析到具体的 sub-group.
+func (s *KeyService) TestModelConnectivity(group *models.Group, modelName string) (*keypool.ModelTestResult, error) {
+	return s.KeyValidator.TestModelConnectivity(group, modelName)
+}
+
 // TestMultipleKeys handles a one-off validation test for multiple keys.
 func (s *KeyService) TestMultipleKeys(group *models.Group, keysText string) ([]keypool.KeyTestResult, error) {
 	keysToTest := s.ParseKeysFromText(keysText)

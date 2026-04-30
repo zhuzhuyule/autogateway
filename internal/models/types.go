@@ -187,6 +187,10 @@ type APIKey struct {
 const (
 	RequestTypeRetry = "retry"
 	RequestTypeFinal = "final"
+	// RequestTypeTest 是手动 / 后台 ValidateKey 触发的探活请求, 走 request_logs
+	// 表只为前端 live tail 可见 (Logs.vue + errorContains 模糊搜), 不计入业务
+	// success/failure 统计 (hourly stats 跳过).
+	RequestTypeTest = "test"
 )
 
 // RequestLog 对应 request_logs 表

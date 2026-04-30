@@ -243,14 +243,19 @@ const allColumnConfigs: ColumnConfig[] = [
     width: 90,
     defaultVisible: true,
     render: (row: LogRow) => {
-      return h(
-        NTag,
-        { type: row.request_type === "retry" ? "warning" : "default", size: "small", round: true },
-        {
-          default: () =>
-            row.request_type === "retry" ? t("logs.retryRequest") : t("logs.finalRequest"),
-        }
-      );
+      const tagType =
+        row.request_type === "retry"
+          ? "warning"
+          : row.request_type === "test"
+            ? "info"
+            : "default";
+      const labelKey =
+        row.request_type === "retry"
+          ? "logs.retryRequest"
+          : row.request_type === "test"
+            ? "logs.testRequest"
+            : "logs.finalRequest";
+      return h(NTag, { type: tagType, size: "small", round: true }, { default: () => t(labelKey) });
     },
   },
   {
@@ -765,6 +770,13 @@ const deselectAllColumns = () => {
                 <span class="detail-label-compact">{{ t("logs.requestType") }}:</span>
                 <n-tag v-if="selectedLog.request_type === 'retry'" type="warning" size="small">
                   {{ t("logs.retryRequest") }}
+                </n-tag>
+                <n-tag
+                  v-else-if="selectedLog.request_type === 'test'"
+                  type="info"
+                  size="small"
+                >
+                  {{ t("logs.testRequest") }}
                 </n-tag>
                 <n-tag v-else type="default" size="small">{{ t("logs.finalRequest") }}</n-tag>
               </div>

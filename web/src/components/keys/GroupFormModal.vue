@@ -154,7 +154,8 @@ const modelsRefreshedAt = ref<string | null>(null);
 // 编辑已有 group 时若已配置 >1 个 upstream, 自动展开.
 const multiUpstreamEnabled = ref(false);
 
-// 上游 URL 失焦时按规则规范化 (尾部追加 /v1, 处理 # 转义).
+// 上游 URL 失焦时按规则规范化 (尾部追加 /v1, "#" escape 保留并持久化进库,
+// 二次 blur 与 submit 都不再处理 "#" 后内容).
 function onUpstreamUrlBlur(index: number) {
   const cur = formData.upstreams[index]?.url;
   if (!cur) {

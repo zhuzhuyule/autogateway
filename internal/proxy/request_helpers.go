@@ -1,13 +1,15 @@
 package proxy
 
 import (
+	app_errors "autogateway/internal/errors"
+	"autogateway/internal/models"
 	"bytes"
 	"compress/gzip"
 	"encoding/json"
-	app_errors "autogateway/internal/errors"
-	"autogateway/internal/models"
+	"fmt"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/sirupsen/logrus"
 )
@@ -64,6 +66,34 @@ func applyNested(requestData, overrides map[string]any, modelName string) {
 			requestData[k] = v
 		}
 	}
+}
+
+func shouldValidateJSONSuccess(path string, isStream bool) bool {
+	if isStream {
+		return false
+	}
+	return strings.Contains(path, "chat/completions") ||
+		strings.Contains(path, "messages") ||
+		strings.Contains(path, "generateContent")
+}
+
+func validateJSONSuccessResponse(resp *http.Response) error {
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("failed to read upstream success response: %w", err)
+	}
+	resp.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+
+	bodyBytes = handleGzipCompression(resp, bodyBytes)
+	if json.Valid(bodyBytes) {
+		return nil
+	}
+
+	contentType := resp.Header.Get("Content-Type")
+	if contentType == "" {
+		contentType = "unknown"
+	}
+	return fmt.Errorf("upstream returned non-JSON success response: status=%d content_type=%s", resp.StatusCode, contentType)
 }
 
 // logUpstreamError provides a centralized way to log errors from upstream interactions.

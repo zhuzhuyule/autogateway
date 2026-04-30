@@ -81,6 +81,17 @@ func (f *Factory) GetChannel(group *models.Group) (ChannelProxy, error) {
 	return channel, nil
 }
 
+// BuildChannel constructs a fresh channel proxy without touching the cache.
+// 用于 per-model 连通性测试: 调用方会临时改写 group.TestModel 跑一次
+// ValidateKey, 不应让这个临时副本污染长期缓存里供代理流量使用的 channel.
+func (f *Factory) BuildChannel(group *models.Group) (ChannelProxy, error) {
+	constructor, ok := channelRegistry[group.ChannelType]
+	if !ok {
+		return nil, fmt.Errorf("unsupported channel type: %s", group.ChannelType)
+	}
+	return constructor(f, group)
+}
+
 // newBaseChannel is a helper function to create and configure a BaseChannel.
 func (f *Factory) newBaseChannel(name string, group *models.Group) (*BaseChannel, error) {
 	type upstreamDef struct {

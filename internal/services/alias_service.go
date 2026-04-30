@@ -112,6 +112,22 @@ func (s *AliasService) ListAll(ctx context.Context) ([]models.ModelAlias, error)
 	return rows, nil
 }
 
+// ListEnabledAliasNames returns distinct user-callable alias names. Placeholder
+// rows have group_id=0 and are intentionally excluded; an alias appears only
+// after it has at least one enabled destination candidate.
+func (s *AliasService) ListEnabledAliasNames(ctx context.Context) ([]string, error) {
+	var names []string
+	if err := s.db.WithContext(ctx).
+		Model(&models.ModelAlias{}).
+		Distinct("alias").
+		Where("enabled = ? AND group_id <> 0 AND alias <> ''", true).
+		Order("alias asc").
+		Pluck("alias", &names).Error; err != nil {
+		return nil, app_errors.ParseDBError(err)
+	}
+	return names, nil
+}
+
 // ListByAlias returns the candidate pool for a given alias (excludes the
 // reserved placeholder row with group_id=0).
 func (s *AliasService) ListByAlias(ctx context.Context, alias string) ([]models.ModelAlias, error) {

@@ -61,6 +61,18 @@ func TestCooldownBumpAndReset(t *testing.T) {
 	}
 }
 
+func TestCooldownBumpsOnNon2xxStatus(t *testing.T) {
+	s := NewSelector(nil)
+	c := Candidate{GroupID: 99, RealModel: "test"}
+	s.MarkResponse(c, 500)
+	cands := []Candidate{c, {AliasID: 7, GroupID: 100, RealModel: "fresh", Weight: 1, Priority: 100}}
+
+	alive := s.filterCooldown(cands)
+	if len(alive) != 1 || alive[0].RealModel != "fresh" {
+		t.Errorf("expected non-2xx candidate to enter cooldown, got %+v", alive)
+	}
+}
+
 // TestPickForAutoTierSelection exercises the token threshold logic.
 func TestPickForAutoTierSelection(t *testing.T) {
 	s := NewSelector(nil)
@@ -71,7 +83,7 @@ func TestPickForAutoTierSelection(t *testing.T) {
 		alias  string
 	}{
 		{500, "simple"},
-		{2000, "medium"},  // boundary: not < 2000 → medium
+		{2000, "medium"}, // boundary: not < 2000 → medium
 		{5000, "medium"},
 		{8000, "complex"}, // boundary: >= 8000 → complex
 		{20000, "complex"},

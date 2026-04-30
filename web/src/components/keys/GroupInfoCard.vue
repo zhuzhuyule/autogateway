@@ -1,6 +1,12 @@
 <script setup lang="ts">
 import { keysApi } from "@/api/keys";
-import { findFreeModel, findProviderByUpstreams, isFree, type ModelTier } from "@/data/freeProviders";
+import {
+  displayModelName,
+  findFreeModel,
+  findProviderByUpstreams,
+  isFree,
+  type ModelTier,
+} from "@/data/freeProviders";
 import FreeBadge from "@/components/common/FreeBadge.vue";
 import type {
   Group,
@@ -106,6 +112,28 @@ const groupProviderId = computed<string | undefined>(() => {
   return findProviderByUpstreams(props.group.upstreams)?.id;
 });
 
+const groupProvider = computed(() => {
+  if (!props.group?.upstreams) {
+    return undefined;
+  }
+  return findProviderByUpstreams(props.group.upstreams);
+});
+
+// 聚合分组的子分组各自有 provider — 给 modelId 找出"贡献它的"子分组对应的
+// provider, 用来还原 obfuscated 模型名 (xfyun). 找不到就由 displayModelName
+// 走 GLOBAL_MODEL_NAMES 兜底.
+function aggProviderFor(modelId: string) {
+  if (!props.subGroups) {
+    return undefined;
+  }
+  for (const sg of props.subGroups) {
+    if (effectiveModelsFor(sg.group).includes(modelId)) {
+      return findProviderByUpstreams(sg.group.upstreams || []);
+    }
+  }
+  return undefined;
+}
+
 function modelIsFree(modelId: string): boolean {
   return isFree(groupProviderId.value, modelId) === true;
 }
@@ -130,15 +158,33 @@ interface AggregatedModel {
   modelId: string;
   providers: string[]; // 子分组 displayName 或 name
 }
+
+// 子分组对聚合的真实贡献:
+//  - specified 模式 → 用户显式 exposed_models 白名单 (而非上游 available_models 全量)
+//  - passthrough 模式 → 上游 available_models
+//  - 两种模式都剔除 blocked_models 黑名单
+// 这样系统聚合 (default-openai 等) 不会把透传子分组里"碰巧也支持 GPT-x" 的旁路模型
+// 全部展示,只显示用户主动加入的模型.
+function effectiveModelsFor(group: Group): string[] {
+  const mode = (group as unknown as { model_routing_mode?: string }).model_routing_mode;
+  const source =
+    mode === "specified"
+      ? (group as unknown as { exposed_models?: unknown }).exposed_models
+      : (group as unknown as { available_models?: unknown }).available_models;
+  const list = parseAvailable(source);
+  const blocked = new Set(
+    parseAvailable((group as unknown as { blocked_models?: unknown }).blocked_models)
+  );
+  return blocked.size === 0 ? list : list.filter(m => !blocked.has(m));
+}
+
 const aggregateModels = computed<AggregatedModel[]>(() => {
   if (!props.subGroups || props.subGroups.length === 0) {
     return [];
   }
   const map = new Map<string, Set<string>>();
   for (const sg of props.subGroups) {
-    const list = parseAvailable(
-      (sg.group as unknown as { available_models?: unknown }).available_models
-    );
+    const list = effectiveModelsFor(sg.group);
     const label = sg.group.display_name || sg.group.name;
     for (const m of list) {
       if (!map.has(m)) {
@@ -908,8 +954,10 @@ function resetPage() {
                       <div v-else class="models-grid">
                         <div v-for="m in filteredGroupModels" :key="m" class="model-item">
                           <div class="model-item-main">
-                            <span class="model-item-id">{{ m }}</span>
-                            <FreeBadge v-if="modelIsFree(m)" :label="t('modelcatalog.freeTag')" />
+                            <span class="model-item-id" :title="m">
+                              {{ displayModelName(groupProvider, m) }}
+                              <FreeBadge v-if="modelIsFree(m)" />
+                            </span>
                             <n-tag
                               v-if="findFreeModel(m)?.tier"
                               size="tiny"
@@ -954,8 +1002,10 @@ function resetPage() {
                           class="model-item model-item-tall"
                         >
                           <div class="model-item-main">
-                            <span class="model-item-id">{{ r.modelId }}</span>
-                            <FreeBadge v-if="modelIsFree(r.modelId)" :label="t('modelcatalog.freeTag')" />
+                            <span class="model-item-id" :title="r.modelId">
+                              {{ displayModelName(aggProviderFor(r.modelId), r.modelId) }}
+                              <FreeBadge v-if="modelIsFree(r.modelId)" />
+                            </span>
                             <n-tag
                               v-if="findFreeModel(r.modelId)?.tier"
                               size="tiny"

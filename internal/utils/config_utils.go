@@ -6,11 +6,26 @@ import (
 	"autogateway/internal/types"
 	"os"
 	"reflect"
+	"regexp"
 	"strconv"
 	"strings"
 
 	"github.com/sirupsen/logrus"
 )
+
+// validationEndpointVersionPrefixRe 匹配验证端点开头的 /vN 段 (含 /v1 / /v1beta 等),
+// 用于聚合分组的子分组等价比较 — 运行时 dedupeVersionSegment 会让 /v1/chat/completions
+// 与 /chat/completions 在合适 baseUrl 下等价, 比较时应去掉版本前缀以避免误判.
+var validationEndpointVersionPrefixRe = regexp.MustCompile(`^/v\d+(?:beta\d*)?(/|$)`)
+
+// NormalizeValidationEndpoint 把验证端点归一化为去掉首段 /vN 的形式.
+// 用于子分组等价性比较, 不影响实际验证请求的路径.
+func NormalizeValidationEndpoint(endpoint string) string {
+	if endpoint == "" {
+		return endpoint
+	}
+	return validationEndpointVersionPrefixRe.ReplaceAllString(endpoint, "$1")
+}
 
 // GenerateSettingsMetadata 使用反射从 SystemSettings 结构体动态生成元数据
 func GenerateSettingsMetadata(s *types.SystemSettings) []models.SystemSettingInfo {

@@ -75,6 +75,13 @@ func BuildContainer() (*dig.Container, error) {
 	if err := container.Provide(services.NewRequestLogService); err != nil {
 		return nil, err
 	}
+	// 把 *services.RequestLogService 暴露为 keypool.RequestLogRecorder,
+	// 这样 keypool 不必反向 import services, 避免 import cycle.
+	if err := container.Provide(func(s *services.RequestLogService) keypool.RequestLogRecorder {
+		return s
+	}); err != nil {
+		return nil, err
+	}
 	if err := container.Provide(services.NewSubGroupManager); err != nil {
 		return nil, err
 	}

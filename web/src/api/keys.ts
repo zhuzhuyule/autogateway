@@ -140,6 +140,28 @@ export const keysApi = {
     await http.put(`/keys/${keyId}/notes`, { notes }, { hideMessage: true });
   },
 
+  // 测试分组下指定模型的连通性 (后端会用一个活跃 key + 该模型 跑一次 ValidateKey)
+  async testGroupModel(
+    groupId: number,
+    model: string
+  ): Promise<{
+    is_valid: boolean;
+    status_code: number;
+    url: string;
+    error: string;
+    duration_ms: number;
+    model: string;
+    resolved_group: string;
+    is_via_aggregate: boolean;
+  }> {
+    const res = await http.post(
+      `/groups/${groupId}/test-model`,
+      { model },
+      { hideMessage: true }
+    );
+    return res.data;
+  },
+
   // 测试密钥
   async testKeys(
     group_id: number,

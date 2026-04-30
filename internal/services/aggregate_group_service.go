@@ -84,10 +84,13 @@ func (s *AggregateGroupService) ValidateSubGroups(ctx context.Context, channelTy
 			return nil, NewI18nError(app_errors.ErrValidation, "validation.sub_group_channel_mismatch", nil)
 		}
 
+		sgEndpoint := utils.GetValidationEndpoint(&sg)
 		// If no existing endpoint, use the first sub-group's effective endpoint
 		if validationEndpoint == "" {
-			validationEndpoint = utils.GetValidationEndpoint(&sg)
-		} else if validationEndpoint != utils.GetValidationEndpoint(&sg) {
+			validationEndpoint = sgEndpoint
+		} else if utils.NormalizeValidationEndpoint(validationEndpoint) != utils.NormalizeValidationEndpoint(sgEndpoint) {
+			// 比较时去掉首段 /vN — /v1/chat/completions 与 /chat/completions 运行时等价
+			// (dedupeVersionSegment 在 baseUrl 末段是 /vN 时去重), 不应据此拒绝.
 			return nil, NewI18nError(app_errors.ErrValidation, "validation.sub_group_validation_endpoint_mismatch", nil)
 		}
 		subGroupMap[sg.ID] = sg

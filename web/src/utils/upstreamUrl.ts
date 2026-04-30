@@ -3,7 +3,10 @@
 // 聚合分组的 endpoint 一致性校验也能命中默认 /v1/chat/completions.
 //
 // 规则 (按顺序):
-//   1. 输入末尾是 "#" → 用户显式跳过自动追加, 仅去掉 "#"
+//   1. 输入末尾是 "#" → 用户显式声明 "URL 已最终化, 不要追加任何东西",
+//      保留 "#" 持久化, 让数据库 / 重新打开 / 二次 blur 都看到一致的形态.
+//      "#" 对实际上游请求无影响 (Go url.Parse 把它分离成 fragment, HTTP
+//      不发送), 但作为 UI/normalize 的"封装"标记最稳定.
 //   2. 已经匹配 /v\d+(beta\d*)?$ → 不变
 //   3. 末尾是 /api → 追加 /v1 (openrouter / 各种 *-api 命名)
 //   4. 其他情况 → 兜底追加 /v1
@@ -17,8 +20,8 @@
 //     → "https://api.openai.com/v1"
 //   normalizeUpstreamUrl("https://open.bigmodel.cn/api/paas/v4")
 //     → "https://open.bigmodel.cn/api/paas/v4"
-//   normalizeUpstreamUrl("https://my.host/foo#")
-//     → "https://my.host/foo"
+//   normalizeUpstreamUrl("https://generativelanguage.googleapis.com/v1beta/openai/#")
+//     → "https://generativelanguage.googleapis.com/v1beta/openai/#"
 
 const VERSION_TAIL_RE = /\/v\d+(?:beta\d*)?$/;
 
@@ -33,9 +36,10 @@ export function normalizeUpstreamUrl(raw: string): string {
     return trimmed;
   }
 
-  // 1) "#" 转义: 去掉 "#", 不再追加版本
+  // 1) "#" escape: 折叠 "/#" 前多余斜杠后保留单个 "#", 不再追加版本.
+  //    这是用户级"封装标记", 持久化进库, 重新加载也保留.
   if (trimmed.endsWith("#")) {
-    return trimmed.slice(0, -1).replace(/\/+$/, "");
+    return trimmed.replace(/\/+#$/, "/#");
   }
 
   // 去尾斜杠后判断
@@ -57,10 +61,15 @@ export function normalizeUpstreamUrl(raw: string): string {
 
 // 用于 UI 预览: 把 baseUrl + 相对 endpoint 拼成最终上游路径,
 // 不实际触发后端的 dedupeVersionSegment, 但模拟其行为给用户直观反馈.
+// "#" escape 形态 (e.g. ".../openai/#") 在拼路径时被忽略 — 因为后端实际请求
+// 也不带它 (Go url.Parse 自动把 # 后内容当 fragment 丢弃).
 export function previewUpstreamPath(rawBaseUrl: string, endpoint: string): string {
-  const base = normalizeUpstreamUrl(rawBaseUrl);
+  let base = normalizeUpstreamUrl(rawBaseUrl);
   if (!base) {
     return "";
+  }
+  if (base.endsWith("#")) {
+    base = base.slice(0, -1).replace(/\/+$/, "");
   }
   const ep = (endpoint || "").trim();
   if (!ep) {

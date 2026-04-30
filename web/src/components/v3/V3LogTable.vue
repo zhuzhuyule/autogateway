@@ -55,6 +55,7 @@ const requestTypeOptions: SelectOption[] = [
   { label: t("common.all") || "All", value: "" },
   { label: t("logs.retryRequest") || "Retry", value: "retry" },
   { label: t("logs.finalRequest") || "Final", value: "final" },
+  { label: t("logs.testRequest") || "Test", value: "test" },
 ];
 
 const successFilter = ref<string>("");
@@ -89,7 +90,9 @@ async function loadLogs() {
       error_contains: errorFilter.value || undefined,
       is_success: successFilter.value === "" ? undefined : successFilter.value === "true",
       request_type:
-        requestTypeFilter.value === "" ? undefined : (requestTypeFilter.value as "retry" | "final"),
+        requestTypeFilter.value === ""
+          ? undefined
+          : (requestTypeFilter.value as "retry" | "final" | "test"),
     };
     const r = await logApi.getLogs(params);
     if (r.code === 0 && r.data) {
@@ -144,6 +147,9 @@ function fmtMs(ms: number): string {
 function tierForRequestType(rt: string): { cls: string; label: string } {
   if (rt === "retry") {
     return { cls: "v3-chip v3-chip--warn", label: t("logs.retryRequest") || "retry" };
+  }
+  if (rt === "test") {
+    return { cls: "v3-chip v3-chip--info", label: t("logs.testRequest") || "test" };
   }
   return { cls: "v3-chip", label: t("logs.finalRequest") || "final" };
 }

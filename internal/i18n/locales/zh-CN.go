@@ -68,6 +68,7 @@ var MessagesZhCN = map[string]string{
 	"validation.sub_groups_required":     "聚合分组必须包含至少一个子分组",
 	"validation.invalid_sub_group_id":    "无效的子分组ID",
 	"validation.sub_group_not_found":     "一个或多个子分组不存在",
+	"validation.no_sub_group_for_model":  "没有支持该模型的可用子分组",
 	"validation.sub_group_cannot_be_aggregate": "子分组不能是聚合分组",
 	"validation.sub_group_channel_mismatch": "所有子分组必须使用相同的渠道类型",
 	"validation.sub_group_validation_endpoint_mismatch": "子分组请求端点不一致，聚合分组需要统一的上游请求路径以确保透传成功",

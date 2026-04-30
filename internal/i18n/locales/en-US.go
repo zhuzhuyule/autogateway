@@ -68,6 +68,7 @@ var MessagesEnUS = map[string]string{
 	"validation.sub_groups_required":     "Aggregate group must contain at least one sub-group",
 	"validation.invalid_sub_group_id":    "Invalid sub-group ID",
 	"validation.sub_group_not_found":     "One or more sub-groups not found",
+	"validation.no_sub_group_for_model":  "No sub-group available for the requested model",
 	"validation.sub_group_cannot_be_aggregate": "Sub-groups cannot be aggregate groups",
 	"validation.sub_group_channel_mismatch": "All sub-groups must use the same channel type",
 	"validation.sub_group_validation_endpoint_mismatch": "Sub-group endpoints are inconsistent. Aggregate groups require unified upstream request paths for successful proxying",

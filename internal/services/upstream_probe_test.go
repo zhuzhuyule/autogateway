@@ -73,15 +73,26 @@ func TestProbeGeminiStyle(t *testing.T) {
 	}
 }
 
+// 全协议未命中不再返回 error — 而是返回 200 + 空 channel_type,
+// 让前端 UI 显示 ⚠ unknown, 避免误触全局 toast.
 func TestProbeUnknown(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 	}))
 	defer srv.Close()
 
-	_, err := ProbeUpstream(context.Background(), srv.URL, "")
-	if err == nil {
-		t.Fatalf("expected error for unknown upstream, got nil")
+	got, err := ProbeUpstream(context.Background(), srv.URL, "")
+	if err != nil {
+		t.Fatalf("expected nil error for unknown upstream, got %v", err)
+	}
+	if got == nil {
+		t.Fatalf("expected non-nil result for unknown upstream")
+	}
+	if got.ChannelType != "" {
+		t.Errorf("expected empty channel_type, got %q", got.ChannelType)
+	}
+	if got.NormalizedURL != srv.URL {
+		t.Errorf("expected normalized url %q, got %q", srv.URL, got.NormalizedURL)
 	}
 }
 
@@ -106,6 +117,50 @@ func TestProbePreferOverridesRank(t *testing.T) {
 	}
 	if got.ChannelType != "openai" {
 		t.Errorf("expected openai (prefer override), got %q", got.ChannelType)
+	}
+}
+
+// baseUrl 已带版本段时 (e.g. https://ai.gitee.com/v1), probe 应剥掉再拼,
+// 不能拼成 /v1/v1/models 然后全协议 404.
+func TestProbeBaseUrlWithVersionSegment(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/models" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	got, err := ProbeUpstream(context.Background(), srv.URL+"/v1", "openai")
+	if err != nil {
+		t.Fatalf("ProbeUpstream returned error: %v", err)
+	}
+	if got.ChannelType != "openai" {
+		t.Errorf("expected openai for base+/v1, got %q", got.ChannelType)
+	}
+	if got.NormalizedURL != srv.URL+"/v1" {
+		t.Errorf("expected normalized url to preserve original, got %q", got.NormalizedURL)
+	}
+}
+
+// /v1beta 后缀也要被剥掉, 避免 gemini probe 拼成 /v1beta/v1beta/models.
+func TestProbeBaseUrlWithV1betaSegment(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1beta/models" {
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	got, err := ProbeUpstream(context.Background(), srv.URL+"/v1beta", "")
+	if err != nil {
+		t.Fatalf("ProbeUpstream returned error: %v", err)
+	}
+	if got.ChannelType != "gemini" {
+		t.Errorf("expected gemini for base+/v1beta, got %q", got.ChannelType)
 	}
 }
 

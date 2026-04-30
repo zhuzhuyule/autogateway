@@ -45,14 +45,20 @@ http.interceptors.response.use(
   },
   error => {
     appState.loading = false;
-    if (error.response) {
-      if (error.response.status === 401) {
-        if (window.location.pathname !== "/login") {
-          const { logout } = useAuthService();
-          logout();
-          window.location.href = "/login";
-        }
+    // 401 始终 logout, 与 hideMessage 无关 — 不能让无声请求把用户卡在登录态过期里
+    if (error.response?.status === 401) {
+      if (window.location.pathname !== "/login") {
+        const { logout } = useAuthService();
+        logout();
+        window.location.href = "/login";
       }
+    }
+    // hideMessage: 调用方自己处理失败 (probe / 后台轮询等), 不弹全局 toast.
+    // 否则用户看到 "no known upstream protocol …" 之类 502 会误以为是保存失败.
+    if (error.config?.hideMessage) {
+      return Promise.reject(error);
+    }
+    if (error.response) {
       window.$message.error(
         error.response.data?.message ||
           i18n.global.t("common.requestFailed", { status: error.response.status }),

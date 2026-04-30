@@ -1,12 +1,12 @@
 package channel
 
 import (
-	"bytes"
-	"encoding/json"
-	"fmt"
 	"autogateway/internal/models"
 	"autogateway/internal/types"
 	"autogateway/internal/utils"
+	"bytes"
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/url"
 	"reflect"
@@ -79,6 +79,29 @@ func (b *BaseChannel) getUpstreamURL() *url.URL {
 	return best.URL
 }
 
+// JoinUpstreamURL joins requestPath onto base and returns the resolved URL.
+//
+// 单一职责: 所有上游请求 (代理转发 + ValidateKey 测试) 都必须走这个方法, 避免
+// 不同入口实现各自的拼接逻辑导致路径双 /v1.
+//
+// 行为:
+//  1. 丢弃 fragment ("#" 是用户级 UI escape, 持久化进库但 HTTP 不发送)
+//  2. baseURL 末段是 /vN → request 开头若也是版本段 (任意版本号) 一律去掉,
+//     base 的版本视为权威. 避免:
+//       base=/v1   + req=/v1/chat/completions → /v1/chat/completions
+//       base=/v2   + req=/v1/chat/completions → /v2/chat/completions  (xfyun)
+//       base=/v1beta + req=/v1/chat/completions → /v1beta/chat/completions
+//  3. RawQuery 不在此处理, 由调用方自行 set/append
+func (b *BaseChannel) JoinUpstreamURL(base *url.URL, requestPath string) *url.URL {
+	final := *base
+	final.Fragment = ""
+	final.RawFragment = ""
+	basePath := strings.TrimRight(final.Path, "/")
+	requestPath = dedupeVersionSegment(basePath, requestPath)
+	final.Path = basePath + requestPath
+	return &final
+}
+
 // BuildUpstreamURL constructs the target URL for the upstream service.
 //
 // 智能去重 API 版本段:如果 baseURL 末段是 /vN (e.g. /v1, /v1beta) 且 request
@@ -91,47 +114,76 @@ func (b *BaseChannel) BuildUpstreamURL(originalURL *url.URL, groupName string) (
 		return "", fmt.Errorf("no upstream URL configured for channel %s", b.Name)
 	}
 
-	finalURL := *base
-	proxyPrefix := "/proxy/" + groupName
-	requestPath := originalURL.Path
-	requestPath = strings.TrimPrefix(requestPath, proxyPrefix)
-
-	basePath := strings.TrimRight(finalURL.Path, "/")
-	requestPath = dedupeVersionSegment(basePath, requestPath)
-	finalURL.Path = basePath + requestPath
-
+	requestPath := stripGatewayPrefix(originalURL.Path, groupName)
+	finalURL := b.JoinUpstreamURL(base, requestPath)
 	finalURL.RawQuery = originalURL.RawQuery
 
 	return finalURL.String(), nil
 }
 
-// dedupeVersionSegment 在 baseURL 末段是 /vN 而 request 开头也是同一段时,
-// 把 request 那段去掉,避免双 /v1。
-//   - base="/v1"      req="/v1/chat/completions" → "/chat/completions"
-//   - base="/v1"      req="/chat/completions"    → "/chat/completions" (不变)
-//   - base="/openai"  req="/v1/chat/completions" → "/v1/chat/completions" (不变)
-//   - base=""         req="/v1/chat/completions" → "/v1/chat/completions" (不变)
-//   - base="/v1beta"  req="/v1beta/models"       → "/models"
+func stripGatewayPrefix(requestPath, groupName string) string {
+	proxyPrefix := "/proxy/" + groupName
+	if strings.HasPrefix(requestPath, proxyPrefix) {
+		return strings.TrimPrefix(requestPath, proxyPrefix)
+	}
+
+	// System shortcut routes are mounted without /proxy:
+	// /openai/*, /anthropic/*, /gemini/*. The router injects group_name, but
+	// non-chat endpoints such as /openai/v1/models do not pass through the
+	// model-routing middleware that rewrites the path to /proxy/{group}/*.
+	for _, shortcut := range []string{"/openai", "/anthropic", "/gemini"} {
+		if requestPath == shortcut {
+			return ""
+		}
+		if strings.HasPrefix(requestPath, shortcut+"/") {
+			return strings.TrimPrefix(requestPath, shortcut)
+		}
+	}
+
+	return requestPath
+}
+
+// dedupeVersionSegment 在 baseURL 末段是 /vN 时把 request 开头的版本段也去掉,
+// base 的版本视为权威 (用户配置的 baseUrl 是上游真实 API 版本, 而 endpoint
+// 模板里的 /v1 只是 OpenAI 默认 schema 的占位).
+//
+//   - base="/v1"      req="/v1/chat/completions"  → "/chat/completions"
+//   - base="/v2"      req="/v1/chat/completions"  → "/chat/completions"  (xfyun /v2)
+//   - base="/v1beta"  req="/v1beta/models"        → "/models"
+//   - base="/v1beta"  req="/v1/chat/completions"  → "/chat/completions"  (gemini openai-compat)
+//   - base="/v1"      req="/chat/completions"     → "/chat/completions"  (不变)
+//   - base="/openai"  req="/v1/chat/completions"  → "/v1/chat/completions" (base 末段非版本号, 不变)
+//   - base=""         req="/v1/chat/completions"  → "/v1/chat/completions" (不变)
 func dedupeVersionSegment(basePath, requestPath string) string {
 	if basePath == "" || requestPath == "" {
 		return requestPath
 	}
-	segs := strings.Split(strings.TrimPrefix(basePath, "/"), "/")
-	if len(segs) == 0 {
+	baseSegs := strings.Split(strings.TrimPrefix(basePath, "/"), "/")
+	if len(baseSegs) == 0 {
 		return requestPath
 	}
-	lastSeg := segs[len(segs)-1]
-	if !versionSegmentRe.MatchString(lastSeg) {
+	if !versionSegmentRe.MatchString(baseSegs[len(baseSegs)-1]) {
 		return requestPath
 	}
-	expected := "/" + lastSeg
-	if requestPath == expected {
-		return ""
+
+	// base 已经带版本 → 无论 request 的版本号是否相同, 都把它的第一段版本号砍掉.
+	trimmed := strings.TrimPrefix(requestPath, "/")
+	if trimmed == "" {
+		return requestPath
 	}
-	if strings.HasPrefix(requestPath, expected+"/") {
-		return strings.TrimPrefix(requestPath, expected)
+	slash := strings.Index(trimmed, "/")
+	var firstSeg, rest string
+	if slash < 0 {
+		firstSeg = trimmed
+		rest = ""
+	} else {
+		firstSeg = trimmed[:slash]
+		rest = trimmed[slash:] // 保留前导 "/"
 	}
-	return requestPath
+	if !versionSegmentRe.MatchString(firstSeg) {
+		return requestPath
+	}
+	return rest
 }
 
 // IsConfigStale checks if the channel's configuration is stale compared to the provided group.

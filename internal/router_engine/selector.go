@@ -16,12 +16,24 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"strconv"
 	"sync"
 	"time"
 
 	"autogateway/internal/models"
 
+	"github.com/sirupsen/logrus"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
+)
+
+// Settings 持久化在 system_settings 表里的 key, 用前缀避开 SystemSettingsManager
+// 的 typed-config 校验 (它的 ValidateSettings 只认 types.SystemSettings 已声明的字段,
+// 不会触碰这些前缀的 key).
+const (
+	settingKeyRoutingEnabled  = "routing_enabled"
+	settingKeyRoutingSimple   = "routing_simple_threshold"
+	settingKeyRoutingComplex  = "routing_complex_threshold"
 )
 
 // Tier names (sync with internal/autoroute, kept independent for the
@@ -77,18 +89,74 @@ type Selector struct {
 }
 
 func NewSelector(db *gorm.DB) *Selector {
-	return &Selector{
+	s := &Selector{
 		db:        db,
 		cooldown:  newCooldownStore(),
 		swrrState: newSWRRStateMap(),
 		settings:  DefaultSettings(),
 	}
+	s.loadSettingsFromDB()
+	return s
 }
 
 func (s *Selector) UpdateSettings(cfg Settings) {
 	s.mu.Lock()
 	s.settings = cfg
 	s.mu.Unlock()
+	s.persistSettings(cfg)
+}
+
+// loadSettingsFromDB 启动时从 system_settings 表读取持久化的路由阈值, 缺失则保留默认值.
+func (s *Selector) loadSettingsFromDB() {
+	if s.db == nil {
+		return
+	}
+	var rows []models.SystemSetting
+	if err := s.db.Where("setting_key IN ?", []string{
+		settingKeyRoutingEnabled, settingKeyRoutingSimple, settingKeyRoutingComplex,
+	}).Find(&rows).Error; err != nil {
+		logrus.WithError(err).Warn("failed to load routing settings from db, using defaults")
+		return
+	}
+	cfg := s.settings
+	for _, r := range rows {
+		switch r.SettingKey {
+		case settingKeyRoutingEnabled:
+			cfg.Enabled = r.SettingValue == "true"
+		case settingKeyRoutingSimple:
+			if v, err := strconv.Atoi(r.SettingValue); err == nil && v > 0 {
+				cfg.SimpleThreshold = v
+			}
+		case settingKeyRoutingComplex:
+			if v, err := strconv.Atoi(r.SettingValue); err == nil && v > 0 {
+				cfg.ComplexThreshold = v
+			}
+		}
+	}
+	if cfg.SimpleThreshold >= cfg.ComplexThreshold {
+		cfg.ComplexThreshold = cfg.SimpleThreshold * 2
+	}
+	s.mu.Lock()
+	s.settings = cfg
+	s.mu.Unlock()
+}
+
+// persistSettings 把当前阈值 upsert 进 system_settings 表, 重启后 loadSettingsFromDB 取回.
+func (s *Selector) persistSettings(cfg Settings) {
+	if s.db == nil {
+		return
+	}
+	rows := []models.SystemSetting{
+		{SettingKey: settingKeyRoutingEnabled, SettingValue: strconv.FormatBool(cfg.Enabled)},
+		{SettingKey: settingKeyRoutingSimple, SettingValue: strconv.Itoa(cfg.SimpleThreshold)},
+		{SettingKey: settingKeyRoutingComplex, SettingValue: strconv.Itoa(cfg.ComplexThreshold)},
+	}
+	if err := s.db.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "setting_key"}},
+		DoUpdates: clause.AssignmentColumns([]string{"setting_value", "updated_at"}),
+	}).Create(&rows).Error; err != nil {
+		logrus.WithError(err).Warn("failed to persist routing settings")
+	}
 }
 
 func (s *Selector) GetSettings() Settings {
@@ -110,6 +178,10 @@ func (s *Selector) PickByAlias(ctx context.Context, alias string) (*Candidate, e
 	}
 	if len(cands) == 0 {
 		return nil, fmt.Errorf("no candidates for alias %q", alias)
+	}
+	cands = s.filterByActiveKeys(ctx, cands)
+	if len(cands) == 0 {
+		return nil, fmt.Errorf("alias %q has no candidates with active keys", alias)
 	}
 	cands = s.filterByExposed(ctx, cands)
 	if len(cands) == 0 {
@@ -158,6 +230,10 @@ func (s *Selector) PickByExactName(ctx context.Context, model string) (*Candidat
 	if len(cands) == 0 {
 		return nil, fmt.Errorf("no group exposes model %q", model)
 	}
+	cands = s.filterByActiveKeys(ctx, cands)
+	if len(cands) == 0 {
+		return nil, fmt.Errorf("model %q has no group with active keys", model)
+	}
 	cands = s.filterByExposed(ctx, cands)
 	if len(cands) == 0 {
 		return nil, fmt.Errorf("model %q has no exposed group", model)
@@ -182,17 +258,17 @@ func (s *Selector) PickForAuto(ctx context.Context, estimatedTokens int) (*Candi
 }
 
 // MarkResponse feeds an upstream HTTP status back into the cooldown
-// machinery. 429 starts/extends a backoff window; anything in 2xx clears
-// the failure streak for that (group, model).
+// machinery. Non-2xx/3xx responses start or extend a backoff window; anything
+// in 2xx/3xx clears the failure streak for that (group, model).
 func (s *Selector) MarkResponse(c Candidate, status int) {
 	if c.GroupID == 0 || c.RealModel == "" {
 		return
 	}
 	key := fmt.Sprintf("%d:%s", c.GroupID, c.RealModel)
-	if status == 429 {
-		s.cooldown.bump(key)
-	} else if status >= 200 && status < 400 {
+	if status >= 200 && status < 400 {
 		s.cooldown.reset(key)
+	} else if status >= 400 {
+		s.cooldown.bump(key)
 	}
 }
 
@@ -273,6 +349,50 @@ func (s *Selector) filterByExposed(ctx context.Context, cands []Candidate) []Can
 			continue
 		}
 		if jsonContainsString(r.ExposedModels, c.RealModel) {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+func (s *Selector) filterByActiveKeys(ctx context.Context, cands []Candidate) []Candidate {
+	if len(cands) == 0 || s.db == nil {
+		return cands
+	}
+
+	idSet := make(map[uint]struct{}, len(cands))
+	for _, c := range cands {
+		idSet[c.GroupID] = struct{}{}
+	}
+	ids := make([]uint, 0, len(idSet))
+	for id := range idSet {
+		ids = append(ids, id)
+	}
+
+	type row struct {
+		GroupID uint
+		Count   int64
+	}
+	var rows []row
+	if err := s.db.WithContext(ctx).
+		Table("api_keys").
+		Select("group_id, count(*) as count").
+		Where("group_id IN ? AND status = ?", ids, models.KeyStatusActive).
+		Group("group_id").
+		Scan(&rows).Error; err != nil {
+		return cands
+	}
+
+	active := make(map[uint]bool, len(rows))
+	for _, r := range rows {
+		if r.Count > 0 {
+			active[r.GroupID] = true
+		}
+	}
+
+	out := make([]Candidate, 0, len(cands))
+	for _, c := range cands {
+		if active[c.GroupID] {
 			out = append(out, c)
 		}
 	}

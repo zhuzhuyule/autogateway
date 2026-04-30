@@ -2,7 +2,10 @@ package proxy
 
 import (
 	"encoding/json"
+	"io"
+	"net/http"
 	"reflect"
+	"strings"
 	"testing"
 
 	"autogateway/internal/models"
@@ -107,5 +110,29 @@ func TestApplyOverridesEmptyBody(t *testing.T) {
 	out, err := ps.applyParamOverrides([]byte(""), g)
 	if err != nil || !reflect.DeepEqual(out, []byte("")) {
 		t.Errorf("empty body should pass through unchanged: %v %v", out, err)
+	}
+}
+
+func TestShouldValidateJSONSuccess(t *testing.T) {
+	if !shouldValidateJSONSuccess("/proxy/openai/v1/chat/completions", false) {
+		t.Fatalf("expected chat completions to require JSON validation")
+	}
+	if shouldValidateJSONSuccess("/proxy/openai/v1/chat/completions", true) {
+		t.Fatalf("expected streaming responses to skip JSON validation")
+	}
+	if shouldValidateJSONSuccess("/proxy/openai/v1/models", false) {
+		t.Fatalf("expected models endpoint to skip chat JSON validation")
+	}
+}
+
+func TestValidateJSONSuccessResponseRejectsHTML(t *testing.T) {
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/html; charset=utf-8"}},
+		Body:       io.NopCloser(strings.NewReader("<html></html>")),
+	}
+
+	if err := validateJSONSuccessResponse(resp); err == nil {
+		t.Fatalf("expected HTML success response to be rejected")
 	}
 }

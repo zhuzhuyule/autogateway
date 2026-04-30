@@ -70,19 +70,17 @@ func (ch *OpenAIResponseChannel) ExtractModel(c *gin.Context, bodyBytes []byte) 
 	return ""
 }
 
-func (ch *OpenAIResponseChannel) ValidateKey(ctx context.Context, apiKey *models.APIKey, group *models.Group) (bool, error) {
+func (ch *OpenAIResponseChannel) ValidateKey(ctx context.Context, apiKey *models.APIKey, group *models.Group) ValidateResult {
 	upstreamURL := ch.getUpstreamURL()
 	if upstreamURL == nil {
-		return false, fmt.Errorf("no upstream URL configured for channel %s", ch.Name)
+		return ValidateResult{Err: fmt.Errorf("no upstream URL configured for channel %s", ch.Name)}
 	}
 
 	endpointURL, err := url.Parse(ch.ValidationEndpoint)
 	if err != nil {
-		return false, fmt.Errorf("failed to parse validation endpoint: %w", err)
+		return ValidateResult{Err: fmt.Errorf("failed to parse validation endpoint: %w", err)}
 	}
-
-	finalURL := *upstreamURL
-	finalURL.Path = strings.TrimRight(finalURL.Path, "/") + endpointURL.Path
+	finalURL := ch.JoinUpstreamURL(upstreamURL, endpointURL.Path)
 	finalURL.RawQuery = endpointURL.RawQuery
 	reqURL := finalURL.String()
 
@@ -92,12 +90,12 @@ func (ch *OpenAIResponseChannel) ValidateKey(ctx context.Context, apiKey *models
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
-		return false, fmt.Errorf("failed to marshal validation payload: %w", err)
+		return ValidateResult{URL: reqURL, Err: fmt.Errorf("failed to marshal validation payload: %w", err)}
 	}
 
 	req, err := http.NewRequestWithContext(ctx, "POST", reqURL, bytes.NewBuffer(body))
 	if err != nil {
-		return false, fmt.Errorf("failed to create validation request: %w", err)
+		return ValidateResult{URL: reqURL, Err: fmt.Errorf("failed to create validation request: %w", err)}
 	}
 	req.Header.Set("Authorization", "Bearer "+apiKey.KeyValue)
 	req.Header.Set("Content-Type", "application/json")
@@ -109,20 +107,27 @@ func (ch *OpenAIResponseChannel) ValidateKey(ctx context.Context, apiKey *models
 
 	resp, err := ch.HTTPClient.Do(req)
 	if err != nil {
-		return false, fmt.Errorf("failed to send validation request: %w", err)
+		return ValidateResult{URL: reqURL, Err: fmt.Errorf("failed to send validation request: %w", err)}
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		return true, nil
+		return ValidateResult{IsValid: true, StatusCode: resp.StatusCode, URL: reqURL}
 	}
 
-	errorBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return false, fmt.Errorf("key is invalid (status %d), but failed to read error body: %w", resp.StatusCode, err)
+	errorBody, readErr := io.ReadAll(resp.Body)
+	if readErr != nil {
+		return ValidateResult{
+			StatusCode: resp.StatusCode,
+			URL:        reqURL,
+			Err:        fmt.Errorf("key is invalid (status %d), but failed to read error body: %w", resp.StatusCode, readErr),
+		}
 	}
 
 	parsedError := app_errors.ParseUpstreamError(errorBody)
-
-	return false, fmt.Errorf("[status %d] %s", resp.StatusCode, parsedError)
+	return ValidateResult{
+		StatusCode: resp.StatusCode,
+		URL:        reqURL,
+		Err:        fmt.Errorf("[status %d at %s] %s", resp.StatusCode, reqURL, parsedError),
+	}
 }

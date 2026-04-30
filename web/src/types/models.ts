@@ -169,7 +169,7 @@ export interface RequestLog {
   duration_ms: number;
   error_message: string;
   user_agent: string;
-  request_type: "retry" | "final";
+  request_type: "retry" | "final" | "test";
   group_name?: string;
   parent_group_name?: string;
   key_value?: string;
@@ -204,7 +204,7 @@ export interface LogFilter {
   error_contains?: string;
   start_time?: string | null;
   end_time?: string | null;
-  request_type?: "retry" | "final";
+  request_type?: "retry" | "final" | "test";
 }
 
 export interface DashboardStats {
