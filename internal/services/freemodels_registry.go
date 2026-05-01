@@ -26,10 +26,15 @@ import (
 )
 
 const (
-	// view=all 比 view=free 多收录 trial 模型 (Gitee 体验模式 11 个)
-	// 和 paid 模型. isFree 标志位决定是否免费, freeTier 区分 full/trial.
-	// 拉 all 才能让前端正确识别这三态.
-	freeModelsURL          = "https://ofind.cn/FreeModels/data/views/all/models.json"
+	// 选 data/models.json 而不是 data/views/all/models.json:
+	// 两者 data 完全相同 (全量 563 条), 但只有聚合根 models.json 顶层带
+	// `providers` map (含每家 provider 的 apiBaseUrl / channelType 等元
+	// 数据), 视图文件没有. 我们要用 providerMeta 做 host 反查关联,
+	// 必须拉聚合根.
+	//
+	// view=all 语义保留: isFree 区分 free/paid, freeTier 区分 full/trial,
+	// 三态识别全在解析层完成 (parseUpstream).
+	freeModelsURL          = "https://ofind.cn/FreeModels/data/models.json"
 	freeModelsRefreshEvery = 6 * time.Hour
 	freeModelsCachePath    = "data/freemodels-cache.json"
 	freeModelsHTTPTimeout  = 15 * time.Second
@@ -61,38 +66,66 @@ type FreeModelMeta struct {
 	Metadata         map[string]interface{} `json:"metadata,omitempty"` // provider 原生 meta, 含 gitee 的 isExperienceable / isFullyFree / freeUse 等
 }
 
+// FreeProviderMeta 是单个 provider 的元数据 (从 FreeModels providerMeta
+// map 解析而来). 让 api-center 能直接拿到 baseUrl / channelType, 不再
+// 在前端 freeProviders.ts 重复维护一份.
+type FreeProviderMeta struct {
+	Name          string `json:"name"`
+	DisplayName   string `json:"displayName"`
+	Website       string `json:"website,omitempty"`
+	LogoURL       string `json:"logoUrl,omitempty"`
+	APIBaseURL    string `json:"apiBaseUrl,omitempty"`    // 反查锚点; 派生 host 跟用户分组 upstream 比较
+	ChannelType   string `json:"channelType,omitempty"`   // openai / anthropic / gemini
+	PriceCurrency string `json:"priceCurrency,omitempty"` // USD / CNY (原本 per-model, 已上提)
+	PriceUnit     string `json:"priceUnit,omitempty"`     // per_million_tokens
+}
+
 // freeModelsEnvelope is the **outward** shape we serve to the frontend
 // (kept camelCase + legacy field names so frontend stays decoupled from
 // upstream schema drift). 内部解析见 upstreamEnvelope.
 type freeModelsEnvelope struct {
-	View        string          `json:"view"`
-	UpdatedAt   string          `json:"updatedAt"`
-	TotalModels int             `json:"totalModels"`
-	Models      []FreeModelMeta `json:"models"`
+	View         string                      `json:"view"`
+	UpdatedAt    string                      `json:"updatedAt"`
+	TotalModels  int                         `json:"totalModels"`
+	Models       []FreeModelMeta             `json:"models"`
+	ProviderMeta map[string]FreeProviderMeta `json:"providerMeta,omitempty"`
 }
 
 // upstreamEnvelope mirrors the OpenAI-compatible schema served by
-// https://ofind.cn/FreeModels/data/views/all/models.json — switched to
-// snake_case + {object, total, data} in 2026-04. We parse it here and
-// remap into our stable FreeModelMeta shape so any further upstream
-// schema changes only touch this file.
+// https://ofind.cn/FreeModels/data/models.json — snake_case +
+// {object, total, data, providers}. We parse it here and remap into
+// our stable FreeModelMeta shape so any further upstream schema changes
+// only touch this file.
+//
+// 2026-05 schema 调整:
+//   - model 上的 object / model_id / owned_by / price_currency / price_unit 已上游删除
+//   - providerMeta 顶层新增 apiBaseUrl / channelType / priceCurrency / priceUnit
 type upstreamEnvelope struct {
-	Object    string          `json:"object"`
-	View      string          `json:"view"`
-	UpdatedAt string          `json:"updated_at"`
-	Total     int             `json:"total"`
-	Data      []upstreamModel `json:"data"`
+	Object    string                          `json:"object"`
+	View      string                          `json:"view"`
+	UpdatedAt string                          `json:"updated_at"`
+	Total     int                             `json:"total"`
+	Providers map[string]upstreamProviderMeta `json:"providers"`
+	Data      []upstreamModel                 `json:"data"`
+}
+
+type upstreamProviderMeta struct {
+	Name          string `json:"name"`
+	DisplayName   string `json:"displayName"`
+	Website       string `json:"website"`
+	LogoURL       string `json:"logoUrl"`
+	APIBaseURL    string `json:"apiBaseUrl"`
+	ChannelType   string `json:"channelType"`
+	PriceCurrency string `json:"priceCurrency"`
+	PriceUnit     string `json:"priceUnit"`
 }
 
 type upstreamModel struct {
-	ID            string   `json:"id"`              // "<provider>/<rawId>"
-	ModelID       string   `json:"model_id"`        // 同 ID, 备用
-	OwnedBy       string   `json:"owned_by"`        // provider 名
-	Provider      string   `json:"provider"`
+	ID            string   `json:"id"`       // "<provider>/<rawId>"
+	Provider      string   `json:"provider"` // owned_by 已删除 (≡ provider)
 	Name          string   `json:"name"`
 	ContextSize   int      `json:"context_size"`
 	ContextLabel  string   `json:"context_label"`
-	PriceCurrency string   `json:"price_currency"`
 	PriceInput    float64  `json:"price_input"`
 	PriceOutput   float64  `json:"price_output"`
 	IsFree        bool     `json:"is_free"`
@@ -109,22 +142,27 @@ type upstreamModel struct {
 }
 
 // FreeModelsRegistry holds an in-memory copy of the upstream registry,
-// indexed by both `(provider, modelId)` and bare `modelId` (lowercase).
+// indexed by `(provider, modelId)`, bare `modelId`, and api host (for
+// reverse-lookup from a user's group baseUrl → providerId).
 type FreeModelsRegistry struct {
-	mu          sync.RWMutex
-	envelope    freeModelsEnvelope
-	byProvMod   map[string]*FreeModelMeta // key: "<provider>/<lower-modelId>"
-	byModelOnly map[string][]*FreeModelMeta
-	stopCh      chan struct{}
-	httpClient  *http.Client
+	mu             sync.RWMutex
+	envelope       freeModelsEnvelope
+	byProvMod      map[string]*FreeModelMeta    // key: "<provider>/<lower-modelId>"
+	byModelOnly    map[string][]*FreeModelMeta
+	byHost         map[string]string            // host (lowercase) → providerId
+	providerByName map[string]*FreeProviderMeta // providerId → meta
+	stopCh         chan struct{}
+	httpClient     *http.Client
 }
 
 func NewFreeModelsRegistry() *FreeModelsRegistry {
 	return &FreeModelsRegistry{
-		byProvMod:   make(map[string]*FreeModelMeta),
-		byModelOnly: make(map[string][]*FreeModelMeta),
-		stopCh:      make(chan struct{}),
-		httpClient:  &http.Client{Timeout: freeModelsHTTPTimeout},
+		byProvMod:      make(map[string]*FreeModelMeta),
+		byModelOnly:    make(map[string][]*FreeModelMeta),
+		byHost:         make(map[string]string),
+		providerByName: make(map[string]*FreeProviderMeta),
+		stopCh:         make(chan struct{}),
+		httpClient:     &http.Client{Timeout: freeModelsHTTPTimeout},
 	}
 }
 
@@ -206,18 +244,31 @@ func (r *FreeModelsRegistry) fetchAndStore(ctx context.Context) error {
 }
 
 // parseUpstream 解析 FreeModels CDN 当前的 OpenAI-compat schema
-// (snake_case + {object, total, data} 包装) 转换成我们对外稳定的
-// camelCase envelope. 上游 schema 漂移只需改这一个函数.
+// (snake_case + {object, total, data, providers} 包装) 转换成我们对外
+// 稳定的 camelCase envelope. 上游 schema 漂移只需改这一个函数.
 func parseUpstream(body []byte) (freeModelsEnvelope, error) {
 	var up upstreamEnvelope
 	if err := json.Unmarshal(body, &up); err != nil {
 		return freeModelsEnvelope{}, err
 	}
 	out := freeModelsEnvelope{
-		View:        up.View,
-		UpdatedAt:   up.UpdatedAt,
-		TotalModels: up.Total,
-		Models:      make([]FreeModelMeta, 0, len(up.Data)),
+		View:         up.View,
+		UpdatedAt:    up.UpdatedAt,
+		TotalModels:  up.Total,
+		Models:       make([]FreeModelMeta, 0, len(up.Data)),
+		ProviderMeta: make(map[string]FreeProviderMeta, len(up.Providers)),
+	}
+	for name, p := range up.Providers {
+		out.ProviderMeta[name] = FreeProviderMeta{
+			Name:          p.Name,
+			DisplayName:   p.DisplayName,
+			Website:       p.Website,
+			LogoURL:       p.LogoURL,
+			APIBaseURL:    p.APIBaseURL,
+			ChannelType:   p.ChannelType,
+			PriceCurrency: p.PriceCurrency,
+			PriceUnit:     p.PriceUnit,
+		}
 	}
 	for _, u := range up.Data {
 		// is_free + free_mechanism + trial_scope 决定 freeTier:
@@ -244,17 +295,11 @@ func parseUpstream(body []byte) (freeModelsEnvelope, error) {
 			freeTier = "trial"
 			isExperienceable = true
 		}
-		modelID := u.ModelID
-		if modelID == "" {
-			modelID = u.ID
-		}
-		provider := u.Provider
-		if provider == "" {
-			provider = u.OwnedBy
-		}
+		// model_id / owned_by 已从上游 schema 删除 (与 id / provider 100% 重复).
+		// 直接用 id 作为 modelID, provider 作为 provider.
 		out.Models = append(out.Models, FreeModelMeta{
-			Provider:         provider,
-			ModelID:          modelID,
+			Provider:         u.Provider,
+			ModelID:          u.ID,
 			Name:             u.Name,
 			IsFree:           isFree,
 			IsExperienceable: isExperienceable,
@@ -291,11 +336,51 @@ func (r *FreeModelsRegistry) replaceIndex(env freeModelsEnvelope) {
 		bare := strings.ToLower(m.ModelID)
 		byModelOnly[bare] = append(byModelOnly[bare], m)
 	}
+	// 从 providerMeta.apiBaseUrl 派生 host → providerId 索引, 让前端反查
+	// 用户分组 upstream URL 时能在 O(1) 命中. 缺 apiBaseUrl 的 provider
+	// (e.g. cloudflare 的 account_id 路径) 不进表, 由前端 fallback 走
+	// freeProviders.ts.upstreamHosts 兜底.
+	byHost := make(map[string]string, len(env.ProviderMeta))
+	providerByName := make(map[string]*FreeProviderMeta, len(env.ProviderMeta))
+	for name, meta := range env.ProviderMeta {
+		m := meta
+		providerByName[name] = &m
+		host := extractHost(meta.APIBaseURL)
+		if host != "" {
+			byHost[host] = name
+		}
+	}
 	r.mu.Lock()
 	r.envelope = env
 	r.byProvMod = byProvMod
 	r.byModelOnly = byModelOnly
+	r.byHost = byHost
+	r.providerByName = providerByName
 	r.mu.Unlock()
+}
+
+// extractHost parses a URL and returns its lowercase host, or "" on parse
+// failure / empty input. Mirrors the frontend extractHost helper.
+func extractHost(rawURL string) string {
+	if rawURL == "" {
+		return ""
+	}
+	// 简单解析: 跳过 scheme, 切到首个 '/' 或 '?' 之前.
+	s := rawURL
+	if i := strings.Index(s, "://"); i >= 0 {
+		s = s[i+3:]
+	}
+	for i, c := range s {
+		if c == '/' || c == '?' || c == '#' {
+			s = s[:i]
+			break
+		}
+	}
+	// 去掉端口
+	if i := strings.Index(s, ":"); i >= 0 {
+		s = s[:i]
+	}
+	return strings.ToLower(s)
 }
 
 func (r *FreeModelsRegistry) loadFromDisk() error {
@@ -369,6 +454,37 @@ func (r *FreeModelsRegistry) Lookup(provider, modelID string) *FreeModelMeta {
 		return list[0]
 	}
 	return nil
+}
+
+// LookupProviderByHost reverse-resolves a host (e.g. "api.groq.com") to the
+// FreeModels provider id ("groq") + its meta. Returns ("", nil, false) on miss.
+// Frontend findProviderByUpstreamUrl uses this as the primary lookup before
+// falling back to local freeProviders.ts.upstreamHosts.
+func (r *FreeModelsRegistry) LookupProviderByHost(host string) (string, *FreeProviderMeta, bool) {
+	if host == "" {
+		return "", nil, false
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	id, ok := r.byHost[strings.ToLower(host)]
+	if !ok {
+		return "", nil, false
+	}
+	meta, mok := r.providerByName[id]
+	if !mok {
+		return id, nil, true
+	}
+	return id, meta, true
+}
+
+// LookupProviderMeta returns the meta for a known provider id, or nil.
+func (r *FreeModelsRegistry) LookupProviderMeta(providerID string) *FreeProviderMeta {
+	if providerID == "" {
+		return nil
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.providerByName[providerID]
 }
 
 // Snapshot returns the entire envelope (for the /api/freemodels/registry handler).

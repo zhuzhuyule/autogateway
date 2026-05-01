@@ -28,11 +28,31 @@ export interface FreeModelMeta {
   tags: string[];
 }
 
+/**
+ * Provider 元数据 — 跟模型列表分开存, per-provider 唯一字段都聚在这里.
+ * 让 api-center 能从 FreeModels 直接拿 baseUrl / channelType, 不再在
+ * 本地 freeProviders.ts 重复维护 (本地表降级为 fallback).
+ */
+export interface FreeProviderMeta {
+  name: string;
+  displayName: string;
+  website?: string;
+  logoUrl?: string;
+  /** 推荐 API base URL, 派生 host 用于反查关联用户分组 upstream. */
+  apiBaseUrl?: string;
+  /** 决定下游网关用哪种 channel 适配. */
+  channelType?: "openai" | "anthropic" | "gemini";
+  priceCurrency?: "USD" | "CNY";
+  priceUnit?: "per_million_tokens";
+}
+
 export interface FreeModelsEnvelope {
   view: string;
   updatedAt: string;
   totalModels: number;
   models: FreeModelMeta[];
+  /** 后端 2026-05 起会下发, 旧 cache 没有此字段时降级走本地 fallback. */
+  providerMeta?: Record<string, FreeProviderMeta>;
 }
 
 const STORAGE_KEY = "freemodels-registry-v1";
@@ -110,12 +130,14 @@ export function expandProviderAliases(providerId: string): string[] {
 // 时 Vue 看不到 Map 内容变化, 即使触发了 ref 依赖也用的是旧索引。
 // byProvMod:  "<freemodels-provider>/<bareId>" 和 "<aliased-provider>/<bareId>"
 // byBareModel: 裸 modelId → meta list (不知 provider 时回退)
+// byHost:     host (lowercase) → providerId, 从 providerMeta.apiBaseUrl 派生
 const indexCache = computed(() => {
   const byProvMod = new Map<string, FreeModelMeta>();
   const byBareModel = new Map<string, FreeModelMeta[]>();
+  const byHost = new Map<string, string>();
   const env = freeModelsRef.value;
   if (!env || !env.models) {
-    return { byProvMod, byBareModel };
+    return { byProvMod, byBareModel, byHost };
   }
   for (const m of env.models) {
     const bare = bareModelId(m.modelId, m.provider).toLowerCase();
@@ -129,8 +151,64 @@ const indexCache = computed(() => {
     }
     byBareModel.get(bare)!.push(m);
   }
-  return { byProvMod, byBareModel };
+  if (env.providerMeta) {
+    for (const [providerId, meta] of Object.entries(env.providerMeta)) {
+      const host = extractHostFromUrl(meta.apiBaseUrl);
+      if (host) {
+        byHost.set(host, providerId);
+      }
+    }
+  }
+  return { byProvMod, byBareModel, byHost };
 });
+
+/** 从 URL 提 host (lowercase). 解析失败返回 "". */
+function extractHostFromUrl(url: string | undefined): string {
+  if (!url) {
+    return "";
+  }
+  try {
+    return new URL(url).host.toLowerCase();
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * 用 host (e.g. "api.groq.com") 反查 FreeModels providerId (e.g. "groq").
+ * 让 freeProviders.ts.findProviderByUpstreamUrl 能优先走 registry,
+ * 不必在本地表持续维护 upstreamHosts[].
+ *
+ * 数据未到位时返回 undefined, caller 走本地 fallback.
+ */
+export function lookupProviderIdByHost(host: string): string | undefined {
+  if (!host) {
+    return undefined;
+  }
+  const { byHost } = indexCache.value;
+  if (!freeModelsRef.value) {
+    void loadFreeModelsRegistry();
+  }
+  return byHost.get(host.toLowerCase());
+}
+
+/** 拿到 provider 的推荐 API base URL (建组流程默认填充 / 展示用). */
+export function getProviderApiBaseUrl(providerId: string): string | undefined {
+  if (!providerId) {
+    return undefined;
+  }
+  const env = freeModelsRef.value;
+  return env?.providerMeta?.[providerId]?.apiBaseUrl;
+}
+
+/** 拿 provider 的完整元数据 (channelType / displayName / etc.). */
+export function getProviderMeta(providerId: string): FreeProviderMeta | undefined {
+  if (!providerId) {
+    return undefined;
+  }
+  const env = freeModelsRef.value;
+  return env?.providerMeta?.[providerId];
+}
 
 export function lookupRegistry(provider: string | undefined, modelId: string): FreeModelMeta | null {
   if (!modelId) {

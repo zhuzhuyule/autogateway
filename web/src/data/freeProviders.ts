@@ -7,7 +7,7 @@
 // 提供运行时聚合的免费模型数据,优先级高于本文件的静态 FREE_MODELS 清单。
 // 见 isFree() 内的 Tier 0 查询。
 
-import { isFreeFromRegistry } from "@/api/freemodels";
+import { getProviderMeta, isFreeFromRegistry, lookupProviderIdByHost } from "@/api/freemodels";
 
 export type ChannelType = "openai" | "openai-response" | "gemini" | "anthropic";
 
@@ -663,7 +663,55 @@ export function findProviderByUpstreamUrl(url: string): FreeProvider | undefined
   if (!host) {
     return undefined;
   }
+  // 1) Registry 优先: FreeModels providerMeta 由 host 反查 providerId.
+  //    匹配上时, 用本地 entry (有更全的 testModel/upstreamHosts/badge 等) 兜
+  //    回, 没本地 entry 时合成最小 FreeProvider 让 UI 仍能显示 displayName.
+  //    设计目的: FreeModels 加新 provider 后 api-center 自动认得, 不必手
+  //    动同步 upstreamHosts[].
+  const providerId = lookupProviderIdByHost(host);
+  if (providerId) {
+    const local = FREE_PROVIDERS.find(p => p.id === providerId);
+    if (local) {
+      return local;
+    }
+    // FreeModels 已收录但本地 entry 缺失: 用 registry meta 合成最小占位,
+    // 至少让"是不是认得这个分组"层面回答正确. 真要建组操作仍需补本地 entry.
+    const meta = getProviderMeta(providerId);
+    if (meta) {
+      return synthesizeProviderFromMeta(providerId, meta);
+    }
+  }
+  // 2) Fallback: 本地 freeProviders.ts.upstreamHosts (FreeModels 没覆盖
+  //    的 13 家国内 provider 走这条路 — siliconflow / llm7 / kilo 等).
   return FREE_PROVIDERS.find(p => p.upstreamHosts.some(h => h.toLowerCase() === host));
+}
+
+/**
+ * 当 FreeModels 已收录但本地 freeProviders.ts 缺 entry 时, 用 registry
+ * 元数据合成一个"最小可用" FreeProvider, 让分组识别 / 展示链接不至于报
+ * "未知 provider". 字段不全 (无 testModel / models[] / 限额信息), 真要建
+ * 组操作仍建议在 freeProviders.ts 补完整 entry.
+ */
+function synthesizeProviderFromMeta(
+  providerId: string,
+  meta: { displayName: string; website?: string; apiBaseUrl?: string; channelType?: "openai" | "anthropic" | "gemini" }
+): FreeProvider {
+  return {
+    id: providerId,
+    name: meta.displayName,
+    freeTier: "见 FreeModels Registry",
+    description: "",
+    signupUrl: meta.website || "",
+    docsUrl: meta.website || "",
+    channelType: meta.channelType || "openai",
+    baseUrl: meta.apiBaseUrl || "",
+    testModel: "",
+    models: [],
+    recommendedGroupName: providerId,
+    recommendedDisplayName: meta.displayName,
+    upstreamHosts: meta.apiBaseUrl ? [extractHost(meta.apiBaseUrl)].filter(Boolean) : [],
+    verifiedAt: "",
+  };
 }
 
 export function findProviderByUpstreams(
