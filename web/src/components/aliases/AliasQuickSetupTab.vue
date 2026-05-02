@@ -1,17 +1,24 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
-import { NInput, NSpin, useMessage } from "naive-ui";
+import { useRouter, useRoute } from "vue-router";
+import { NInput, NModal, NSpin, useMessage } from "naive-ui";
 import { useI18n } from "vue-i18n";
 import { dedupApi, type DedupFamily, type DedupModelEntry } from "@/api/dedup";
 import FamilyAccordion from "./quick/FamilyAccordion.vue";
 import ExistingAliasesPanel from "./quick/ExistingAliasesPanel.vue";
+import SubmitActionBar from "./quick/SubmitActionBar.vue";
 
 const { t } = useI18n();
 const message = useMessage();
+const router = useRouter();
+const route = useRoute();
 
 const loading = ref(false);
 const families = ref<DedupFamily[]>([]);
 const searchQuery = ref("");
+const submitting = ref(false);
+const failureModalOpen = ref(false);
+const failures = ref<string[]>([]);
 
 const selected = ref(new Map<string, DedupModelEntry>());
 function entryKey(e: DedupModelEntry): string {
@@ -42,6 +49,39 @@ async function load() {
 
 function onClickAlias(alias: string) {
   targetAlias.value = targetAlias.value === alias ? null : alias;
+}
+
+async function onSubmit({ alias, entries }: { alias: string; entries: DedupModelEntry[] }) {
+  submitting.value = true;
+  try {
+    const res = await dedupApi.create({
+      alias,
+      candidates: entries.map(e => ({ group_id: e.group_id, real_model: e.real_model })),
+    });
+    if (res.created > 0 && res.failures.length === 0) {
+      message.success(t("aliases.quick.createdN", { n: res.created }));
+      router.replace({
+        query: { ...route.query, tab: "manage", highlight: alias },
+      });
+    } else if (res.created > 0) {
+      message.warning(
+        t("aliases.quick.partialFailures", { ok: res.created, fail: res.failures.length }),
+      );
+      failures.value = res.failures;
+      failureModalOpen.value = true;
+    } else {
+      message.error(t("common.requestFailed", { status: "" }));
+      failures.value = res.failures;
+      failureModalOpen.value = true;
+    }
+    await load();
+    selected.value = new Map();
+    targetAlias.value = null;
+  } catch {
+    message.error(t("common.requestFailed", { status: "" }));
+  } finally {
+    submitting.value = false;
+  }
 }
 
 onMounted(load);
@@ -86,6 +126,21 @@ const selectionCount = computed(() => selected.value.size);
         </div>
       </div>
     </NSpin>
+
+    <SubmitActionBar
+      :selected="selected"
+      :target-alias="targetAlias"
+      :submitting="submitting"
+      @submit="onSubmit"
+    />
+
+    <NModal v-model:show="failureModalOpen" preset="dialog" :title="t('aliases.quick.failureModalTitle')">
+      <ul style="padding-left: 20px; margin: 0; max-height: 260px; overflow-y: auto">
+        <li v-for="(f, i) in failures" :key="i" style="font: 500 12px var(--v3-mono); margin: 4px 0">
+          {{ f }}
+        </li>
+      </ul>
+    </NModal>
   </div>
 </template>
 

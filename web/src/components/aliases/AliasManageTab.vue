@@ -45,11 +45,30 @@ import {
   useMessage,
 } from "naive-ui";
 import { computed, onMounted, ref, watch } from "vue";
+import { useRoute, useRouter } from "vue-router";
 import { useI18n } from "vue-i18n";
 
 const { t } = useI18n();
 const message = useMessage();
 const dialog = useDialog();
+const route = useRoute();
+const router = useRouter();
+const highlightAlias = ref<string | null>(null);
+
+watch(
+  () => route.query.highlight,
+  raw => {
+    const a = typeof raw === "string" ? raw : null;
+    if (!a) return;
+    highlightAlias.value = a;
+    setTimeout(() => {
+      highlightAlias.value = null;
+      const { highlight: _drop, ...rest } = route.query;
+      router.replace({ query: rest });
+    }, 1500);
+  },
+  { immediate: true },
+);
 
 const loading = ref(false);
 const rows = ref<ModelAliasRow[]>([]);
@@ -853,7 +872,11 @@ function saveSettingsThrottled() {
 
     <!-- Tier Board (Grid Mode) -->
     <div class="v5-alias-grid" style="margin-bottom: 20px">
-      <div v-for="tier in tiers" :key="tier.id" :class="['v3-tier', tier.class]">
+      <div
+        v-for="tier in tiers"
+        :key="tier.id"
+        :class="['v3-tier', tier.class, { 'v5-alias-card--glow': tier.id === highlightAlias }]"
+      >
         <div class="v3-tier__band" />
         <div class="v3-tier__head">
           <div class="v3-tier__head-main" style="align-items: center">
@@ -956,7 +979,10 @@ function saveSettingsThrottled() {
           v-for="grp in customAliases"
           :key="grp.alias"
           class="v3-tier"
-          :class="{ 'v5-alias-card--reserved': grp.isReserved }"
+          :class="{
+            'v5-alias-card--reserved': grp.isReserved,
+            'v5-alias-card--glow': grp.alias === highlightAlias,
+          }"
         >
           <div class="v3-tier__band" />
           <div class="v3-tier__head">
@@ -1886,5 +1912,14 @@ function saveSettingsThrottled() {
 .v5-suggest-chip__pill--append {
   color: var(--v3-warn);
   background: oklch(from var(--v3-warn) l c h / 0.12);
+}
+@keyframes v5-alias-glow {
+  0% { box-shadow: 0 0 0 0 var(--v3-accent); }
+  50% { box-shadow: 0 0 0 6px var(--v3-accent-soft); }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+.v5-alias-card--glow {
+  animation: v5-alias-glow 1.5s ease-out 1;
+  border-color: var(--v3-accent) !important;
 }
 </style>
