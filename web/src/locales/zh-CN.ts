@@ -755,6 +755,23 @@ export default {
   aliases: {
     tabManage: "管理",
     tabQuick: "快速整理",
+    quick: {
+      searchPlaceholder: "搜索模型 / 家族,如 OSS-120 / claude",
+      familyMeta: "{n} 模型 · {g} 组",
+      otherFamily: "其他模型",
+      selectionEmpty: "尚未选择模型",
+      selectionCount: "已选 {n} 项",
+      createButton: "创建别名: {family}",
+      appendButton: "追加到 {alias}",
+      nameRequired: "请输入别名名称",
+      selectAtLeastOne: "至少选择一个模型",
+      createdN: "已添加 {n} 条",
+      partialFailures: "成功 {ok} / 失败 {fail}",
+      failureModalTitle: "未成功的行",
+      loadFailed: "加载候选模型失败",
+      aliasChipPrefix: "属于",
+      targetCardHint: "点击切换为追加目标",
+    },
   },
   v3: {
     operations: "运营总览",

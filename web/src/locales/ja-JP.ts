@@ -775,6 +775,23 @@ export default {
   aliases: {
     tabManage: "管理",
     tabQuick: "クイック設定",
+    quick: {
+      searchPlaceholder: "モデル / ファミリーを検索 (OSS-120, claude…)",
+      familyMeta: "{n} モデル · {g} グループ",
+      otherFamily: "その他のモデル",
+      selectionEmpty: "未選択",
+      selectionCount: "{n} 件選択",
+      createButton: "別名を作成: {family}",
+      appendButton: "{alias} に追加",
+      nameRequired: "別名を入力してください",
+      selectAtLeastOne: "1 件以上選択してください",
+      createdN: "{n} 件追加しました",
+      partialFailures: "成功 {ok} / 失敗 {fail}",
+      failureModalTitle: "失敗した行",
+      loadFailed: "候補モデルの読み込みに失敗",
+      aliasChipPrefix: "所属",
+      targetCardHint: "クリックして追加先に設定",
+    },
   },
   v3: {
     operations: "オペレーション",

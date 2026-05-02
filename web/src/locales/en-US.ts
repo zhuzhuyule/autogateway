@@ -776,6 +776,23 @@ export default {
   aliases: {
     tabManage: "Manage",
     tabQuick: "Quick Setup",
+    quick: {
+      searchPlaceholder: "Search models or families, e.g. OSS-120 / claude",
+      familyMeta: "{n} models · {g} groups",
+      otherFamily: "Other models",
+      selectionEmpty: "No models selected",
+      selectionCount: "{n} selected",
+      createButton: "Create alias: {family}",
+      appendButton: "Append to {alias}",
+      nameRequired: "Enter an alias name",
+      selectAtLeastOne: "Select at least one model",
+      createdN: "Added {n} entries",
+      partialFailures: "Succeeded {ok} / Failed {fail}",
+      failureModalTitle: "Failed rows",
+      loadFailed: "Failed to load candidate models",
+      aliasChipPrefix: "in",
+      targetCardHint: "Click to set as append target",
+    },
   },
   v3: {
     operations: "Operations",
