@@ -44,9 +44,9 @@ const routes: Array<RouteRecordRaw> = [
         component: () => import("@/views/ModelCatalog.vue"),
       },
       {
+        // Legacy route alias: /model-dedup folded into the Aliases "快速整理" tab.
         path: "model-dedup",
-        name: "model-dedup",
-        component: () => import("@/views/ModelDedup.vue"),
+        redirect: { path: "/aliases", query: { tab: "quick" } },
       },
     ],
   },

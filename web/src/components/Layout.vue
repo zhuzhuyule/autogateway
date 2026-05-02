@@ -12,7 +12,6 @@ import {
   CubeOutline,
   PulseOutline,
   SettingsOutline,
-  CopyOutline,
   MenuOutline,
   CloseOutline,
   BookOutline,
@@ -46,7 +45,6 @@ const railItems = computed(() => [
   },
   { name: "aliases", icon: GitBranchOutline, tip: t("nav.aliases") },
   { name: "model-catalog", icon: CubeOutline, tip: t("nav.modelCatalog") },
-  { name: "model-dedup", icon: CopyOutline, tip: t("nav.modelDedup") },
   { name: "logs", icon: PulseOutline, tip: t("nav.logs") },
 ]);
 
