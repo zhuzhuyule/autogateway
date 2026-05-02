@@ -792,6 +792,7 @@ export default {
       loadFailed: "Failed to load candidate models",
       aliasChipPrefix: "in",
       targetCardHint: "Click to set as append target",
+      panelHeader: "Existing aliases",
     },
   },
   v3: {

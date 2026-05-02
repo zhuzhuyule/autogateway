@@ -791,6 +791,7 @@ export default {
       loadFailed: "候補モデルの読み込みに失敗",
       aliasChipPrefix: "所属",
       targetCardHint: "クリックして追加先に設定",
+      panelHeader: "既存の別名",
     },
   },
   v3: {

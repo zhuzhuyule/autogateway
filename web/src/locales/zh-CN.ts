@@ -771,6 +771,7 @@ export default {
       loadFailed: "加载候选模型失败",
       aliasChipPrefix: "属于",
       targetCardHint: "点击切换为追加目标",
+      panelHeader: "已存在别名",
     },
   },
   v3: {

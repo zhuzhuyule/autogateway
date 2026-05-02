@@ -4,6 +4,7 @@ import { NInput, NSpin, useMessage } from "naive-ui";
 import { useI18n } from "vue-i18n";
 import { dedupApi, type DedupFamily, type DedupModelEntry } from "@/api/dedup";
 import FamilyAccordion from "./quick/FamilyAccordion.vue";
+import ExistingAliasesPanel from "./quick/ExistingAliasesPanel.vue";
 
 const { t } = useI18n();
 const message = useMessage();
@@ -77,9 +78,11 @@ const selectionCount = computed(() => selected.value.size);
           />
         </div>
         <div class="qsetup__side">
-          <div style="padding: 16px; color: var(--v3-ink-4); font-size: 12px">
-            (右栏 — Task 7)
-          </div>
+          <ExistingAliasesPanel
+            :families="families"
+            :target-alias="targetAlias"
+            @select="(a) => (targetAlias = a)"
+          />
         </div>
       </div>
     </NSpin>
