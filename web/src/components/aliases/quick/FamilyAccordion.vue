@@ -28,16 +28,40 @@ const expanded = ref<Record<string, boolean>>({});
 function toggleFamily(fam: string) {
   expanded.value[fam] = !expanded.value[fam];
 }
+
+// Initial / reload defaults: only fill in unknown families. Preserve any
+// state the user has already toggled, so submit→reload doesn't reset folds.
 watch(
   () => props.families,
   fams => {
-    const next: Record<string, boolean> = {};
-    for (const f of fams) next[f.family] = f.group_count > 1;
+    const next: Record<string, boolean> = { ...expanded.value };
+    for (const f of fams) {
+      if (next[f.family] === undefined) {
+        next[f.family] = f.group_count > 1;
+      }
+    }
     expanded.value = next;
   },
   { immediate: true },
 );
 
+// Search-hit auto-expand lives in its own watcher so visibleFamilies stays pure.
+watch(
+  () => props.searchQuery,
+  q => {
+    const query = q.trim().toLowerCase();
+    if (!query) return;
+    for (const f of props.families) {
+      const famHit = f.family.toLowerCase().includes(query);
+      const modelHit = f.models.some(m => m.real_model.toLowerCase().includes(query));
+      if (famHit || modelHit) {
+        expanded.value[f.family] = true;
+      }
+    }
+  },
+);
+
+// Search-driven filter: NO side effects.
 const visibleFamilies = computed(() => {
   const q = props.searchQuery.trim().toLowerCase();
   if (!q) return props.families;
@@ -47,10 +71,8 @@ const visibleFamilies = computed(() => {
     const modelHits = f.models.filter(m => m.real_model.toLowerCase().includes(q));
     if (famHit) {
       out.push(f);
-      expanded.value[f.family] = true;
     } else if (modelHits.length > 0) {
       out.push({ ...f, models: modelHits });
-      expanded.value[f.family] = true;
     }
   }
   return out;
