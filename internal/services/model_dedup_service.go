@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -13,10 +14,11 @@ import (
 
 type ModelDedupService struct {
 	groupManager *GroupManager
+	db           *gorm.DB
 }
 
-func NewModelDedupService(groupManager *GroupManager) *ModelDedupService {
-	return &ModelDedupService{groupManager: groupManager}
+func NewModelDedupService(groupManager *GroupManager, db *gorm.DB) *ModelDedupService {
+	return &ModelDedupService{groupManager: groupManager, db: db}
 }
 
 // DedupCandidate is one (group, real_model) row that can become a ModelAlias
@@ -112,8 +114,9 @@ type DedupModelEntry struct {
 //     to available_models if the exposed list is empty (matches picker UX)
 //   - in passthrough mode: candidate set = available_models
 //   - removes anything in blocked_models
-func (s *ModelDedupService) GetModelsByFamily(db *gorm.DB) ([]DedupFamily, error) {
+func (s *ModelDedupService) GetModelsByFamily(ctx context.Context) ([]DedupFamily, error) {
 	groups := s.groupManager.GetAllGroups()
+	db := s.db.WithContext(ctx)
 
 	type entry struct {
 		groupID   uint
