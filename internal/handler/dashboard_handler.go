@@ -287,7 +287,7 @@ func (s *Server) TopModels(c *gin.Context) {
 	}
 	var rows []row
 	err := s.DB.Model(&models.RequestLog{}).
-		Select("model, COUNT(*) as calls, AVG(duration_ms) as avg_ms, SUM(CASE WHEN is_success THEN 0 ELSE 1 END) as errors").
+		Select("model, COUNT(*) as calls, AVG(duration) as avg_ms, SUM(CASE WHEN is_success THEN 0 ELSE 1 END) as errors").
 		Where("timestamp >= ? AND request_type = ? AND model IS NOT NULL AND model != ''", since, models.RequestTypeFinal).
 		Group("model").
 		Order("calls DESC").
@@ -334,6 +334,61 @@ func (s *Server) TopModels(c *gin.Context) {
 		})
 	}
 
+	response.Success(c, out)
+}
+
+// ModelTiming is one row of /api/dashboard/model-timings.
+type ModelTiming struct {
+	Model string `json:"model"`
+	AvgMs int64  `json:"avg_ms"`
+	Calls int64  `json:"calls"`
+}
+
+// ModelTimings returns avg request duration (ms) per model for the last 24h.
+// Lightweight variant of TopModels: no LIMIT, no group attribution. The
+// frontend uses the result map to decorate model cards with a "≈ X ms" chip.
+//
+// GET /api/dashboard/model-timings?window=24h
+//   - window: 1h | 6h | 24h | 7d (default 24h)
+func (s *Server) ModelTimings(c *gin.Context) {
+	window := strings.TrimSpace(c.DefaultQuery("window", "24h"))
+	var lookback time.Duration
+	switch window {
+	case "1h":
+		lookback = time.Hour
+	case "6h":
+		lookback = 6 * time.Hour
+	case "7d":
+		lookback = 7 * 24 * time.Hour
+	default:
+		lookback = 24 * time.Hour
+	}
+	since := time.Now().Add(-lookback)
+
+	type row struct {
+		Model string
+		Calls int64
+		AvgMs float64
+	}
+	var rows []row
+	err := s.DB.Model(&models.RequestLog{}).
+		Select("model, COUNT(*) as calls, AVG(duration) as avg_ms").
+		Where("timestamp >= ? AND request_type = ? AND model IS NOT NULL AND model != ''", since, models.RequestTypeFinal).
+		Group("model").
+		Scan(&rows).Error
+	if err != nil {
+		response.ErrorI18nFromAPIError(c, app_errors.ErrDatabase, "database.cannot_get_top_models")
+		return
+	}
+
+	out := make([]ModelTiming, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, ModelTiming{
+			Model: r.Model,
+			AvgMs: int64(r.AvgMs),
+			Calls: r.Calls,
+		})
+	}
 	response.Success(c, out)
 }
 

@@ -2,9 +2,12 @@
 import { findFreeModel, findProviderByUpstreams, isFree, FREE_PROVIDERS, type ModelTier } from "@/data/freeProviders";
 import { freeModelsRef, getFreeStatus, lookupRegistry } from "@/api/freemodels";
 import { keysApi } from "@/api/keys";
+import { getModelTimings, type ModelTiming } from "@/api/dashboard";
 import type { Group } from "@/types/models";
 import FreeBadge from "@/components/common/FreeBadge.vue";
 import SpeedBadge from "@/components/common/SpeedBadge.vue";
+import ProviderLogo from "@/components/common/ProviderLogo.vue";
+import { hasProviderLogo } from "@/data/providerLogos";
 import { RefreshOutline, SearchOutline } from "@vicons/ionicons5";
 import { NIcon, NSpin, useMessage } from "naive-ui";
 import { computed, onMounted, ref } from "vue";
@@ -102,6 +105,34 @@ async function loadGroups() {
   }
 }
 
+// model-timings: { model -> avg_ms } 24h 平均请求耗时.
+// 全程耗时(请求开始 → 响应完成),流式回答越长这个值越大,仅作粗略参考.
+const timingMap = ref<Record<string, number>>({});
+
+async function loadTimings() {
+  try {
+    const r = await getModelTimings("24h");
+    const list: ModelTiming[] = (r as unknown as { data: ModelTiming[] }).data || [];
+    const map: Record<string, number> = {};
+    for (const t of list) {
+      if (t?.model) map[t.model] = t.avg_ms || 0;
+    }
+    timingMap.value = map;
+  } catch {
+    /* swallow — chip is purely decorative */
+  }
+}
+
+function avgMsFor(modelId: string): number {
+  return timingMap.value[modelId] || 0;
+}
+
+function formatAvgMs(ms: number): string {
+  if (ms <= 0) return "";
+  if (ms < 1000) return `≈ ${ms} ms`;
+  return `≈ ${(ms / 1000).toFixed(1)} s`;
+}
+
 const searchText = ref("");
 const tierFilter = ref<ModelTier | "all">("all");
 const providerFilter = ref<string | "all">("all");
@@ -118,7 +149,7 @@ const authHeader = computed(() => {
 // 上游真实返回的 group.available_models 是裸 id ("glm-4-flash-250414") — 必须
 // 用裸形式做 key 才能正确去重, 否则一条模型会被显示两次.
 // 仅在 modelId 第一段 === provider 名时剥前缀, 避免误剥模型作者前缀.
-// FreeModels 内部不一致: groq/cerebras/bigmodel/openrouter/xunfei/longcat 加 prefix,
+// FreeModels 内部不一致: groq/cerebras/bigmodel/openrouter/xinghuo/xingchen/longcat 加 prefix,
 // gitee/nvidia/google 不加. 我们 group.available_models 总是裸 id.
 const FREEMODELS_PROVIDERS = new Set([
   "bigmodel",
@@ -129,7 +160,8 @@ const FREEMODELS_PROVIDERS = new Set([
   "longcat",
   "nvidia",
   "openrouter",
-  "xunfei",
+  "xinghuo",
+  "xingchen",
 ]);
 function bareId(id: string, provider?: string): string {
   const slash = id.indexOf("/");
@@ -342,7 +374,7 @@ function pavClassFor(providerId?: string): string {
 }
 
 onMounted(async () => {
-  await Promise.all([fetchCatalog(), loadGroups()]);
+  await Promise.all([fetchCatalog(), loadGroups(), loadTimings()]);
 });
 
 async function fetchCatalog() {
@@ -458,7 +490,14 @@ async function fetchCatalog() {
           class="v3-model-row"
         >
           <div>
+            <ProviderLogo
+              v-if="row.freeProviderId && hasProviderLogo(row.freeProviderId)"
+              :hint="row.freeProviderId"
+              :size="24"
+              style="border-radius: 5px"
+            />
             <span
+              v-else
               :class="pavClassFor(row.freeProviderId)"
               style="width: 24px; height: 24px; border-radius: 5px; font-size: 9px"
             >
@@ -471,6 +510,13 @@ async function fetchCatalog() {
               style="display: flex; gap: 6px; margin-top: 5px; align-items: center; flex-wrap: wrap"
             >
               <SpeedBadge v-if="row.speed" :speed="row.speed" :size="11" />
+              <span
+                v-if="avgMsFor(row.id) > 0"
+                class="v3-chip"
+                :title="t('modelcatalog.avgMsTip') || '全程耗时 · 24h 平均(含流式回答时长)'"
+              >
+                {{ formatAvgMs(avgMsFor(row.id)) }}
+              </span>
               <span v-if="row.contextHint" class="v3-chip">ctx {{ row.contextHint }}</span>
               <span v-if="row.hasTools" class="v3-chip">tools</span>
               <span v-if="row.hasVision" class="v3-chip v3-chip--info">vision</span>

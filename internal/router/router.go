@@ -155,7 +155,7 @@ func registerProtectedAPIRoutes(
 	dedup := api.Group("/dedup")
 	{
 		dedup.GET("/suggestions", dedupHandler.GetSuggestions)
-		dedup.POST("/create", dedupHandler.CreateAggregate)
+		dedup.POST("/create", dedupHandler.CreateAliasUnification)
 	}
 
 	api.GET("/upstream/probe", upstreamProbeHandler.Probe)
@@ -210,6 +210,7 @@ func registerProtectedAPIRoutes(
 		dashboard.GET("/chart", serverHandler.Chart)
 		dashboard.GET("/encryption-status", serverHandler.EncryptionStatus)
 		dashboard.GET("/top-models", serverHandler.TopModels)
+		dashboard.GET("/model-timings", serverHandler.ModelTimings)
 	}
 
 	// 日志

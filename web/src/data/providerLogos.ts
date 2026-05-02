@@ -27,6 +27,24 @@ import moonshotSvg from "@lobehub/icons-static-svg/icons/moonshot.svg?raw";
 import perplexitySvg from "@lobehub/icons-static-svg/icons/perplexity-color.svg?raw";
 import xaiSvg from "@lobehub/icons-static-svg/icons/xai.svg?raw";
 import grokSvg from "@lobehub/icons-static-svg/icons/grok.svg?raw";
+// 国内 / FreeModels 收录 provider
+import zhipuSvg from "@lobehub/icons-static-svg/icons/zhipu-color.svg?raw";
+import nvidiaSvg from "@lobehub/icons-static-svg/icons/nvidia-color.svg?raw";
+import siliconcloudSvg from "@lobehub/icons-static-svg/icons/siliconcloud-color.svg?raw";
+import modelscopeSvg from "@lobehub/icons-static-svg/icons/modelscope-color.svg?raw";
+import longcatSvg from "@lobehub/icons-static-svg/icons/longcat-color.svg?raw";
+import sparkSvg from "@lobehub/icons-static-svg/icons/spark-color.svg?raw";
+import giteeaiSvg from "@lobehub/icons-static-svg/icons/giteeai.svg?raw";
+import aihubmixSvg from "@lobehub/icons-static-svg/icons/aihubmix-color.svg?raw";
+import kilocodeSvg from "@lobehub/icons-static-svg/icons/kilocode.svg?raw";
+import hunyuanSvg from "@lobehub/icons-static-svg/icons/hunyuan-color.svg?raw";
+import minimaxSvg from "@lobehub/icons-static-svg/icons/minimax-color.svg?raw";
+import wenxinSvg from "@lobehub/icons-static-svg/icons/wenxin-color.svg?raw";
+import baichuanSvg from "@lobehub/icons-static-svg/icons/baichuan-color.svg?raw";
+import stepfunSvg from "@lobehub/icons-static-svg/icons/stepfun-color.svg?raw";
+import bytedanceSvg from "@lobehub/icons-static-svg/icons/bytedance-color.svg?raw";
+import jinaSvg from "@lobehub/icons-static-svg/icons/jina.svg?raw";
+import fireworksSvg from "@lobehub/icons-static-svg/icons/fireworks-color.svg?raw";
 
 export const LOGO_MAP: Record<string, string> = {
   openai: openaiSvg,
@@ -50,6 +68,23 @@ export const LOGO_MAP: Record<string, string> = {
   perplexity: perplexitySvg,
   xai: xaiSvg,
   grok: grokSvg,
+  zhipu: zhipuSvg,
+  nvidia: nvidiaSvg,
+  siliconcloud: siliconcloudSvg,
+  modelscope: modelscopeSvg,
+  longcat: longcatSvg,
+  spark: sparkSvg,
+  giteeai: giteeaiSvg,
+  aihubmix: aihubmixSvg,
+  kilocode: kilocodeSvg,
+  hunyuan: hunyuanSvg,
+  minimax: minimaxSvg,
+  wenxin: wenxinSvg,
+  baichuan: baichuanSvg,
+  stepfun: stepfunSvg,
+  bytedance: bytedanceSvg,
+  jina: jinaSvg,
+  fireworks: fireworksSvg,
 };
 
 const KEYWORD_TO_KEY: Array<[string, string]> = [
@@ -79,6 +114,37 @@ const KEYWORD_TO_KEY: Array<[string, string]> = [
   ["perplexity", "perplexity"],
   ["xai", "xai"],
   ["grok", "grok"],
+  // FreeModels 国内/聚合 provider
+  ["aihubmix", "aihubmix"],          // host: aihubmix.com
+  ["kilocode", "kilocode"],
+  ["kilo", "kilocode"],              // host: api.kilo.ai
+  ["modelscope", "modelscope"],      // host: api-inference.modelscope.cn
+  ["siliconflow", "siliconcloud"],   // host: api.siliconflow.cn
+  ["siliconcloud", "siliconcloud"],
+  ["longcat", "longcat"],            // host: api.longcat.chat
+  ["bigmodel", "zhipu"],             // host: open.bigmodel.cn — 智谱 GLM 平台
+  ["zhipu", "zhipu"],
+  ["glm", "zhipu"],
+  ["nvidia", "nvidia"],              // host: integrate.api.nvidia.com
+  // 讯飞 — host 可能含 xf-yun / xinghuo / xingchen / spark
+  ["xinghuo", "spark"],              // 星火 Spark API
+  ["xingchen", "spark"],             // 星辰 MaaS (同一品牌)
+  ["xf-yun", "spark"],               // host: spark-api-open.xf-yun.com / maas-api.cn-huabei-1.xf-yun.com
+  ["xfyun", "spark"],
+  // gitee 必须先于 github 子串(注意 github 已先匹配,这里作为兜底)
+  ["giteeai", "giteeai"],
+  ["gitee", "giteeai"],              // host: ai.gitee.com
+  // 模型品牌(可能出现在 group name / system_role 但不属于 FreeModels provider)
+  ["hunyuan", "hunyuan"],
+  ["minimax", "minimax"],
+  ["wenxin", "wenxin"],
+  ["ernie", "wenxin"],               // 文心一言别名
+  ["baichuan", "baichuan"],
+  ["stepfun", "stepfun"],
+  ["bytedance", "bytedance"],
+  ["doubao", "bytedance"],           // 字节豆包
+  ["jina", "jina"],
+  ["fireworks", "fireworks"],
 ];
 
 /** 同步判断给定 hint 是否能匹配到内置 provider logo SVG (字符串)。 */

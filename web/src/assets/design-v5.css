@@ -7,8 +7,6 @@
 /* ===== Provider favicon tile ===== */
 .v5-picon {
   border-radius: 8px;
-  background: var(--v3-surface-2);
-  border: 1px solid var(--v3-line);
   display: grid;
   place-items: center;
   overflow: hidden;
@@ -17,8 +15,8 @@
   flex-shrink: 0;
 }
 .v5-picon img {
-  width: 60%;
-  height: 60%;
+  width: 92%;
+  height: 92%;
   object-fit: contain;
   display: block;
 }

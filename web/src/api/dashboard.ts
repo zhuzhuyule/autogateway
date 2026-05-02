@@ -48,3 +48,20 @@ export const getTopModels = (window: "1h" | "6h" | "24h" | "7d" = "24h", limit =
     params: { window, limit },
   });
 };
+
+/** 单条 model timing — 仅 avg_ms / calls,无 group attribution. */
+export interface ModelTiming {
+  model: string;
+  avg_ms: number;
+  calls: number;
+}
+
+/**
+ * 获取所有出现过的模型在窗口内的平均请求耗时。轻量,前端用于在
+ * ModelCatalog / Aliases 卡片上挂一个 "≈ X ms" chip。
+ */
+export const getModelTimings = (window: "1h" | "6h" | "24h" | "7d" = "24h") => {
+  return http.get<ModelTiming[]>("/dashboard/model-timings", {
+    params: { window },
+  });
+};

@@ -8,10 +8,13 @@ import {
   type RoutingSettings,
 } from "@/api/aliases";
 import { keysApi } from "@/api/keys";
+import { getModelTimings, type ModelTiming } from "@/api/dashboard";
 import type { Group } from "@/types/models";
 import { getGroupDisplayName } from "@/utils/display";
 import { V3_PROVIDER_DIR, pavClass } from "@/data/v3Catalog";
 import { findProviderByUpstreams, isFree } from "@/data/freeProviders";
+import ProviderLogo from "@/components/common/ProviderLogo.vue";
+import { hasProviderLogo } from "@/data/providerLogos";
 import { copy } from "@/utils/clipboard";
 import {
   AddOutline,
@@ -277,6 +280,41 @@ function inferProvider(row: ModelAliasRow): string {
   return "default";
 }
 
+// providerLogos.ts 的 KEYWORD_TO_KEY 是子串匹配, 把 group name 和 real model
+// 拼一起当 hint, 命中范围比 inferProvider (仅 V3_PROVIDER_DIR) 大得多 — 智谱
+// (bigmodel/glm) / 讯飞 (xinghuo/xingchen) / longcat / siliconflow 等都能识别。
+function aliasLogoHint(row: ModelAliasRow): string {
+  const gName = groupNameById.value[row.group_id] || "";
+  return `${gName} ${row.real_model || ""}`;
+}
+
+// model-timings: { real_model -> avg_ms } 24h 平均请求耗时,用于 chip 旁挂个 "≈ X ms"
+const timingMap = ref<Record<string, number>>({});
+
+async function loadTimings() {
+  try {
+    const r = await getModelTimings("24h");
+    const list: ModelTiming[] = (r as unknown as { data: ModelTiming[] }).data || [];
+    const map: Record<string, number> = {};
+    for (const t of list) {
+      if (t?.model) map[t.model] = t.avg_ms || 0;
+    }
+    timingMap.value = map;
+  } catch {
+    /* swallow — chip is purely decorative */
+  }
+}
+
+function avgMsFor(modelId: string): number {
+  return timingMap.value[modelId] || 0;
+}
+
+function formatAvgMs(ms: number): string {
+  if (ms <= 0) return "";
+  if (ms < 1000) return `≈ ${ms} ms`;
+  return `≈ ${(ms / 1000).toFixed(1)} s`;
+}
+
 // === Edit Mapping ===
 const editModalOpen = ref(false);
 const editDraft = ref<ModelAliasRow | null>(null);
@@ -479,7 +517,7 @@ function dismissSuggestions() {
 
 onMounted(() => {
   // 并行触发，banner 出现 race-free，无需阻塞主列表
-  Promise.all([loadAll(), loadSuggestions()]);
+  Promise.all([loadAll(), loadSuggestions(), loadTimings()]);
 });
 
 // === Tier board distribution ===
@@ -861,7 +899,14 @@ function saveSettingsThrottled() {
             "
             @click="openEdit(m)"
           >
+            <ProviderLogo
+              v-if="hasProviderLogo(aliasLogoHint(m))"
+              :hint="aliasLogoHint(m)"
+              :size="16"
+              style="border-radius: 3px"
+            />
             <span
+              v-else
               :class="pavClass(inferProvider(m))"
               style="width: 16px; height: 16px; border-radius: 3px; font-size: 8px"
             >
@@ -871,6 +916,13 @@ function saveSettingsThrottled() {
               }}
             </span>
             <span class="v3-alias-chip__name">{{ m.real_model }}</span>
+            <span
+              v-if="avgMsFor(m.real_model) > 0"
+              class="v3-alias-chip__avgms"
+              :title="t('v3.aliasAvgMsTip') || '全程耗时 · 24h 平均(含流式回答时长)'"
+            >
+              {{ formatAvgMs(avgMsFor(m.real_model)) }}
+            </span>
             <span v-if="aliasIsDeadByExposure(m)" class="v3-alias-chip__deadbadge">
               {{ t("v3.aliasUnexposed") || "失效" }}
             </span>
@@ -961,7 +1013,14 @@ function saveSettingsThrottled() {
               "
               @click="openEdit(m)"
             >
+              <ProviderLogo
+                v-if="hasProviderLogo(aliasLogoHint(m))"
+                :hint="aliasLogoHint(m)"
+                :size="16"
+                style="border-radius: 3px"
+              />
               <span
+                v-else
                 :class="pavClass(inferProvider(m))"
                 style="width: 16px; height: 16px; border-radius: 3px; font-size: 8px"
               >
@@ -971,6 +1030,13 @@ function saveSettingsThrottled() {
                 }}
               </span>
               <span class="v3-alias-chip__name">{{ m.real_model }}</span>
+              <span
+                v-if="avgMsFor(m.real_model) > 0"
+                class="v3-alias-chip__avgms"
+                :title="t('v3.aliasAvgMsTip') || '全程耗时 · 24h 平均(含流式回答时长)'"
+              >
+                {{ formatAvgMs(avgMsFor(m.real_model)) }}
+              </span>
               <span v-if="aliasIsDeadByExposure(m)" class="v3-alias-chip__deadbadge">
                 {{ t("v3.aliasUnexposed") || "失效" }}
               </span>
@@ -1532,6 +1598,15 @@ function saveSettingsThrottled() {
   font: 500 11px var(--v3-mono);
   color: var(--v3-ink-2);
   white-space: nowrap;
+}
+.v3-alias-chip__avgms {
+  font: 500 9.5px var(--v3-mono);
+  color: var(--v3-ink-3);
+  background: var(--v3-surface-3, var(--v3-surface-2));
+  padding: 1px 5px;
+  border-radius: 3px;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 /* Custom Picker Styles */

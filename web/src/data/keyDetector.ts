@@ -97,7 +97,7 @@ const RULES: Rule[] = [
   // 讯飞星辰 MaaS — APIKey:APISecret（冒号分隔，各 16-44 位字母数字）
   {
     test: k => /^[A-Za-z0-9]{16,44}:[A-Za-z0-9]{16,64}$/.test(k),
-    providerId: "xunfei",
+    providerId: "xingchen",
     confidence: "high",
     hint: "APIKey:APISecret 格式（讯飞星辰）",
   },

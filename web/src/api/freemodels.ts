@@ -68,7 +68,7 @@ interface CachedEnvelope {
 export const freeModelsRef = ref<FreeModelsEnvelope | null>(null);
 
 // FreeModels CDN 的 modelId 格式不统一:
-//   groq/cerebras/bigmodel/openrouter/xunfei/longcat → 加 "<provider>/" 前缀
+//   groq/cerebras/bigmodel/openrouter/xinghuo/xingchen/longcat → 加 "<provider>/" 前缀
 //     groq/minimax-m2.5, bigmodel/glm-4-flash, groq/qwen/qwen3-vl-32b
 //   gitee/nvidia/google → 直接用上游 raw modelId, 不加前缀
 //     jina-clip-v1 (gitee), bytedance/seed-oss-36b-instruct (nvidia 上托管的 ByteDance 模型)
@@ -101,8 +101,9 @@ function bareModelId(idWithMaybePrefix: string, provider?: string): string {
 }
 
 // =============================================================================
-// 9 家 FreeModels 上游 provider id, 跟本地 freeProviders.ts 已统一为同名:
-// bigmodel / cerebras / gitee / google / groq / longcat / nvidia / openrouter / xunfei
+// 10 家 FreeModels 上游 provider id, 跟本地 freeProviders.ts 已统一为同名:
+// bigmodel / cerebras / gitee / google / groq / longcat / nvidia / openrouter /
+// xinghuo (讯飞星火 Spark API) / xingchen (讯飞星辰 MaaS).
 // 因此不需要别名映射表,id 直通即可.
 // =============================================================================
 const KNOWN_FREEMODELS_PROVIDERS = new Set([
@@ -114,7 +115,8 @@ const KNOWN_FREEMODELS_PROVIDERS = new Set([
   "longcat",
   "nvidia",
   "openrouter",
-  "xunfei",
+  "xinghuo",
+  "xingchen",
 ]);
 function isKnownProviderId(s: string): boolean {
   return KNOWN_FREEMODELS_PROVIDERS.has(s.toLowerCase());

@@ -58,6 +58,7 @@ type GroupService struct {
 	keyImportSvc          *KeyImportService
 	encryptionSvc         encryption.Service
 	aggregateGroupService *AggregateGroupService
+	freeModelsRegistry    *FreeModelsRegistry
 	channelRegistry       []string
 }
 
@@ -70,6 +71,7 @@ func NewGroupService(
 	keyImportSvc *KeyImportService,
 	encryptionSvc encryption.Service,
 	aggregateGroupService *AggregateGroupService,
+	freeModelsRegistry *FreeModelsRegistry,
 ) *GroupService {
 	return &GroupService{
 		db:                    db,
@@ -79,6 +81,7 @@ func NewGroupService(
 		keyImportSvc:          keyImportSvc,
 		encryptionSvc:         encryptionSvc,
 		aggregateGroupService: aggregateGroupService,
+		freeModelsRegistry:    freeModelsRegistry,
 		channelRegistry:       channel.GetChannels(),
 	}
 }
@@ -419,8 +422,20 @@ func (s *GroupService) RefreshAvailableModels(ctx context.Context, groupID uint)
 
 	modelIDs, err := FetchUpstreamModels(ctx, &group, apiKey)
 	if err != nil {
-		logrus.WithError(err).WithField("group_id", group.ID).Warn("fetch upstream models failed")
-		return nil, NewI18nError(app_errors.ErrInternalServer, "group.refresh_models_failed", map[string]any{"error": err.Error()})
+		// 部分 provider 没有 OpenAI 兼容的 /v1/models 端点 (e.g. iFlytek Spark
+		// 只暴露 /v1/chat/completions). 这种情况下用 FreeModels registry 按
+		// upstream host 反查 providerId, 拿出该 provider 收录的全部 modelId 兜底.
+		// 仅在 404 / "not found" 这类"端点不存在"语义下回退, 401/403/timeout
+		// 等鉴权或网络问题继续向上报, 避免错误数据被静默缓存.
+		if fallback := s.fallbackModelsFromRegistry(&group, err); fallback != nil {
+			logrus.WithField("group_id", group.ID).WithField("count", len(fallback)).
+				Info("upstream /v1/models 404, fell back to FreeModels registry")
+			modelIDs = fallback
+			err = nil
+		} else {
+			logrus.WithError(err).WithField("group_id", group.ID).Warn("fetch upstream models failed")
+			return nil, NewI18nError(app_errors.ErrInternalServer, "group.refresh_models_failed", map[string]any{"error": err.Error()})
+		}
 	}
 
 	data, err := json.Marshal(modelIDs)
@@ -441,6 +456,39 @@ func (s *GroupService) RefreshAvailableModels(ctx context.Context, groupID uint)
 		logrus.WithContext(ctx).WithError(err).Warn("invalidate group cache after refresh-models failed")
 	}
 	return modelIDs, nil
+}
+
+// fallbackModelsFromRegistry 仅当 fetchErr 表明上游 /v1/models 端点不存在
+// (404) 时, 用 FreeModels registry 按 upstream URL host 反查 providerId,
+// 返回该 provider 收录的所有 bare modelId. 任何其他错误 (鉴权/超时/解析失败)
+// 或 registry 未知 host / 没有该 provider 的模型, 返回 nil 让调用方继续上报错误.
+func (s *GroupService) fallbackModelsFromRegistry(group *models.Group, fetchErr error) []string {
+	if s.freeModelsRegistry == nil || group == nil || fetchErr == nil {
+		return nil
+	}
+	msg := fetchErr.Error()
+	// upstream_models.go 的错误格式是 "upstream %d: %s",404 才适用 fallback.
+	// 也兼容部分 provider 返回 "404 page not found" 但没正确设状态码的边角情况.
+	if !strings.Contains(msg, "upstream 404") && !strings.Contains(strings.ToLower(msg), "404 page not found") {
+		return nil
+	}
+	baseURL, err := firstUpstreamURL(group)
+	if err != nil {
+		return nil
+	}
+	host := extractHost(baseURL)
+	if host == "" {
+		return nil
+	}
+	providerID, _, ok := s.freeModelsRegistry.LookupProviderByHost(host)
+	if !ok {
+		return nil
+	}
+	ids := s.freeModelsRegistry.ListModelIDsByProvider(providerID)
+	if len(ids) == 0 {
+		return nil
+	}
+	return ids
 }
 
 // pickActiveDecryptedKey 取该分组当前活跃 key 中的一个,用于调用上游 /v1/models.

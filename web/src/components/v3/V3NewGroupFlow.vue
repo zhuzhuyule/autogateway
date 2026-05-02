@@ -21,6 +21,8 @@ import { NIcon, NModal, useMessage } from "naive-ui";
 import { computed, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import FreeBadge from "@/components/common/FreeBadge.vue";
+import ProviderLogo from "@/components/common/ProviderLogo.vue";
+import { hasProviderLogo } from "@/data/providerLogos";
 
 const { t } = useI18n();
 const message = useMessage();
@@ -632,8 +634,14 @@ async function testAndSave() {
           >
             <div class="v3-pc__head">
               <div class="v3-pc__logo-wrapper">
+                <ProviderLogo
+                  v-if="hasProviderLogo(prov.id) || hasProviderLogo(prov.name)"
+                  :hint="hasProviderLogo(prov.id) ? prov.id : prov.name"
+                  :size="24"
+                  style="border-radius: 5px"
+                />
                 <img
-                  v-if="faviconFor(prov.id) && !faviconErr[prov.id]"
+                  v-else-if="faviconFor(prov.id) && !faviconErr[prov.id]"
                   :src="faviconFor(prov.id)"
                   alt=""
                   @error="onFaviconErr(prov.id)"

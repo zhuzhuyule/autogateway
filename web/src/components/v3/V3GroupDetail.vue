@@ -36,6 +36,8 @@ import { NIcon, NPagination, NSpin, NTooltip, useDialog, useMessage } from "naiv
 import FreeBadge from "@/components/common/FreeBadge.vue";
 import SpeedBadge from "@/components/common/SpeedBadge.vue";
 import CapabilityIcons from "@/components/common/CapabilityIcons.vue";
+import ProviderLogo from "@/components/common/ProviderLogo.vue";
+import { hasProviderLogo } from "@/data/providerLogos";
 import { freeModelsRef, getFreeStatus, lookupRegistry } from "@/api/freemodels";
 import { computed, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
@@ -317,6 +319,20 @@ const faviconUrl = computed(() => {
     return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(host)}&sz=64`;
   }
   return "";
+});
+
+const providerHint = computed(() => {
+  const g = props.group;
+  if (!g) {
+    return "";
+  }
+  return [
+    g.system_role || "",
+    g.name || "",
+    extractHost(g.upstreams?.[0]?.url) || "",
+  ]
+    .filter(Boolean)
+    .join(" ");
 });
 
 watch(
@@ -1317,10 +1333,16 @@ const filterCounts = computed(() => ({
     <!-- ===== HERO ===== -->
     <div class="v5-hero">
       <div class="v5-hero__top">
-        <!-- Avatar (favicon w/ fallback letter avatar) -->
+        <!-- Avatar (ProviderLogo > favicon > letter avatar) -->
         <div class="v5-hero__avatar v5-picon" style="width: 52px; height: 52px">
+          <ProviderLogo
+            v-if="hasProviderLogo(providerHint)"
+            :hint="providerHint"
+            :size="44"
+            style="border-radius: 8px"
+          />
           <img
-            v-if="faviconUrl && !faviconFailed"
+            v-else-if="faviconUrl && !faviconFailed"
             :src="faviconUrl"
             alt=""
             draggable="false"

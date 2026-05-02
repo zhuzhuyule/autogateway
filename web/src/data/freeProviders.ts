@@ -458,7 +458,7 @@ export const FREE_PROVIDERS: FreeProvider[] = [
     verifiedAt: "2026-04",
   },
   {
-    id: "xunfei",
+    id: "xingchen",
     name: "讯飞星辰",
     freeTier: "永久免费 (Qwen3.5-2B / Qwen3-1.7B / Hunyuan-MT-7B)",
     description: "科大讯飞 MaaS,65+ 模型,Key 格式 APIKey:APISecret",
@@ -1004,9 +1004,9 @@ export const FREE_MODELS: FreeModel[] = [
 
   // 讯飞星辰 — 仅含 inferencePrice in/out 都为 0 且属于"文本生成"类
   // (源:list-v2 接口枚举,2026-04 复核;OCR/embedding/SD/rerank/MT 走单独端点不在此列)
-  { providerId: "xunfei", modelId: "xop35qwen2b", tier: "fast", notes: "Qwen3.5-2B 永久免费" },
-  { providerId: "xunfei", modelId: "test_ent", tier: "fast", notes: "Qwen3-1.7B 永久免费" },
-  { providerId: "xunfei", modelId: "xophunyuan7bmt", tier: "fast", notes: "Hunyuan-MT-7B 永久免费" },
+  { providerId: "xingchen", modelId: "xop35qwen2b", tier: "fast", notes: "Qwen3.5-2B 永久免费" },
+  { providerId: "xingchen", modelId: "test_ent", tier: "fast", notes: "Qwen3-1.7B 永久免费" },
+  { providerId: "xingchen", modelId: "xophunyuan7bmt", tier: "fast", notes: "Hunyuan-MT-7B 永久免费" },
 
   // Gitee AI (永久免费 text-generation,源自 /api/pay/.../services?type=serverless)
   { providerId: "gitee", modelId: "internlm3-8b-instruct", tier: "fast", notes: "InternLM3-8B · 永久免费" },

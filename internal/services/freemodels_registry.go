@@ -456,6 +456,36 @@ func (r *FreeModelsRegistry) Lookup(provider, modelID string) *FreeModelMeta {
 	return nil
 }
 
+// ListModelIDsByProvider 返回该 provider 在 registry 中的所有 bare modelId
+// (剥掉 "<provider>/" 前缀). 用于上游无 /v1/models 端点的 provider
+// (e.g. iFlytek Spark) 的回退兜底. providerId 大小写不敏感.
+func (r *FreeModelsRegistry) ListModelIDsByProvider(providerID string) []string {
+	if providerID == "" {
+		return nil
+	}
+	target := strings.ToLower(providerID)
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := make([]string, 0, 16)
+	prefix := target + "/"
+	for _, m := range r.envelope.Models {
+		if strings.ToLower(m.Provider) != target {
+			continue
+		}
+		id := m.ModelID
+		// FreeModels 部分 provider (groq/cerebras/bigmodel/openrouter/xinghuo/
+		// xingchen/longcat) 的 modelId 带 "<provider>/" 前缀, 上游 /v1/models
+		// 返回的是裸 id, 这里统一剥掉以保持下游 group.available_models 一致.
+		if strings.HasPrefix(strings.ToLower(id), prefix) {
+			id = id[len(prefix):]
+		}
+		if id != "" {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
 // LookupProviderByHost reverse-resolves a host (e.g. "api.groq.com") to the
 // FreeModels provider id ("groq") + its meta. Returns ("", nil, false) on miss.
 // Frontend findProviderByUpstreamUrl uses this as the primary lookup before
