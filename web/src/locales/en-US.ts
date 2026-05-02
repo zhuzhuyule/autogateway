@@ -773,6 +773,10 @@ export default {
     loadFailed: "Failed to load dedup suggestions",
     noSuggestions: "No dedup suggestions",
   },
+  aliases: {
+    tabManage: "Manage",
+    tabQuick: "Quick Setup",
+  },
   v3: {
     operations: "Operations",
     refresh: "Refresh",

@@ -752,6 +752,10 @@ export default {
     loadFailed: "加载去重建议失败",
     noSuggestions: "暂无去重建议",
   },
+  aliases: {
+    tabManage: "管理",
+    tabQuick: "快速整理",
+  },
   v3: {
     operations: "运营总览",
     refresh: "刷新",

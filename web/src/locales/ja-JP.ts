@@ -772,6 +772,10 @@ export default {
     loadFailed: "重複削除の提案の読み込みに失敗",
     noSuggestions: "重複削除の提案がありません",
   },
+  aliases: {
+    tabManage: "管理",
+    tabQuick: "クイック設定",
+  },
   v3: {
     operations: "オペレーション",
     refresh: "更新",
