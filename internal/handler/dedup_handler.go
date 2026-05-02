@@ -7,20 +7,41 @@ import (
 	"autogateway/internal/services"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 type DedupHandler struct {
 	dedupService *services.ModelDedupService
 	aliasService *services.AliasService
+	db           *gorm.DB
 }
 
-func NewDedupHandler(dedupService *services.ModelDedupService, aliasService *services.AliasService) *DedupHandler {
+func NewDedupHandler(
+	dedupService *services.ModelDedupService,
+	aliasService *services.AliasService,
+	db *gorm.DB,
+) *DedupHandler {
 	return &DedupHandler{
 		dedupService: dedupService,
 		aliasService: aliasService,
+		db:           db,
 	}
 }
 
+// GetModels returns every candidate model from non-aggregate groups,
+// grouped by derived family. Used by the Aliases page's "快速整理" tab.
+func (h *DedupHandler) GetModels(c *gin.Context) {
+	families, err := h.dedupService.GetModelsByFamily(h.db)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"families": families})
+}
+
+// Deprecated: legacy duplicate-only feed; superseded by GetModels.
+// Kept for one release to avoid breaking any consumer; remove after
+// frontend stops calling it (no callers as of this change).
 func (h *DedupHandler) GetSuggestions(c *gin.Context) {
 	suggestions := h.dedupService.GetDedupSuggestions()
 	c.JSON(http.StatusOK, suggestions)

@@ -151,9 +151,10 @@ func registerProtectedAPIRoutes(
 	// Model Catalog API
 	api.GET("/models", modelCatalogHandler.ListModels)
 
-	// Model Dedup API
+	// Model Dedup API — `/suggestions` is deprecated, use `/models` instead.
 	dedup := api.Group("/dedup")
 	{
+		dedup.GET("/models", dedupHandler.GetModels)
 		dedup.GET("/suggestions", dedupHandler.GetSuggestions)
 		dedup.POST("/create", dedupHandler.CreateAliasUnification)
 	}
