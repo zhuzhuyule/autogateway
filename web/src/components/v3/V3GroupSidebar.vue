@@ -325,11 +325,11 @@ function onDragEnd() {
           :class="{ 'v3-gl__row--active': selectedGroup?.id === g.id }"
           @click="emit('select', g)"
         >
-          <span class="v5-picon" style="width: 28px; height: 28px">
+          <span class="v5-picon" style="width: 38px; height: 38px">
             <ProviderLogo
               v-if="hasProviderLogo(providerHint(g))"
               :hint="providerHint(g)"
-              size="20"
+              :size="28"
             />
             <img
               v-else-if="faviconFor(g) && !isFaviconBroken(g)"
@@ -341,7 +341,7 @@ function onDragEnd() {
             <span
               v-else
               :class="['v3-pav', avatarClass(g)]"
-              style="width: 100%; height: 100%; border-radius: 0; font-size: 10px"
+              style="width: 100%; height: 100%; border-radius: 0; font-size: 12px"
             >
               {{ shortFor(g) }}
             </span>
@@ -380,11 +380,11 @@ function onDragEnd() {
         @drop="onDrop($event, g)"
         @dragend="onDragEnd"
       >
-        <span class="v5-picon" style="width: 28px; height: 28px">
+        <span class="v5-picon" style="width: 38px; height: 38px">
           <ProviderLogo
             v-if="hasProviderLogo(providerHint(g))"
             :hint="providerHint(g)"
-            size="20"
+            :size="28"
           />
           <img
             v-else-if="faviconFor(g) && !isFaviconBroken(g)"

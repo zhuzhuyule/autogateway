@@ -152,10 +152,49 @@ type AliasCreateRequest struct {
 }
 
 func (s *AliasService) Create(ctx context.Context, req AliasCreateRequest) (*models.ModelAlias, error) {
+	return s.createOnDB(ctx, s.db, req)
+}
+
+// CreateMany inserts every request atomically in a single transaction. On
+// the first failure the entire batch is rolled back — no partial state. The
+// returned error is an *errors.APIError (Code is stable, Message is human
+// readable and identifies which candidate failed).
+func (s *AliasService) CreateMany(ctx context.Context, reqs []AliasCreateRequest) ([]models.ModelAlias, error) {
+	if len(reqs) == 0 {
+		return nil, app_errors.NewAPIError(app_errors.ErrBadRequest, "no candidates")
+	}
+	rows := make([]models.ModelAlias, 0, len(reqs))
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		for i, req := range reqs {
+			row, err := s.createOnDB(ctx, tx, req)
+			if err != nil {
+				// Wrap the APIError so the client can show which candidate broke
+				// the batch without leaking raw DB error text.
+				if apiErr, ok := err.(*app_errors.APIError); ok {
+					return app_errors.NewAPIError(apiErr,
+						fmt.Sprintf("candidate %d (%s → %s in group %d): %s",
+							i+1, req.Alias, req.RealModel, req.GroupID, apiErr.Message))
+				}
+				return err
+			}
+			rows = append(rows, *row)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
+// createOnDB is the shared implementation used by Create (s.db) and CreateMany
+// (tx). It must not start its own transaction.
+func (s *AliasService) createOnDB(ctx context.Context, db *gorm.DB, req AliasCreateRequest) (*models.ModelAlias, error) {
 	alias := strings.TrimSpace(req.Alias)
 	real := strings.TrimSpace(req.RealModel)
 	if alias == "" || real == "" || req.GroupID == 0 {
-		return nil, fmt.Errorf("alias, group_id and real_model are required")
+		return nil, app_errors.NewAPIError(app_errors.ErrValidation,
+			"alias, group_id and real_model are required")
 	}
 	row := &models.ModelAlias{
 		Alias:     alias,
@@ -168,7 +207,7 @@ func (s *AliasService) Create(ctx context.Context, req AliasCreateRequest) (*mod
 	if req.Enabled != nil {
 		row.Enabled = *req.Enabled
 	}
-	if err := s.db.WithContext(ctx).Create(row).Error; err != nil {
+	if err := db.WithContext(ctx).Create(row).Error; err != nil {
 		return nil, app_errors.ParseDBError(err)
 	}
 	return row, nil

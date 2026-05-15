@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strings"
 
+	app_errors "autogateway/internal/errors"
 	"autogateway/internal/services"
 
 	"github.com/gin-gonic/gin"
@@ -35,17 +36,10 @@ func (h *DedupHandler) GetModels(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"families": families})
 }
 
-// Deprecated: legacy duplicate-only feed; superseded by GetModels.
-// Kept for one release to avoid breaking any consumer; remove after
-// frontend stops calling it (no callers as of this change).
-func (h *DedupHandler) GetSuggestions(c *gin.Context) {
-	suggestions := h.dedupService.GetDedupSuggestions()
-	c.JSON(http.StatusOK, suggestions)
-}
-
 // CreateAliasUnification accepts an alias name plus the candidate
-// (group_id, real_model) pairs the user confirmed and inserts one
-// model_aliases row per candidate via AliasService.Create.
+// (group_id, real_model) pairs the user confirmed and inserts them
+// atomically. Either every candidate is created, or none are — there
+// is no partial-commit state to clean up.
 type CreateAliasUnificationRequest struct {
 	Alias      string                       `json:"alias"`
 	Candidates []CreateAliasUnificationItem `json:"candidates"`
@@ -59,49 +53,53 @@ type CreateAliasUnificationItem struct {
 func (h *DedupHandler) CreateAliasUnification(c *gin.Context) {
 	var req CreateAliasUnificationRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"code":    app_errors.ErrInvalidJSON.Code,
+			"message": err.Error(),
+		})
 		return
 	}
 	alias := strings.TrimSpace(req.Alias)
 	if alias == "" || len(req.Candidates) == 0 {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"success": false,
-			"error":   "alias and at least one candidate are required",
+			"code":    app_errors.ErrValidation.Code,
+			"message": "alias and at least one candidate are required",
 		})
 		return
 	}
 
-	created := 0
-	failures := []string{}
+	aliasReqs := make([]services.AliasCreateRequest, 0, len(req.Candidates))
 	for _, cand := range req.Candidates {
-		if cand.GroupID == 0 || strings.TrimSpace(cand.RealModel) == "" {
-			failures = append(failures, "invalid candidate: missing group_id or real_model")
-			continue
-		}
-		_, err := h.aliasService.Create(c.Request.Context(), services.AliasCreateRequest{
+		aliasReqs = append(aliasReqs, services.AliasCreateRequest{
 			Alias:     alias,
 			GroupID:   cand.GroupID,
 			RealModel: cand.RealModel,
 		})
-		if err != nil {
-			failures = append(failures, err.Error())
-			continue
-		}
-		created++
 	}
 
-	if created == 0 {
+	rows, err := h.aliasService.CreateMany(c.Request.Context(), aliasReqs)
+	if err != nil {
+		if apiErr, ok := err.(*app_errors.APIError); ok {
+			c.JSON(apiErr.HTTPStatus, gin.H{
+				"success": false,
+				"code":    apiErr.Code,
+				"message": apiErr.Message,
+			})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"success":  false,
-			"created":  0,
-			"failures": failures,
+			"success": false,
+			"code":    app_errors.ErrInternalServer.Code,
+			"message": err.Error(),
 		})
 		return
 	}
+
 	c.JSON(http.StatusOK, gin.H{
-		"success":  true,
-		"alias":    alias,
-		"created":  created,
-		"failures": failures,
+		"success": true,
+		"alias":   alias,
+		"created": len(rows),
 	})
 }

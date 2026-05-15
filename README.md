@@ -182,7 +182,7 @@ POST /proxy/{group_name}/v1/chat/completions
 | `GET    /api/models` | 跨分组聚合的统一模型目录 |
 | `GET    /api/auto-routing/config` / `POST /api/auto-routing/config` | Auto Routing 配置 |
 | `POST   /api/auto-routing/test` | 路由测试器(粘贴请求 JSON,返回分类与目标分组) |
-| `GET    /api/dedup/suggestions` / `POST /api/dedup/create` | 模型去重建议 |
+| `GET    /api/aliases/quick/models` / `POST /api/aliases/quick/create` | 别名快速整理 (家族分组的候选模型 + 原子批量创建) |
 
 ---
 

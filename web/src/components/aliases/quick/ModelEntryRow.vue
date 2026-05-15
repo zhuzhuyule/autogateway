@@ -19,7 +19,7 @@ const emit = defineEmits<{
 const { t } = useI18n();
 
 const isHighlighted = computed(
-  () => !!props.highlightAlias && props.entry.aliases.includes(props.highlightAlias),
+  () => !!props.highlightAlias && (props.entry.aliases ?? []).includes(props.highlightAlias),
 );
 
 const nameSegments = computed(() => {
@@ -59,7 +59,7 @@ const nameSegments = computed(() => {
     </code>
     <span class="quick-row__chips">
       <button
-        v-for="a in entry.aliases"
+        v-for="a in entry.aliases ?? []"
         :key="a"
         type="button"
         class="quick-row__alias-chip"

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 import { NInput, NButton, NIcon } from "naive-ui";
 import { CheckmarkCircle } from "@vicons/ionicons5";
 import { useI18n } from "vue-i18n";
@@ -43,19 +43,57 @@ const effectiveName = computed(() => {
   return typedName.value.trim() || familyHint.value;
 });
 
+// Conflict pre-check: when appending to an existing alias, count how many
+// of the selected entries are *already* mapped to that alias. Those would
+// hit the (alias, group_id, real_model) unique index on the backend and
+// roll back the whole transaction, so we must require at least one *new*
+// candidate before allowing submit.
+const dupeCount = computed(() => {
+  if (!props.targetAlias) return 0;
+  let n = 0;
+  const target = props.targetAlias;
+  for (const e of props.selected.values()) {
+    if ((e.aliases ?? []).includes(target)) n++;
+  }
+  return n;
+});
+
+const newCount = computed(() => props.selected.size - dupeCount.value);
+
 const buttonLabel = computed(() => {
   if (props.targetAlias) {
-    return t("aliases.quick.appendButton", { alias: props.targetAlias });
+    return t("aliases.quick.appendButton", { alias: props.targetAlias, n: newCount.value });
   }
   return t("aliases.quick.createButton", { family: familyHint.value || "—" });
 });
 
+// Synchronous double-click guard: flipped to true the instant we emit, released
+// once the parent reflects the submitting state. Without this, a fast double
+// click could fire two `submit` events before the parent's `submitting=true`
+// propagates back as a prop — and combined with the absence of a server-side
+// dedup that used to produce duplicate model_aliases rows.
+const localGuard = ref(false);
+watch(
+  () => props.submitting,
+  () => {
+    localGuard.value = false;
+  },
+);
+
 const canSubmit = computed(
-  () => props.selected.size > 0 && effectiveName.value.length > 0 && !props.submitting,
+  () =>
+    props.selected.size > 0
+    && effectiveName.value.length > 0
+    && !props.submitting
+    && !localGuard.value
+    // In append mode every selection must be a fresh mapping, else the
+    // backend's unique index would reject the whole batch.
+    && (!props.targetAlias || newCount.value > 0),
 );
 
 function onSubmit() {
   if (!canSubmit.value) return;
+  localGuard.value = true;
   emit("submit", {
     alias: effectiveName.value,
     entries: Array.from(props.selected.values()),
@@ -66,9 +104,15 @@ function onSubmit() {
 <template>
   <div class="qbar">
     <div class="qbar__count">
-      {{ selected.size === 0
-        ? t("aliases.quick.selectionEmpty")
-        : t("aliases.quick.selectionCount", { n: selected.size }) }}
+      <template v-if="selected.size === 0">
+        {{ t("aliases.quick.selectionEmpty") }}
+      </template>
+      <template v-else-if="targetAlias && dupeCount > 0">
+        {{ t("aliases.quick.selectionCountWithDupe", { n: selected.size, dupe: dupeCount }) }}
+      </template>
+      <template v-else>
+        {{ t("aliases.quick.selectionCount", { n: selected.size }) }}
+      </template>
     </div>
     <div class="qbar__input">
       <NInput
@@ -76,6 +120,8 @@ function onSubmit() {
         v-model:value="typedName"
         :placeholder="familyHint || t('aliases.quick.nameRequired')"
         size="medium"
+        @keydown.meta.enter="onSubmit"
+        @keydown.ctrl.enter="onSubmit"
       />
       <code v-else class="qbar__locked">{{ targetAlias }}</code>
     </div>

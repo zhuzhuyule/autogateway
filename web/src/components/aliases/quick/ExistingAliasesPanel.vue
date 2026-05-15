@@ -20,7 +20,7 @@ const aliasList = computed(() => {
   const counts = new Map<string, number>();
   for (const f of props.families) {
     for (const m of f.models) {
-      for (const a of m.aliases) {
+      for (const a of m.aliases ?? []) {
         counts.set(a, (counts.get(a) ?? 0) + 1);
       }
     }

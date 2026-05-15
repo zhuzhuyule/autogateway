@@ -153,10 +153,14 @@ type Group struct {
 // 三个 reserved alias 名 (auto-simple / auto-medium / auto-complex)
 // 由 §13.1 路由决策树用作 smart routing 池, UI 锁定不可改名/删除.
 type ModelAlias struct {
-	ID         uint      `gorm:"primaryKey;autoIncrement" json:"id"`
-	Alias      string    `gorm:"type:varchar(255);not null;index:idx_alias_enabled" json:"alias"`
-	GroupID    uint      `gorm:"not null;index" json:"group_id"`
-	RealModel  string    `gorm:"type:varchar(255);not null" json:"real_model"`
+	ID uint `gorm:"primaryKey;autoIncrement" json:"id"`
+	// idx_alias_group_model — uniqueness on the (alias, group_id, real_model)
+	// triple. Each row is one candidate; resubmitting the same triple via the
+	// quick-setup UI must be rejected as DUPLICATE_RESOURCE, not silently
+	// duplicated (which would double the SWRR weight).
+	Alias      string    `gorm:"type:varchar(255);not null;index:idx_alias_enabled;uniqueIndex:idx_alias_group_model,priority:1" json:"alias"`
+	GroupID    uint      `gorm:"not null;index;uniqueIndex:idx_alias_group_model,priority:2" json:"group_id"`
+	RealModel  string    `gorm:"type:varchar(255);not null;uniqueIndex:idx_alias_group_model,priority:3" json:"real_model"`
 	Weight     int       `gorm:"not null;default:1" json:"weight"`
 	Priority   int       `gorm:"not null;default:100" json:"priority"`
 	Enabled    bool      `gorm:"not null;default:true;index:idx_alias_enabled" json:"enabled"`

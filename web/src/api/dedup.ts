@@ -18,21 +18,29 @@ export interface DedupCreateRequest {
   candidates: { group_id: number; real_model: string }[];
 }
 
+// Success-only shape. Failures are surfaced as rejected axios promises with
+// `error.response.data: DedupCreateError` — the create call is now atomic
+// (transactional on the server), so there is no partial-success branch.
 export interface DedupCreateResponse {
-  success: boolean;
-  alias?: string;
+  success: true;
+  alias: string;
   created: number;
-  failures: string[];
+}
+
+export interface DedupCreateError {
+  success: false;
+  code: string;
+  message: string;
 }
 
 export const dedupApi = {
   async models(): Promise<DedupFamily[]> {
-    const data = await http.get<unknown, { families?: DedupFamily[] }>("/dedup/models");
+    const data = await http.get<unknown, { families?: DedupFamily[] }>("/aliases/quick/models");
     return data?.families ?? [];
   },
 
   async create(req: DedupCreateRequest): Promise<DedupCreateResponse> {
-    return await http.post<unknown, DedupCreateResponse>("/dedup/create", req, { hideMessage: true });
+    return await http.post<unknown, DedupCreateResponse>("/aliases/quick/create", req, { hideMessage: true });
   },
 };
 

@@ -142,6 +142,14 @@ func registerProtectedAPIRoutes(
 		aliases.PUT("/:id", aliasHandler.Update)
 		aliases.DELETE("/:id", aliasHandler.Delete)
 	}
+	// Quick-setup tab (was /api/dedup/* before the feature was folded under
+	// the Aliases page): family-grouped picker + atomic batch create. Backs
+	// /aliases?tab=quick in the UI.
+	aliasQuick := api.Group("/aliases/quick")
+	{
+		aliasQuick.GET("/models", dedupHandler.GetModels)
+		aliasQuick.POST("/create", dedupHandler.CreateAliasUnification)
+	}
 	routing := api.Group("/routing")
 	{
 		routing.GET("/settings", routingSettingsHandler.Get)
@@ -150,14 +158,6 @@ func registerProtectedAPIRoutes(
 
 	// Model Catalog API
 	api.GET("/models", modelCatalogHandler.ListModels)
-
-	// Model Dedup API — `/suggestions` is deprecated, use `/models` instead.
-	dedup := api.Group("/dedup")
-	{
-		dedup.GET("/models", dedupHandler.GetModels)
-		dedup.GET("/suggestions", dedupHandler.GetSuggestions)
-		dedup.POST("/create", dedupHandler.CreateAliasUnification)
-	}
 
 	api.GET("/upstream/probe", upstreamProbeHandler.Probe)
 	api.GET("/freemodels/registry", freeModelsHandler.Registry)

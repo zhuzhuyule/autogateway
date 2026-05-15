@@ -1,14 +1,14 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import { useRouter, useRoute } from "vue-router";
-import { NInput, NModal, NSpin, useMessage } from "naive-ui";
+import { NInput, NSpin, useMessage } from "naive-ui";
 import { useI18n } from "vue-i18n";
-import { dedupApi, type DedupFamily, type DedupModelEntry } from "@/api/dedup";
+import { dedupApi, type DedupFamily, type DedupModelEntry, type DedupCreateError } from "@/api/dedup";
 import FamilyAccordion from "./quick/FamilyAccordion.vue";
 import ExistingAliasesPanel from "./quick/ExistingAliasesPanel.vue";
 import SubmitActionBar from "./quick/SubmitActionBar.vue";
 
-const { t } = useI18n();
+const { t, te } = useI18n();
 const message = useMessage();
 const router = useRouter();
 const route = useRoute();
@@ -17,8 +17,6 @@ const loading = ref(false);
 const families = ref<DedupFamily[]>([]);
 const searchQuery = ref("");
 const submitting = ref(false);
-const failureModalOpen = ref(false);
-const failures = ref<string[]>([]);
 
 const selected = ref(new Map<string, DedupModelEntry>());
 function entryKey(e: DedupModelEntry): string {
@@ -32,6 +30,19 @@ function onToggle(entry: DedupModelEntry) {
     selected.value.set(key, entry);
   }
   selected.value = new Map(selected.value);
+}
+
+// Family-level bulk-select: add or remove a batch of entries in one shot.
+// Idempotent — adding an already-selected entry is a no-op, removing an
+// unselected one too.
+function onBulkToggle({ entries, mode }: { entries: DedupModelEntry[]; mode: "add" | "remove" }) {
+  const next = new Map(selected.value);
+  for (const e of entries) {
+    const key = entryKey(e);
+    if (mode === "add") next.set(key, e);
+    else next.delete(key);
+  }
+  selected.value = next;
 }
 
 const targetAlias = ref<string | null>(null);
@@ -51,6 +62,19 @@ function onClickAlias(alias: string) {
   targetAlias.value = targetAlias.value === alias ? null : alias;
 }
 
+// Translate stable backend error codes to i18n strings. Falls back to the
+// server-supplied message when the code is unknown — avoids leaking raw
+// "pq: duplicate key violates constraint ..." text.
+function translateError(err: unknown): string {
+  const data = (err as { response?: { data?: DedupCreateError } } | undefined)?.response?.data;
+  if (data?.code) {
+    const key = `aliases.quick.errors.${data.code}`;
+    if (te(key)) return t(key);
+    if (data.message) return data.message;
+  }
+  return t("aliases.quick.errors.UNKNOWN");
+}
+
 async function onSubmit({ alias, entries }: { alias: string; entries: DedupModelEntry[] }) {
   submitting.value = true;
   try {
@@ -58,27 +82,15 @@ async function onSubmit({ alias, entries }: { alias: string; entries: DedupModel
       alias,
       candidates: entries.map(e => ({ group_id: e.group_id, real_model: e.real_model })),
     });
-    if (res.created > 0 && res.failures.length === 0) {
-      message.success(t("aliases.quick.createdN", { n: res.created }));
-      router.replace({
-        query: { ...route.query, tab: "manage", highlight: alias },
-      });
-    } else if (res.created > 0) {
-      message.warning(
-        t("aliases.quick.partialFailures", { ok: res.created, fail: res.failures.length }),
-      );
-      failures.value = res.failures;
-      failureModalOpen.value = true;
-    } else {
-      message.error(t("common.requestFailed", { status: "" }));
-      failures.value = res.failures;
-      failureModalOpen.value = true;
-    }
-    await load();
+    message.success(t("aliases.quick.createdN", { n: res.created }));
     selected.value = new Map();
     targetAlias.value = null;
-  } catch {
-    message.error(t("common.requestFailed", { status: "" }));
+    router.replace({
+      query: { ...route.query, tab: "manage", highlight: alias },
+    });
+  } catch (err) {
+    message.error(translateError(err), { duration: 5000, closable: true });
+    await load();
   } finally {
     submitting.value = false;
   }
@@ -114,6 +126,7 @@ const selectionCount = computed(() => selected.value.size);
             :selected="selected"
             :highlight-alias="targetAlias"
             @toggle="onToggle"
+            @bulk-toggle="onBulkToggle"
             @click-alias="onClickAlias"
           />
         </div>
@@ -133,14 +146,6 @@ const selectionCount = computed(() => selected.value.size);
       :submitting="submitting"
       @submit="onSubmit"
     />
-
-    <NModal v-model:show="failureModalOpen" preset="dialog" :title="t('aliases.quick.failureModalTitle')">
-      <ul style="padding-left: 20px; margin: 0; max-height: 260px; overflow-y: auto">
-        <li v-for="(f, i) in failures" :key="i" style="font: 500 12px var(--v3-mono); margin: 4px 0">
-          {{ f }}
-        </li>
-      </ul>
-    </NModal>
   </div>
 </template>
 

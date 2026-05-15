@@ -105,6 +105,11 @@ func (a *App) Start() error {
 
 		// 数据库迁移
 		db.HandleLegacyIndexes(a.db)
+		// Pre-migrate dedup: must run BEFORE AutoMigrate so the new
+		// idx_alias_group_model unique index can be created without conflicts.
+		if err := db.V1_2_0_DedupModelAliases(a.db); err != nil {
+			return fmt.Errorf("pre-migrate dedup model_aliases failed: %w", err)
+		}
 		if err := a.db.AutoMigrate(
 			&models.SystemSetting{},
 			&models.Group{},
