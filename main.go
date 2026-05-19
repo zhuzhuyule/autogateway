@@ -41,6 +41,8 @@ func runCommand() {
 	switch command {
 	case "migrate-keys":
 		commands.RunMigrateKeys(args)
+	case "check-freemodels-drift":
+		commands.RunCheckDrift(args)
 	case "help", "-h", "--help":
 		printHelp()
 	default:
@@ -59,8 +61,9 @@ func printHelp() {
 	fmt.Println("  autogateway <command> [args]   Execute a command")
 	fmt.Println()
 	fmt.Println("Available Commands:")
-	fmt.Println("  migrate-keys    Migrate encryption keys")
-	fmt.Println("  help            Display this help message")
+	fmt.Println("  migrate-keys              Migrate encryption keys")
+	fmt.Println("  check-freemodels-drift    Diff local FREE_PROVIDERS vs ofind registry")
+	fmt.Println("  help                      Display this help message")
 	fmt.Println()
 	fmt.Println("Use 'autogateway <command> --help' for more information about a command.")
 }

@@ -34,6 +34,13 @@ migrate-keys: ## Execute key migration (usage: make migrate-keys ARGS="--from ol
 	fi
 	go run ./main.go migrate-keys $(ARGS)
 
+# ==============================================================================
+# FreeModels Drift Check
+# ==============================================================================
+.PHONY: check-freemodels-drift
+check-freemodels-drift: ## Diff local FREE_PROVIDERS vs ofind registry (FAIL_ON_DRIFT=1 for CI)
+	@go run ./main.go check-freemodels-drift $(if $(FAIL_ON_DRIFT),--fail-on-drift) $(if $(VERBOSE),-v)
+
 .PHONY: help
 help: ## Display this help message
 	@awk 'BEGIN {FS = ":.*?## "; printf "Usage:\n  make \033[36m<target>\033[0m\n\nTargets:\n"} /^[a-zA-Z0-9_-]+:.*?## / { printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
