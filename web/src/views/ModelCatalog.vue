@@ -39,6 +39,10 @@ interface AugmentedItem extends ModelItem {
   contextHint: string | null;
   /** registry 直读的 speed 档位 (fast/balanced/slow), 缺失时 null. */
   speed: "fast" | "balanced" | "slow" | null;
+  /** ofind registry 提供的短描述, 用于 hover / 搜索. 缺失时空串. */
+  description: string;
+  /** 上游 free_quota.notes — 限速 / 配额 / 体验额度的人类描述. 缺时空串. */
+  freeQuotaNote: string;
 }
 
 /**
@@ -262,6 +266,8 @@ const augmented = computed<AugmentedItem[]>(() =>
       isReasoning: reg ? reg.isReasoning : false,
       contextHint: reg?.contextLabel || null,
       speed: (reg?.speed as "fast" | "balanced" | "slow" | null) || null,
+      description: reg?.description || "",
+      freeQuotaNote: reg?.freeQuota?.notes || "",
     };
   })
 );
@@ -273,7 +279,8 @@ const filtered = computed<AugmentedItem[]>(() => {
       if (
         q &&
         !row.id.toLowerCase().includes(q) &&
-        !(row.display_name || "").toLowerCase().includes(q)
+        !(row.display_name || "").toLowerCase().includes(q) &&
+        !row.description.toLowerCase().includes(q)
       ) {
         return false;
       }
@@ -505,7 +512,16 @@ async function fetchCatalog() {
             </span>
           </div>
           <div>
-            <div class="v3-model-row__name">{{ row.id }} <FreeBadge v-if="row.freeVariant" /></div>
+            <div class="v3-model-row__name" :title="row.description || undefined">
+              {{ row.id }} <FreeBadge v-if="row.freeVariant" />
+            </div>
+            <div
+              v-if="row.description"
+              class="v3-model-row__desc"
+              :title="row.description"
+            >
+              {{ row.description }}
+            </div>
             <div
               style="display: flex; gap: 6px; margin-top: 5px; align-items: center; flex-wrap: wrap"
             >
@@ -521,6 +537,13 @@ async function fetchCatalog() {
               <span v-if="row.hasTools" class="v3-chip">tools</span>
               <span v-if="row.hasVision" class="v3-chip v3-chip--info">vision</span>
               <span v-if="row.isReasoning" class="v3-chip v3-chip--warn">reasoning</span>
+              <span
+                v-if="row.freeQuotaNote"
+                class="v3-chip v3-chip--info"
+                :title="row.freeQuotaNote"
+              >
+                quota
+              </span>
               <span
                 v-if="row.freeProviderId"
                 style="font: 400 10.5px var(--v3-mono); color: var(--v3-ink-3)"

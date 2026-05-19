@@ -622,6 +622,31 @@ export const FREE_PROVIDERS: FreeProvider[] = [
     verifiedAt: "2026-04",
   },
   {
+    id: "sambanova",
+    name: "SambaNova Cloud",
+    freeTier: "$5 注册赠金 (3 个月有效) + 高速免费档",
+    description: "RDU 芯片极速推理,DeepSeek / Llama 4 / Qwen / GPT-OSS,首 token < 1s",
+    signupUrl: "https://cloud.sambanova.ai/apis",
+    docsUrl: "https://docs.sambanova.ai",
+    channelType: "openai",
+    baseUrl: "https://api.sambanova.ai/v1",
+    testModel: "Meta-Llama-3.3-70B-Instruct",
+    models: [
+      "Meta-Llama-3.3-70B-Instruct",
+      "Llama-4-Maverick-17B-128E-Instruct",
+      "DeepSeek-V3.1",
+      "DeepSeek-V3.2",
+      "MiniMax-M2.7",
+      "gpt-oss-120b",
+      "gemma-3-12b-it",
+    ],
+    recommendedGroupName: "sambanova",
+    recommendedDisplayName: "SambaNova Cloud",
+    upstreamHosts: ["api.sambanova.ai"],
+    badge: "fast",
+    verifiedAt: "2026-05",
+  },
+  {
     id: "kilo",
     name: "Kilo Code",
     freeTier: "免费模型,无需绑卡",
@@ -957,6 +982,15 @@ export const FREE_MODELS: FreeModel[] = [
     tier: "balanced",
     notes: "代码专用",
   },
+
+  // SambaNova Cloud (registry: ofind 2026-05; trial-credits $5/3mo, latency < 1s)
+  { providerId: "sambanova", modelId: "Meta-Llama-3.3-70B-Instruct", tier: "balanced", notes: "70B · 高速推理" },
+  { providerId: "sambanova", modelId: "Llama-4-Maverick-17B-128E-Instruct", tier: "max", notes: "多模态旗舰" },
+  { providerId: "sambanova", modelId: "DeepSeek-V3.1", tier: "max" },
+  { providerId: "sambanova", modelId: "DeepSeek-V3.2", tier: "max" },
+  { providerId: "sambanova", modelId: "MiniMax-M2.7", tier: "balanced" },
+  { providerId: "sambanova", modelId: "gpt-oss-120b", tier: "max", notes: "OpenAI 开源 120B" },
+  { providerId: "sambanova", modelId: "gemma-3-12b-it", tier: "fast" },
 
   // 美团 LongCat (PascalCase IDs, 官方文档校对)
   {

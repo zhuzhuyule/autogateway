@@ -6,21 +6,50 @@
 import { computed, ref } from "vue";
 import http from "@/utils/http";
 
+// FreeQuotaMeta 来自上游 free_quota 字段 ({notes: string} | null).
+// 缺时 undefined; 含值时至少 notes 非空.
+export interface FreeQuotaMeta {
+  notes?: string;
+}
+
 export interface FreeModelMeta {
   provider: string;
   modelId: string;
   name: string;
+  /** 短描述, e.g. "语言模型". 645/697 模型有, 缺时空串. */
+  description?: string;
+  /** Unix ts, 上游模型创建时间. 排序 / "新" 标签用. */
+  created?: number;
   isFree: boolean;
   billingMode: string; // "free" | "trial" | "paid"
   freeTier: string; // "full" | "trial" | ""
   freeKind: string; // "permanent" | "rate-limited" | ...
+  /** 上游 2026-05 起 free_quota 改为 dict 形式. */
+  freeQuota?: FreeQuotaMeta;
   contextSize: number;
   contextLabel: string;
   tier: string; // "small" | "medium" | "large"
-  speed: string; // "fast" | "balanced" | "slow"
+  speed: string; // "fast" | "standard" | "premium"
+  /** 上游 2026-05 起新增. "entry" | "mid" | "high". 697/697 覆盖. */
+  performanceLevel?: string;
+  /** "< 1s" | "1-3s" | "3-10s". 697/697 覆盖. */
+  estimatedLatency?: string;
   isReasoning: boolean;
   isMultimodal: boolean;
   hasToolUse: boolean;
+  /**
+   * 能力枚举: "chat" / "text-generation" / "tool-use" / "vision" / "reasoning"
+   * / "code-generation" / "function-calling" / "embeddings" / "rerank" / 等
+   * 29 种. 比 isReasoning / isMultimodal / hasToolUse 三个 bool 表达力强;
+   * 路由器决策建议直接读这里.
+   */
+  capabilities?: string[];
+  /** "conversation" / "q&a" / "code-completion" / "math" / 等. 30 种. */
+  useCase?: string[];
+  /** 上游给出的参数量 (e.g. 8e9 表示 8B). 261/697 覆盖. */
+  parameterCount?: number;
+  modelVariant?: string;
+  quantization?: string;
   priceInput: number;
   priceOutput: number;
   modelFamily: string;
@@ -122,9 +151,28 @@ function isKnownProviderId(s: string): boolean {
   return KNOWN_FREEMODELS_PROVIDERS.has(s.toLowerCase());
 }
 
-/** 历史包袱:仍有少数 caller 调 expandProviderAliases. 既然 ID 统一了, 直接返回 [自身]. */
+/**
+ * Provider ID 对齐 — registry 与本地 freeProviders.ts 的 ID 不完全一致时,
+ * 通过别名让两边互查能命中. byProvMod 索引时会把每个 alias 都注册一份.
+ *
+ * 已知不一致 (2026-05-19 ofind schema):
+ *   - registry 'github' ↔ 本地 'github-models' (Azure 托管的 GitHub Models)
+ *
+ * 其他 ID (groq/cerebras/openrouter/...) 双方已对齐, alias = [自身].
+ */
+const PROVIDER_ALIAS_PAIRS: Array<[string, string]> = [["github", "github-models"]];
+const PROVIDER_ALIAS_MAP: Record<string, string[]> = (() => {
+  const out: Record<string, string[]> = {};
+  for (const [a, b] of PROVIDER_ALIAS_PAIRS) {
+    out[a] = [a, b];
+    out[b] = [b, a];
+  }
+  return out;
+})();
+
 export function expandProviderAliases(providerId: string): string[] {
-  return [providerId.toLowerCase()];
+  const key = providerId.toLowerCase();
+  return PROVIDER_ALIAS_MAP[key] || [key];
 }
 
 // Indexed lookup tables — 必须是 Vue computed 才能让所有 caller (render / watch /

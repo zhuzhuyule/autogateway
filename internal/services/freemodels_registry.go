@@ -42,28 +42,49 @@ const (
 
 // FreeModelMeta is the subset of fields we expose to the rest of the app.
 // Field tags match the upstream JSON exactly; unused fields stay off the struct.
+//
+// 2026-05-19 schema upgrade: 上游 ofind.cn 加了一批新字段, 全量纳入. 旧字段
+// 保持不变 (向后兼容). 字段覆盖率不同 (capabilities/performance_level/estimated_latency
+// 在 697/697 模型都有, description 645/697, parameter_count 仅 261/697 等),
+// 缺失值是零值 (空串/0/nil), 调用方自行判断.
 type FreeModelMeta struct {
 	Provider         string                 `json:"provider"`
 	ModelID          string                 `json:"modelId"`
 	Name             string                 `json:"name"`
+	Description      string                 `json:"description,omitempty"` // 短描述, e.g. "语言模型" / "用于代码生成的模型"
+	Created          int64                  `json:"created,omitempty"`     // Unix ts, 上游模型创建时间 (排序/"新"标签)
 	IsFree           bool                   `json:"isFree"`
 	IsExperienceable bool                   `json:"isExperienceable"` // gitee 体验额度 (可体验非完全免费)
 	BillingMode      string                 `json:"billingMode"`      // "free" | "trial" | "paid"
 	FreeTier         string                 `json:"freeTier"`         // "full" | "trial" | "none" | ""
 	FreeKind         string                 `json:"freeKind"`         // "permanent" | "rate-limited" | ...
+	FreeQuota        *FreeQuotaMeta         `json:"freeQuota,omitempty"`
 	ContextSize      int                    `json:"contextSize"`
 	ContextLabel     string                 `json:"contextLabel"`
-	Tier             string                 `json:"tier"`  // "small" | "medium" | "large"
-	Speed            string                 `json:"speed"` // "fast" | "balanced" | "slow"
+	Tier             string                 `json:"tier"`             // "small" | "medium" | "large"
+	Speed            string                 `json:"speed"`            // "fast" | "standard" | "premium"
+	PerformanceLevel string                 `json:"performanceLevel"` // "entry" | "mid" | "high"
+	EstimatedLatency string                 `json:"estimatedLatency"` // "< 1s" | "1-3s" | "3-10s"
 	IsReasoning      bool                   `json:"isReasoning"`
 	IsMultimodal     bool                   `json:"isMultimodal"`
 	HasToolUse       bool                   `json:"hasToolUse"`
+	Capabilities     []string               `json:"capabilities,omitempty"` // "chat" / "text-generation" / "tool-use" / "vision" / ...
+	UseCase          []string               `json:"useCase,omitempty"`      // "conversation" / "q&a" / "code-completion" / ...
+	ParameterCount   int64                  `json:"parameterCount,omitempty"`
+	ModelVariant     string                 `json:"modelVariant,omitempty"`
+	Quantization     string                 `json:"quantization,omitempty"`
 	PriceInput       float64                `json:"priceInput"`
 	PriceOutput      float64                `json:"priceOutput"`
 	ModelFamily      string                 `json:"modelFamily"`
 	Aliases          []string               `json:"aliases"` // 跨 provider 同名
 	Tags             []string               `json:"tags"`
 	Metadata         map[string]interface{} `json:"metadata,omitempty"` // provider 原生 meta, 含 gitee 的 isExperienceable / isFullyFree / freeUse 等
+}
+
+// FreeQuotaMeta 是 free_quota 字段的结构 (上游 2026-05 起为 dict, 主要含 notes 描述).
+// 之前是 string, 解析时按 dict 兼容; 缺时 nil (而非空 struct), 避免无意义 JSON {}.
+type FreeQuotaMeta struct {
+	Notes string `json:"notes,omitempty"`
 }
 
 // FreeProviderMeta 是单个 provider 的元数据 (从 FreeModels providerMeta
@@ -121,24 +142,34 @@ type upstreamProviderMeta struct {
 }
 
 type upstreamModel struct {
-	ID            string   `json:"id"`       // "<provider>/<rawId>"
-	Provider      string   `json:"provider"` // owned_by 已删除 (≡ provider)
-	Name          string   `json:"name"`
-	ContextSize   int      `json:"context_size"`
-	ContextLabel  string   `json:"context_label"`
-	PriceInput    float64  `json:"price_input"`
-	PriceOutput   float64  `json:"price_output"`
-	IsFree        bool     `json:"is_free"`
-	FreeMechanism *string  `json:"free_mechanism"` // permanent / rate-limited / preview / trial-credits / daily-tokens / null
-	TrialScope    string   `json:"trial_scope"`    // "all" / "specific" / "none"
-	IsReasoning   bool     `json:"is_reasoning"`
-	IsMultimodal  bool     `json:"is_multimodal"`
-	HasToolUse    bool     `json:"has_tool_use"`
-	ModelFamily   string   `json:"model_family"`
-	Aliases       []string `json:"aliases"`
-	Tags          []string `json:"tags"`
-	Tier          string   `json:"tier"`
-	Speed         string   `json:"speed"`
+	ID               string         `json:"id"`       // "<provider>/<rawId>"
+	Provider         string         `json:"provider"` // owned_by 已删除 (≡ provider)
+	Name             string         `json:"name"`
+	Description      string         `json:"description"`
+	Created          int64          `json:"created"` // Unix ts
+	ContextSize      int            `json:"context_size"`
+	ContextLabel     string         `json:"context_label"`
+	PriceInput       float64        `json:"price_input"`
+	PriceOutput      float64        `json:"price_output"`
+	IsFree           bool           `json:"is_free"`
+	FreeMechanism    *string        `json:"free_mechanism"` // permanent / rate-limited / preview / trial-credits / daily-tokens / null
+	FreeQuota        *FreeQuotaMeta `json:"free_quota"`     // {notes: "..."} | null
+	TrialScope       string         `json:"trial_scope"`    // "all" / "specific" / "none"
+	IsReasoning      bool           `json:"is_reasoning"`
+	IsMultimodal     bool           `json:"is_multimodal"`
+	HasToolUse       bool           `json:"has_tool_use"`
+	Capabilities     []string       `json:"capabilities"`      // "chat" / "tool-use" / "vision" / "reasoning" / ...
+	UseCase          []string       `json:"use_case"`          // "conversation" / "q&a" / "code-completion" / ...
+	PerformanceLevel string         `json:"performance_level"` // "entry" / "mid" / "high"
+	EstimatedLatency string         `json:"estimated_latency"` // "< 1s" / "1-3s" / "3-10s"
+	ParameterCount   int64          `json:"parameter_count"`
+	ModelVariant     string         `json:"model_variant"`
+	Quantization     string         `json:"quantization"`
+	ModelFamily      string         `json:"model_family"`
+	Aliases          []string       `json:"aliases"`
+	Tags             []string       `json:"tags"`
+	Tier             string         `json:"tier"`
+	Speed            string         `json:"speed"`
 }
 
 // FreeModelsRegistry holds an in-memory copy of the upstream registry,
@@ -301,18 +332,28 @@ func parseUpstream(body []byte) (freeModelsEnvelope, error) {
 			Provider:         u.Provider,
 			ModelID:          u.ID,
 			Name:             u.Name,
+			Description:      u.Description,
+			Created:          u.Created,
 			IsFree:           isFree,
 			IsExperienceable: isExperienceable,
 			BillingMode:      "", // 上游已不再提供, 留空
 			FreeTier:         freeTier,
 			FreeKind:         freeKind,
+			FreeQuota:        u.FreeQuota,
 			ContextSize:      u.ContextSize,
 			ContextLabel:     u.ContextLabel,
 			Tier:             u.Tier,
 			Speed:            u.Speed,
+			PerformanceLevel: u.PerformanceLevel,
+			EstimatedLatency: u.EstimatedLatency,
 			IsReasoning:      u.IsReasoning,
 			IsMultimodal:     u.IsMultimodal,
 			HasToolUse:       u.HasToolUse,
+			Capabilities:     u.Capabilities,
+			UseCase:          u.UseCase,
+			ParameterCount:   u.ParameterCount,
+			ModelVariant:     u.ModelVariant,
+			Quantization:     u.Quantization,
 			PriceInput:       u.PriceInput,
 			PriceOutput:      u.PriceOutput,
 			ModelFamily:      u.ModelFamily,

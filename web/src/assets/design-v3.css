@@ -1765,6 +1765,15 @@ body.dark,
   color: var(--v3-ink);
   word-break: break-all;
 }
+.v3-model-row__desc {
+  font: 400 11px/1.4 var(--v3-sans);
+  color: var(--v3-ink-3);
+  margin-top: 2px;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+}
 
 .v3-log-row {
   display: grid;
