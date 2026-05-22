@@ -47,3 +47,52 @@ func TestSeal_RandomSaltAndNonce(t *testing.T) {
 		t.Fatal("nonce must be random per Seal")
 	}
 }
+
+func TestDeriveKey_Deterministic(t *testing.T) {
+	salt := []byte("0123456789abcdef")
+	a := DeriveKey("password-x", salt)
+	b := DeriveKey("password-x", salt)
+	if !bytes.Equal(a, b) {
+		t.Fatal("DeriveKey must be deterministic for same (password, salt)")
+	}
+}
+
+func TestDeriveKey_DifferentPasswordYieldsDifferentKey(t *testing.T) {
+	salt := []byte("0123456789abcdef")
+	a := DeriveKey("password-x", salt)
+	b := DeriveKey("password-y", salt)
+	if bytes.Equal(a, b) {
+		t.Fatal("DeriveKey must differ for different passwords")
+	}
+}
+
+func TestOpen_TamperedCiphertextRejected(t *testing.T) {
+	box, err := Seal([]byte("payload"), "pw")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(box.Ciphertext) == 0 {
+		t.Fatal("empty ciphertext")
+	}
+	// Flip a bit in the middle of the ciphertext (before the GCM tag).
+	box.Ciphertext[0] ^= 0x01
+	if _, err := Open(box, "pw"); err == nil {
+		t.Fatal("expected error on tampered ciphertext, got nil")
+	}
+}
+
+func TestOpen_TamperedAADRejected(t *testing.T) {
+	box, err := Seal([]byte("payload"), "pw")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(box.AAD) == 0 {
+		t.Fatal("empty AAD")
+	}
+	// Simulate a downgrade attempt: flip the version byte in the AAD.
+	box.AAD = append([]byte(nil), box.AAD...) // own copy to avoid mutating shared backing
+	box.AAD[len(box.AAD)-1] ^= 0xFF
+	if _, err := Open(box, "pw"); err == nil {
+		t.Fatal("expected error on tampered AAD (downgrade), got nil")
+	}
+}
