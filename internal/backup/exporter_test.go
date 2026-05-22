@@ -2,6 +2,8 @@ package backup
 
 import (
 	"context"
+	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -112,5 +114,75 @@ func TestExport_DecryptFailureProducesWarning(t *testing.T) {
 	}
 	if len(warns) == 0 {
 		t.Error("expected at least 1 warning")
+	}
+}
+
+// TestGroupModelToDTO_JSONShape pins down 4 behaviors at once:
+// raw shape preservation, omitempty on nullable JSON, IsSystem
+// flattening, and empty Upstreams must NOT degrade to null.
+func TestGroupModelToDTO_JSONShape(t *testing.T) {
+	g := models.Group{
+		Name:          "x",
+		Upstreams:     datatypes.JSON(`[{"url":"https://a"}]`),
+		ExposedModels: datatypes.JSON(`["m1","m2"]`),
+		BlockedModels: datatypes.JSON(`[]`),
+		// HeaderRules left nil — must be omitted from JSON
+		IsSystem: true, // must be flattened to false
+	}
+	dto := groupModelToDTO(&g)
+	out, err := json.Marshal(dto)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(out)
+	if !strings.Contains(s, `"upstreams":[{"url":"https://a"}]`) {
+		t.Errorf("upstreams not raw-preserved: %s", s)
+	}
+	if !strings.Contains(s, `"exposed_models":["m1","m2"]`) {
+		t.Errorf("exposed_models not raw-preserved: %s", s)
+	}
+	if strings.Contains(s, `"header_rules"`) {
+		t.Errorf("nil header_rules should be omitted: %s", s)
+	}
+	if strings.Contains(s, `"is_system":true`) {
+		t.Errorf("is_system must always export false: %s", s)
+	}
+}
+
+// TestGroupModelToDTO_EmptyUpstreamsBecomesArray makes sure the
+// NOT-NULL invariant on Upstreams holds even when the source row
+// has nil bytes.
+func TestGroupModelToDTO_EmptyUpstreamsBecomesArray(t *testing.T) {
+	g := models.Group{Name: "x", Upstreams: nil}
+	dto := groupModelToDTO(&g)
+	out, _ := json.Marshal(dto)
+	if !strings.Contains(string(out), `"upstreams":[]`) {
+		t.Fatalf("nil Upstreams must marshal as []: %s", out)
+	}
+}
+
+// TestExport_NoSystemGroupInOutput negatively asserts that no
+// system-aggregate group ever appears in Data.Groups.
+func TestExport_NoSystemGroupInOutput(t *testing.T) {
+	db := newTestDB(t)
+	db.Create(&models.Group{Name: "stdA", ChannelType: "openai", TestModel: "m", Upstreams: datatypes.JSON("[]")})
+	db.Create(&models.Group{Name: "default-openai", ChannelType: "openai", TestModel: "m", IsSystem: true, GroupType: "aggregate", Upstreams: datatypes.JSON("[]")})
+	db.Create(&models.Group{Name: "default-anthropic", ChannelType: "anthropic", TestModel: "m", IsSystem: true, GroupType: "aggregate", Upstreams: datatypes.JSON("[]")})
+
+	exp := NewExporter(db, fakeEncSvc{}, "v")
+	got, _, err := exp.Export(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, g := range got.Data.Groups {
+		if g.IsSystem {
+			t.Errorf("exported group %q has IsSystem=true", g.Name)
+		}
+		if g.Name == "default-openai" || g.Name == "default-anthropic" {
+			t.Errorf("system group leaked into output: %s", g.Name)
+		}
+	}
+	if len(got.Data.Groups) != 1 {
+		t.Errorf("expected exactly 1 standard group, got %d", len(got.Data.Groups))
 	}
 }

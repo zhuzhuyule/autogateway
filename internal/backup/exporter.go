@@ -3,6 +3,7 @@ package backup
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -63,6 +64,8 @@ func (e *Exporter) Export(ctx context.Context) (*BackupV1, []string, error) {
 		if err := tx.Where("is_system = ?", true).Find(&sysGroups).Error; err != nil {
 			return fmt.Errorf("read sys groups: %w", err)
 		}
+		// models.Group.Name has a unique constraint at the SQL level, so the
+		// standard + system passes can share nameByID safely.
 		for _, g := range sysGroups {
 			nameByID[g.ID] = g.Name
 		}
@@ -84,6 +87,8 @@ func (e *Exporter) Export(ctx context.Context) (*BackupV1, []string, error) {
 					warnings = append(warnings, fmt.Sprintf("api_key id=%d decrypt failed, skipped", k.ID))
 					continue
 				}
+				// Safe lookup: k.GroupID came from standardIDs which was derived from
+				// the same `groups` slice that populated nameByID.
 				out.Data.APIKeys = append(out.Data.APIKeys, APIKeyDTO{
 					GroupName: nameByID[k.GroupID],
 					KeyValue:  plain,
@@ -101,6 +106,8 @@ func (e *Exporter) Export(ctx context.Context) (*BackupV1, []string, error) {
 			}
 			out.Data.ModelAliases = make([]ModelAliasDTO, 0, len(aliases))
 			for _, a := range aliases {
+				// Safe lookup: a.GroupID came from standardIDs which was derived from
+				// the same `groups` slice that populated nameByID.
 				out.Data.ModelAliases = append(out.Data.ModelAliases, ModelAliasDTO{
 					Alias:      a.Alias,
 					GroupName:  nameByID[a.GroupID],
@@ -167,8 +174,12 @@ func groupModelToDTO(g *models.Group) GroupDTO {
 		ModelRedirectStrict: g.ModelRedirectStrict,
 		ModelRoutingMode:    g.ModelRoutingMode,
 	}
-	if g.Upstreams != nil {
-		dto.Upstreams = jsonRaw(g.Upstreams)
+	// Upstreams 在 DB 是 NOT NULL —— nil/空字节必须规范化为 []，
+	// 否则会 JSON-marshal 成 null，违反 schema.go 的契约。
+	if len(g.Upstreams) == 0 {
+		dto.Upstreams = json.RawMessage(`[]`)
+	} else {
+		dto.Upstreams = json.RawMessage(g.Upstreams)
 	}
 	if g.HeaderRules != nil {
 		dto.HeaderRules = jsonRaw(g.HeaderRules)
@@ -183,21 +194,10 @@ func groupModelToDTO(g *models.Group) GroupDTO {
 }
 
 // jsonRaw 把 datatypes.JSON ([]byte) 转成 any 以便 json.Marshal 原样输出。
+// 空值 → nil（配合 GroupDTO 上的 omitempty 即从 JSON 中省略）。
 func jsonRaw(b []byte) any {
 	if len(b) == 0 {
 		return nil
 	}
-	// 用 json.RawMessage 让上层 marshal 时按原始结构输出
-	rm := make([]byte, len(b))
-	copy(rm, b)
-	return jsonRawMessage(rm)
-}
-
-type jsonRawMessage []byte
-
-func (m jsonRawMessage) MarshalJSON() ([]byte, error) {
-	if len(m) == 0 {
-		return []byte("null"), nil
-	}
-	return []byte(m), nil
+	return json.RawMessage(b)
 }
