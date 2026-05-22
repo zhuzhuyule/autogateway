@@ -42,7 +42,7 @@ func DecodeContainer(blob []byte, password string) ([]byte, error) {
 	if len(blob) < headerFixedLen+saltLen+nonceLen+4 {
 		return nil, errors.New("acb: truncated header")
 	}
-	if string(blob[0:4]) != string(magic[:]) {
+	if string(blob[0:magicLen]) != string(magic[:]) {
 		return nil, errors.New("acb: bad magic")
 	}
 	ver := blob[4]

@@ -50,3 +50,21 @@ func TestDecodeContainer_Truncated(t *testing.T) {
 		t.Fatal("expected truncation error")
 	}
 }
+
+func TestDecodeContainer_UnsupportedKDF(t *testing.T) {
+	blob, _ := EncodeContainer([]byte("x"), "x")
+	blob[5] = 0x99 // tamper kdf_id
+	_, err := DecodeContainer(blob, "x")
+	if err == nil {
+		t.Fatal("expected unsupported kdf error")
+	}
+}
+
+func TestDecodeContainer_UnsupportedCipher(t *testing.T) {
+	blob, _ := EncodeContainer([]byte("x"), "x")
+	blob[6] = 0x99 // tamper cipher_id
+	_, err := DecodeContainer(blob, "x")
+	if err == nil {
+		t.Fatal("expected unsupported cipher error")
+	}
+}
