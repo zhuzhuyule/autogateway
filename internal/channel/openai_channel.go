@@ -62,14 +62,8 @@ func (ch *OpenAIChannel) IsStreamRequest(c *gin.Context, bodyBytes []byte) bool 
 }
 
 func (ch *OpenAIChannel) ExtractModel(c *gin.Context, bodyBytes []byte) string {
-	type modelPayload struct {
-		Model string `json:"model"`
-	}
-	var p modelPayload
-	if err := json.Unmarshal(bodyBytes, &p); err == nil {
-		return p.Model
-	}
-	return ""
+	// 兼容 JSON 与 multipart/form-data(audio/transcriptions 等需要文件上传的端点).
+	return utils.ExtractRequestedModel(c.GetHeader("Content-Type"), bodyBytes)
 }
 
 // ValidateKey checks if the given API key is valid by making a chat completion request.

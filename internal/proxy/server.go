@@ -65,18 +65,10 @@ func NewProxyServer(
 }
 
 // extractRequestedModel 从请求体中粗解析 "model" 字段;OpenAI/Anthropic/Gemini 三种 channel 都用这个字段.
+// 兼容 JSON(chat/completions 等)与 multipart/form-data(audio/transcriptions 等需文件上传的端点).
 // 解析失败或不存在 → 返回空字符串(等价于不做模型过滤).
-func extractRequestedModel(body []byte) string {
-	if len(body) == 0 {
-		return ""
-	}
-	var probe struct {
-		Model string `json:"model"`
-	}
-	if err := json.Unmarshal(body, &probe); err != nil {
-		return ""
-	}
-	return probe.Model
+func extractRequestedModel(contentType string, body []byte) string {
+	return utils.ExtractRequestedModel(contentType, body)
 }
 
 // HandleProxy is the main entry point for proxy requests, refactored based on the stable .bak logic.
@@ -99,7 +91,7 @@ func (ps *ProxyServer) HandleProxy(c *gin.Context) {
 		return
 	}
 	c.Request.Body.Close()
-	requestedModel := extractRequestedModel(bodyBytes)
+	requestedModel := extractRequestedModel(c.GetHeader("Content-Type"), bodyBytes)
 
 	// 模型感知的 sub-group 选择(聚合分组才走;请求 model 为空时退化为普通 SWRR)
 	subGroupName, err := ps.subGroupManager.SelectSubGroupForModel(originalGroup, requestedModel)
