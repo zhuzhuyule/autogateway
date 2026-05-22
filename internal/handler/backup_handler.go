@@ -1,11 +1,11 @@
 package handler
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strings"
 	"time"
@@ -55,10 +55,17 @@ func (h *BackupHandler) Export(c *gin.Context) {
 	}
 	host := h.hostSlug()
 	fname := fmt.Sprintf("api-center-backup-%s-%s.acb", host, time.Now().UTC().Format("20060102-150405"))
-	c.Header("Content-Type", "application/octet-stream")
 	c.Header("Content-Disposition", `attachment; filename="`+fname+`"`)
-	logrus.Infof("event=backup.export bytes=%d", len(blob))
-	io.Copy(c.Writer, bytes.NewReader(blob))
+	if len(warns) > 0 {
+		c.Header("X-Backup-Warnings", fmt.Sprintf("%d", len(warns)))
+	}
+	logrus.WithFields(logrus.Fields{
+		"event":    "backup.export",
+		"ip":       c.ClientIP(),
+		"bytes":    len(blob),
+		"warnings": len(warns),
+	}).Info("export delivered")
+	c.Data(http.StatusOK, "application/octet-stream", blob)
 }
 
 // Preview POST /api/admin/backup/preview (multipart: file, password)
@@ -93,17 +100,26 @@ func (h *BackupHandler) Import(c *gin.Context) {
 	rep, err := h.svc.Import(c.Request.Context(), blob, password, strat, tok)
 	if err != nil {
 		if strings.Contains(err.Error(), "stale") {
+			logrus.WithField("ip", c.ClientIP()).Warn("backup.import stale_preview")
 			c.JSON(http.StatusConflict, gin.H{"error": "STALE_PREVIEW", "detail": err.Error()})
 			return
 		}
 		c.JSON(classifyDecodeError(err), gin.H{"error": classifyErrorCode(err), "detail": err.Error()})
 		return
 	}
-	logrus.Infof("event=backup.import applied=%+v skipped=%+v", rep.Applied, rep.Skipped)
+	logrus.WithFields(logrus.Fields{
+		"event":    "backup.import",
+		"strategy": strat,
+		"ip":       c.ClientIP(),
+		"applied":  rep.Applied,
+		"skipped":  rep.Skipped,
+	}).Info("import applied")
 	c.JSON(http.StatusOK, rep)
 }
 
 func readMultipart(c *gin.Context) ([]byte, string, error) {
+	const maxBody = 64 << 20 // 64 MB
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBody)
 	if err := c.Request.ParseMultipartForm(32 << 20); err != nil {
 		return nil, "", err
 	}
@@ -129,11 +145,13 @@ func classifyDecodeError(err error) int {
 	}
 	msg := err.Error()
 	switch {
-	case strings.Contains(msg, "decrypt"), strings.Contains(msg, "bad magic"):
+	case strings.Contains(msg, "acb:"):
 		return http.StatusBadRequest
-	case strings.Contains(msg, "unsupported"):
+	case strings.Contains(msg, "decrypt"):
 		return http.StatusBadRequest
 	case strings.Contains(msg, "malformed"):
+		return http.StatusBadRequest
+	case strings.Contains(msg, "unsupported schema_version"):
 		return http.StatusBadRequest
 	}
 	return http.StatusInternalServerError
@@ -142,14 +160,14 @@ func classifyDecodeError(err error) int {
 func classifyErrorCode(err error) string {
 	msg := err.Error()
 	switch {
+	case strings.Contains(msg, "acb:"):
+		return "UNSUPPORTED_BACKUP_FORMAT"
 	case strings.Contains(msg, "decrypt"):
 		return "INVALID_PASSWORD_OR_CORRUPTED"
-	case strings.Contains(msg, "bad magic"):
-		return "UNSUPPORTED_BACKUP_FORMAT"
-	case strings.Contains(msg, "unsupported"):
-		return "UNSUPPORTED_SCHEMA_VERSION"
 	case strings.Contains(msg, "malformed"):
 		return "MALFORMED_PAYLOAD"
+	case strings.Contains(msg, "unsupported schema_version"):
+		return "UNSUPPORTED_SCHEMA_VERSION"
 	}
 	return "IMPORT_FAILED"
 }
@@ -164,8 +182,11 @@ func (h *BackupHandler) hostSlug() string {
 	if v == "" {
 		return "unknown"
 	}
-	s := strings.TrimPrefix(strings.TrimPrefix(v, "https://"), "http://")
-	s = hostSafe.ReplaceAllString(s, "-")
+	u, err := url.Parse(v)
+	if err != nil || u.Hostname() == "" {
+		return "unknown"
+	}
+	s := hostSafe.ReplaceAllString(u.Hostname(), "-")
 	if s == "" {
 		return "unknown"
 	}

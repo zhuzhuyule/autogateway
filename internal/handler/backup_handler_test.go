@@ -2,7 +2,6 @@ package handler
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"io"
 	"mime/multipart"
@@ -128,4 +127,67 @@ func uploadBackup(t *testing.T, r *gin.Engine, path string, blob []byte, passwor
 	return w, ""
 }
 
-var _ = context.Background
+func TestBackupHandler_StalePreview(t *testing.T) {
+	r, srcDB, _ := newTestServerWithBackup(t)
+	srcDB.Create(&models.Group{Name: "x", ChannelType: "openai", TestModel: "m", Upstreams: datatypes.JSON("[]")})
+
+	// export
+	ew := httptest.NewRecorder()
+	er := httptest.NewRequest("POST", "/api/admin/backup/export", strings.NewReader(`{"password":"p"}`))
+	er.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(ew, er)
+	blob := ew.Body.Bytes()
+
+	// preview
+	pw, tok := uploadBackup(t, r, "/api/admin/backup/preview", blob, "p", "")
+	if pw.Code != http.StatusOK || tok == "" {
+		t.Fatal("preview setup failed")
+	}
+
+	// Tamper the blob (flip byte 30 to corrupt ciphertext) — fingerprint mismatch
+	if len(blob) < 50 {
+		t.Fatal("blob too small to tamper")
+	}
+	tampered := append([]byte(nil), blob...)
+	tampered[30] ^= 0xFF
+
+	iw, _ := uploadBackup(t, r, "/api/admin/backup/import", tampered, "p", tok+"|merge")
+	if iw.Code != http.StatusConflict {
+		t.Fatalf("expected 409 STALE_PREVIEW (blob fingerprint mismatch), got %d body=%s", iw.Code, iw.Body.String())
+	}
+}
+
+func TestBackupHandler_BadStrategy(t *testing.T) {
+	r, _, _ := newTestServerWithBackup(t)
+	// import with an invalid strategy string — bypass preview
+	var body bytes.Buffer
+	mw := multipart.NewWriter(&body)
+	fw, _ := mw.CreateFormFile("file", "x.acb")
+	fw.Write([]byte("ACB1"))
+	mw.WriteField("password", "p")
+	mw.WriteField("strategy", "nope")
+	mw.WriteField("confirm_token", "anything")
+	mw.Close()
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest("POST", "/api/admin/backup/import", &body)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 BAD_STRATEGY, got %d body=%s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "BAD_STRATEGY") {
+		t.Errorf("expected BAD_STRATEGY in body, got %s", w.Body.String())
+	}
+}
+
+func TestHostSlug(t *testing.T) {
+	h := &BackupHandler{}
+	if got := h.hostSlug(); got != "unknown" {
+		t.Errorf("nil settingsManager: got %q want unknown", got)
+	}
+	// Without a real settingsManager we can't test the URL paths directly without
+	// wiring a config.SystemSettingsManager. The internal regex behavior is
+	// covered by hostSafe applied to the parsed hostname in production paths.
+}
