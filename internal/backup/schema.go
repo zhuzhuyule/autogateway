@@ -37,19 +37,20 @@ type GroupDTO struct {
 	GroupType           string                 `json:"group_type"`
 	IsSystem            bool                   `json:"is_system"`
 	SystemRole          string                 `json:"system_role"`
+	// Upstreams 在 DB 是 NOT NULL —— exporter 必须把 nil 规范化为 []。
 	Upstreams           any                    `json:"upstreams"`
 	ValidationEndpoint  string                 `json:"validation_endpoint"`
 	ChannelType         string                 `json:"channel_type"`
 	Sort                int                    `json:"sort"`
 	TestModel           string                 `json:"test_model"`
-	ParamOverrides      map[string]any         `json:"param_overrides"`
-	Config              map[string]any         `json:"config"`
-	HeaderRules         any                    `json:"header_rules"`
-	ModelRedirectRules  map[string]any         `json:"model_redirect_rules"`
+	ParamOverrides      map[string]any         `json:"param_overrides,omitempty"`
+	Config              map[string]any         `json:"config,omitempty"`
+	HeaderRules         any                    `json:"header_rules,omitempty"`
+	ModelRedirectRules  map[string]any         `json:"model_redirect_rules,omitempty"`
 	ModelRedirectStrict bool                   `json:"model_redirect_strict"`
 	ModelRoutingMode    string                 `json:"model_routing_mode"`
-	ExposedModels       any                    `json:"exposed_models"`
-	BlockedModels       any                    `json:"blocked_models"`
+	ExposedModels       any                    `json:"exposed_models,omitempty"`
+	BlockedModels       any                    `json:"blocked_models,omitempty"`
 }
 
 type GroupSubGroupDTO struct {
@@ -58,6 +59,8 @@ type GroupSubGroupDTO struct {
 	Weight       int    `json:"weight"`
 }
 
+// APIKeyDTO 是 api_keys 表的备份形态。KeyHash 字段未导出，
+// 导入端按 KeyValue 重算。
 type APIKeyDTO struct {
 	GroupName string `json:"group_name"`
 	KeyValue  string `json:"key_value"` // PLAINTEXT
