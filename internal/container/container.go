@@ -3,6 +3,7 @@ package container
 
 import (
 	"autogateway/internal/app"
+	"autogateway/internal/backup"
 	"autogateway/internal/channel"
 	"autogateway/internal/config"
 	"autogateway/internal/db"
@@ -16,6 +17,7 @@ import (
 	"autogateway/internal/services"
 	"autogateway/internal/store"
 	"autogateway/internal/types"
+	"autogateway/internal/version"
 
 	"go.uber.org/dig"
 	"gorm.io/gorm"
@@ -151,6 +153,18 @@ func BuildContainer() (*dig.Container, error) {
 		return nil, err
 	}
 	if err := container.Provide(handler.NewDedupHandler); err != nil {
+		return nil, err
+	}
+
+	// Backup/Restore (config 一键备份恢复)
+	if err := container.Provide(func(db *gorm.DB, enc encryption.Service) *backup.Service {
+		return backup.NewService(db, enc, version.Version)
+	}); err != nil {
+		return nil, err
+	}
+	if err := container.Provide(func(svc *backup.Service, sm *config.SystemSettingsManager) *handler.BackupHandler {
+		return handler.NewBackupHandler(svc).WithSettingsManager(sm)
+	}); err != nil {
 		return nil, err
 	}
 

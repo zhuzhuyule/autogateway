@@ -52,6 +52,7 @@ func NewRouter(
 	dedupHandler *handler.DedupHandler,
 	upstreamProbeHandler *handler.UpstreamProbeHandler,
 	freeModelsHandler *handler.FreeModelsHandler,
+	backupHandler *handler.BackupHandler,
 	buildFS embed.FS,
 	indexPage []byte,
 ) *gin.Engine {
@@ -74,7 +75,7 @@ func NewRouter(
 
 	// 注册路由
 	registerSystemRoutes(router, serverHandler)
-	registerAPIRoutes(router, serverHandler, configManager, aliasHandler, aliasSuggestionHandler, routingSettingsHandler, modelCatalogHandler, dedupHandler, upstreamProbeHandler, freeModelsHandler)
+	registerAPIRoutes(router, serverHandler, configManager, aliasHandler, aliasSuggestionHandler, routingSettingsHandler, modelCatalogHandler, dedupHandler, upstreamProbeHandler, freeModelsHandler, backupHandler)
 	registerProxyRoutes(router, proxyServer, groupManager, serverHandler, selector)
 	registerFrontendRoutes(router, buildFS, indexPage)
 
@@ -98,6 +99,7 @@ func registerAPIRoutes(
 	dedupHandler *handler.DedupHandler,
 	upstreamProbeHandler *handler.UpstreamProbeHandler,
 	freeModelsHandler *handler.FreeModelsHandler,
+	backupHandler *handler.BackupHandler,
 ) {
 	api := router.Group("/api")
 	api.Use(i18n.Middleware())
@@ -109,7 +111,7 @@ func registerAPIRoutes(
 	// 用户在 UI 改完即时生效,无需重启
 	protectedAPI := api.Group("")
 	protectedAPI.Use(middleware.Auth(serverHandler.SettingsManager))
-	registerProtectedAPIRoutes(protectedAPI, serverHandler, aliasHandler, aliasSuggestionHandler, routingSettingsHandler, modelCatalogHandler, dedupHandler, upstreamProbeHandler, freeModelsHandler)
+	registerProtectedAPIRoutes(protectedAPI, serverHandler, aliasHandler, aliasSuggestionHandler, routingSettingsHandler, modelCatalogHandler, dedupHandler, upstreamProbeHandler, freeModelsHandler, backupHandler)
 }
 
 // registerPublicAPIRoutes 公开API路由
@@ -129,6 +131,7 @@ func registerProtectedAPIRoutes(
 	dedupHandler *handler.DedupHandler,
 	upstreamProbeHandler *handler.UpstreamProbeHandler,
 	freeModelsHandler *handler.FreeModelsHandler,
+	backupHandler *handler.BackupHandler,
 ) {
 	api.GET("/channel-types", serverHandler.CommonHandler.GetChannelTypes)
 
@@ -226,6 +229,14 @@ func registerProtectedAPIRoutes(
 	{
 		settings.GET("", serverHandler.GetSettings)
 		settings.PUT("", serverHandler.UpdateSettings)
+	}
+
+	// Backup/Restore
+	backupGroup := api.Group("/admin/backup")
+	{
+		backupGroup.POST("/export", backupHandler.Export)
+		backupGroup.POST("/preview", backupHandler.Preview)
+		backupGroup.POST("/import", backupHandler.Import)
 	}
 }
 
