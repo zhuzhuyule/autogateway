@@ -47,6 +47,8 @@ type Service struct {
 	enc     encryption.Service
 	version string
 
+	invalidates []InvalidateFunc
+
 	tokensMu sync.Mutex
 	// tokens 是单进程内存中的 preview-token 存储。多实例部署需要把
 	// preview→import 钉到同一实例（sticky session），否则 import 会返回
@@ -59,6 +61,12 @@ type tokenEntry struct {
 	expires  time.Time
 }
 
+// InvalidateFunc runs after a successful Import to refresh caches and
+// reconcile invariants (e.g., system aggregate membership). Returning an
+// error appends a warning to the import Report — the import itself is
+// already committed at this point and won't be undone.
+type InvalidateFunc func() error
+
 const previewTokenTTL = 10 * time.Minute
 
 func NewService(db *gorm.DB, enc encryption.Service, version string) *Service {
@@ -68,6 +76,13 @@ func NewService(db *gorm.DB, enc encryption.Service, version string) *Service {
 		version: version,
 		tokens:  make(map[string]tokenEntry),
 	}
+}
+
+// WithInvalidator registers a post-Import hook to run after the DB
+// transaction commits successfully. Multiple hooks run in registration order.
+func (s *Service) WithInvalidator(fn InvalidateFunc) *Service {
+	s.invalidates = append(s.invalidates, fn)
+	return s
 }
 
 // blobFingerprint 计算 blob 的 SHA-256 摘要，用于 confirm_token ↔ blob 绑定。
@@ -140,7 +155,16 @@ func (s *Service) Import(ctx context.Context, blob []byte, password string, stra
 		return nil, err
 	}
 	imp := NewImporter(s.db, s.enc)
-	return imp.Import(ctx, bk, strat)
+	rep, err := imp.Import(ctx, bk, strat)
+	if err != nil {
+		return nil, err
+	}
+	for _, fn := range s.invalidates {
+		if hookErr := fn(); hookErr != nil {
+			rep.Warnings = append(rep.Warnings, fmt.Sprintf("post-import invalidate: %v", hookErr))
+		}
+	}
+	return rep, nil
 }
 
 func (s *Service) decode(blob []byte, password string) (*BackupV1, error) {

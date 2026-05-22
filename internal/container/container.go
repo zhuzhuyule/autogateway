@@ -2,6 +2,8 @@
 package container
 
 import (
+	"context"
+
 	"autogateway/internal/app"
 	"autogateway/internal/backup"
 	"autogateway/internal/channel"
@@ -157,8 +159,21 @@ func BuildContainer() (*dig.Container, error) {
 	}
 
 	// Backup/Restore (config 一键备份恢复)
-	if err := container.Provide(func(db *gorm.DB, enc encryption.Service) *backup.Service {
-		return backup.NewService(db, enc, version.Version)
+	if err := container.Provide(func(
+		db *gorm.DB,
+		enc encryption.Service,
+		groupManager *services.GroupManager,
+		aggSvc *services.AggregateGroupService,
+	) *backup.Service {
+		svc := backup.NewService(db, enc, version.Version)
+		// 1) Backfill: 让新导入的 standard 分组自动挂回 default-openai/gemini/anthropic 等系统聚合。
+		svc = svc.WithInvalidator(func() error {
+			aggSvc.BackfillSystemAggregates(context.Background())
+			return nil
+		})
+		// 2) Invalidate GroupManager 缓存：下次请求重新从 DB 加载分组配置。
+		svc = svc.WithInvalidator(groupManager.Invalidate)
+		return svc
 	}); err != nil {
 		return nil, err
 	}
