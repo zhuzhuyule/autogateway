@@ -231,8 +231,20 @@ func upsertSystemSetting(tx *gorm.DB, s SystemSettingDTO, strat Strategy) (bool,
 }
 
 func upsertGroup(tx *gorm.DB, dto GroupDTO, strat Strategy) (uint, bool, error) {
+	// Reject name collisions with system aggregates: a hand-crafted backup
+	// setting is_system=false on a name like "default-openai" must NOT
+	// demote the existing system row.
+	var sysCollision models.Group
+	sysErr := tx.Where("name = ? AND is_system = ?", dto.Name, true).First(&sysCollision).Error
+	if sysErr == nil {
+		return 0, false, fmt.Errorf("group name %q collides with system aggregate; payload rejected", dto.Name)
+	}
+	if sysErr != nil && !errors.Is(sysErr, gorm.ErrRecordNotFound) {
+		return 0, false, sysErr
+	}
+
 	var existing models.Group
-	err := tx.Where("name = ?", dto.Name).First(&existing).Error
+	err := tx.Where("name = ? AND is_system = ?", dto.Name, false).First(&existing).Error
 	newRow := dtoToGroupModel(dto)
 
 	if errors.Is(err, gorm.ErrRecordNotFound) {

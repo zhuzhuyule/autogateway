@@ -164,6 +164,7 @@ func BuildContainer() (*dig.Container, error) {
 		enc encryption.Service,
 		groupManager *services.GroupManager,
 		aggSvc *services.AggregateGroupService,
+		settingsManager *config.SystemSettingsManager,
 	) *backup.Service {
 		svc := backup.NewService(db, enc, version.Version)
 		// 1) Backfill: 让新导入的 standard 分组自动挂回 default-openai/gemini/anthropic 等系统聚合。
@@ -173,6 +174,9 @@ func BuildContainer() (*dig.Container, error) {
 		})
 		// 2) Invalidate GroupManager 缓存：下次请求重新从 DB 加载分组配置。
 		svc = svc.WithInvalidator(groupManager.Invalidate)
+		// 3) Invalidate SystemSettingsManager：让 app_url/auth_key 等 SystemSetting
+		//    在所有节点立刻生效，不需要重启。
+		svc = svc.WithInvalidator(settingsManager.Invalidate)
 		return svc
 	}); err != nil {
 		return nil, err

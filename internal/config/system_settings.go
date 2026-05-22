@@ -230,6 +230,13 @@ func (sm *SystemSettingsManager) UpdateSettings(settingsMap map[string]any) erro
 	return sm.syncer.Invalidate()
 }
 
+// Invalidate notifies all instances (incl. the local one) to drop their
+// in-memory copy of system settings and re-read from the database on the
+// next access. Safe to call multiple times.
+func (sm *SystemSettingsManager) Invalidate() error {
+	return sm.syncer.Invalidate()
+}
+
 // GetEffectiveConfig 获取有效配置 (系统配置 + 分组覆盖)
 func (sm *SystemSettingsManager) GetEffectiveConfig(groupConfigJSON datatypes.JSONMap) types.SystemSettings {
 	effectiveConfig := sm.GetSettings()

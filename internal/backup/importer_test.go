@@ -257,3 +257,41 @@ func TestImport_GroupSubGroupRoundTrip(t *testing.T) {
 		t.Errorf("group_sub_groups row missing or wrong weight: %+v", subs)
 	}
 }
+
+// TestImport_RejectsSystemGroupNameCollision pins down that an attacker
+// cannot demote a system aggregate by submitting a payload with
+// is_system=false but the system name (e.g. "default-openai").
+func TestImport_RejectsSystemGroupNameCollision(t *testing.T) {
+	db := newTestDB(t)
+	// Pre-seed an existing system aggregate.
+	db.Create(&models.Group{
+		Name:        "default-openai",
+		ChannelType: "openai",
+		TestModel:   "m",
+		IsSystem:    true,
+		GroupType:   "aggregate",
+		Upstreams:   datatypes.JSON("[]"),
+	})
+
+	// Build a malicious payload claiming default-openai is a standard group.
+	bk := &BackupV1{
+		SchemaVersion: 1,
+		Data: DataV1{
+			Groups: []GroupDTO{
+				{Name: "default-openai", ChannelType: "openai", TestModel: "m", IsSystem: false},
+			},
+		},
+	}
+	imp := NewImporter(db, fakeEncSvc{})
+	if _, err := imp.Import(context.Background(), bk, StrategyMerge); err == nil {
+		t.Fatal("expected error rejecting system-name collision")
+	}
+	// System group must still be system after the rejection (whole tx rolls back).
+	var got models.Group
+	if err := db.Where("name = ?", "default-openai").First(&got).Error; err != nil {
+		t.Fatal(err)
+	}
+	if !got.IsSystem {
+		t.Errorf("system group must not be demoted")
+	}
+}
