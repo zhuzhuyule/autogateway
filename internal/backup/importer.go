@@ -248,7 +248,8 @@ func upsertGroup(tx *gorm.DB, dto GroupDTO, strat Strategy) (uint, bool, error) 
 		return existing.ID, false, nil
 	}
 	newRow.ID = existing.ID
-	if err := tx.Model(&existing).Updates(newRow).Error; err != nil {
+	newRow.CreatedAt = existing.CreatedAt
+	if err := tx.Save(&newRow).Error; err != nil {
 		return 0, false, err
 	}
 	return existing.ID, true, nil
@@ -299,6 +300,14 @@ func dtoToGroupModel(dto GroupDTO) models.Group {
 	return g
 }
 
+// upsertAPIKey upserts an APIKey row using (group_id, key_hash) as the business key.
+//
+// Cross-instance note: key_hash is computed via encryption.Service.Hash, which is
+// HMAC-SHA256 keyed by ENCRYPTION_KEY. Same plaintext under different ENCRYPTION_KEY
+// yields different hashes — so migrating the same key between two instances that
+// already independently held it may produce a duplicate row, not a dedup. This is
+// the expected behavior: cross-instance dedup would require plaintext comparison
+// (decrypting every existing row), which is out of scope for v1.
 func upsertAPIKey(tx *gorm.DB, k APIKeyDTO, gid uint, enc encryption.Service, strat Strategy) (bool, error) {
 	hash := enc.Hash(k.KeyValue) // HMAC-SHA256 keyed by ENCRYPTION_KEY — matches project convention
 	var existing models.APIKey

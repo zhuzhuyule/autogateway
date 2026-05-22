@@ -1,6 +1,7 @@
 package backup
 
 import (
+	"bytes"
 	"context"
 	"testing"
 
@@ -142,4 +143,117 @@ func TestImport_SkipsSystemGroupsAndEncryptionKey(t *testing.T) {
 		t.Errorf("encryption_key must not be imported")
 	}
 	_ = rep
+}
+
+// TestImport_MergeOverwritesZeroValues pins down that merge replaces
+// non-zero local values with explicit zero values from the backup
+// (Sort=0, ModelRedirectStrict=false, etc.). Catches GORM Updates()
+// zero-value-skip pitfall.
+func TestImport_MergeOverwritesZeroValues(t *testing.T) {
+	db := newTestDB(t)
+	db.Create(&models.Group{
+		Name:                "openai-main",
+		ChannelType:         "openai",
+		TestModel:           "gpt-4o-mini",
+		DisplayName:         "Local",
+		Sort:                5,
+		ModelRedirectStrict: true,
+		Upstreams:           datatypes.JSON("[]"),
+	})
+
+	bk := sampleBackup()
+	// backup explicitly carries zero values
+	bk.Data.Groups[0].Sort = 0
+	bk.Data.Groups[0].ModelRedirectStrict = false
+	bk.Data.Groups[0].DisplayName = ""
+
+	imp := NewImporter(db, fakeEncSvc{})
+	if _, err := imp.Import(context.Background(), bk, StrategyMerge); err != nil {
+		t.Fatal(err)
+	}
+
+	var g models.Group
+	if err := db.Where("name = ?", "openai-main").First(&g).Error; err != nil {
+		t.Fatal(err)
+	}
+	if g.Sort != 0 {
+		t.Errorf("Sort should be overwritten to 0, got %d", g.Sort)
+	}
+	if g.ModelRedirectStrict != false {
+		t.Errorf("ModelRedirectStrict should be overwritten to false, got %v", g.ModelRedirectStrict)
+	}
+	if g.DisplayName != "" {
+		t.Errorf("DisplayName should be overwritten to empty, got %q", g.DisplayName)
+	}
+}
+
+// TestImport_PreservesNonEmptyUpstreams ensures the JSON column survives
+// dto → model encode (json.Marshal of any).
+func TestImport_PreservesNonEmptyUpstreams(t *testing.T) {
+	db := newTestDB(t)
+	bk := &BackupV1{
+		SchemaVersion: 1,
+		Data: DataV1{
+			Groups: []GroupDTO{{
+				Name:        "with-upstreams",
+				ChannelType: "openai",
+				TestModel:   "m",
+				Upstreams: []map[string]any{
+					{"url": "https://a.example", "weight": 1},
+				},
+			}},
+		},
+	}
+	imp := NewImporter(db, fakeEncSvc{})
+	if _, err := imp.Import(context.Background(), bk, StrategyMerge); err != nil {
+		t.Fatal(err)
+	}
+	var g models.Group
+	db.Where("name = ?", "with-upstreams").First(&g)
+	if len(g.Upstreams) == 0 || string(g.Upstreams) == "[]" {
+		t.Fatalf("Upstreams should contain payload data, got %q", string(g.Upstreams))
+	}
+	if !bytes.Contains(g.Upstreams, []byte(`"url":"https://a.example"`)) {
+		t.Errorf("Upstreams missing url key: %q", string(g.Upstreams))
+	}
+}
+
+// TestImport_GroupSubGroupRoundTrip exercises the GroupSubGroup branch
+// where both parent and child are present in the backup.
+func TestImport_GroupSubGroupRoundTrip(t *testing.T) {
+	db := newTestDB(t)
+	// Pre-existing system aggregate (importer never inserts is_system rows).
+	db.Create(&models.Group{
+		Name:        "default-openai",
+		ChannelType: "openai",
+		TestModel:   "m",
+		IsSystem:    true,
+		GroupType:   "aggregate",
+		Upstreams:   datatypes.JSON("[]"),
+	})
+
+	bk := &BackupV1{
+		SchemaVersion: 1,
+		Data: DataV1{
+			Groups: []GroupDTO{{
+				Name: "openai-main", ChannelType: "openai", TestModel: "m",
+			}},
+			GroupSubGroups: []GroupSubGroupDTO{
+				{ParentName: "default-openai", SubGroupName: "openai-main", Weight: 7},
+			},
+		},
+	}
+	imp := NewImporter(db, fakeEncSvc{})
+	rep, err := imp.Import(context.Background(), bk, StrategyMerge)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Applied.GroupSubGroups != 1 {
+		t.Errorf("expected 1 sub-group applied, got %+v", rep.Applied)
+	}
+	var subs []models.GroupSubGroup
+	db.Find(&subs)
+	if len(subs) != 1 || subs[0].Weight != 7 {
+		t.Errorf("group_sub_groups row missing or wrong weight: %+v", subs)
+	}
 }
