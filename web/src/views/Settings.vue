@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { settingsApi, type Setting, type SettingCategory } from "@/api/settings";
 import ProxyKeysInput from "@/components/common/ProxyKeysInput.vue";
+import V3BackupCard from "@/components/v3/V3BackupCard.vue";
 import { HelpCircle, Save } from "@vicons/ionicons5";
 import {
   NForm,
@@ -102,6 +103,8 @@ function generateValidationRules(item: Setting): FormItemRule[] {
       {{ t("nav.settings") || "Settings" }}
       <span class="v3-viewtitle__meta">{{ settingList.length }} categories</span>
     </h1>
+
+    <V3BackupCard style="margin-bottom: 24px" />
 
     <n-form ref="formRef" :model="form" label-placement="top">
       <div class="v3-settings-grid">
