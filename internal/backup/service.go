@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"autogateway/internal/encryption"
+	"autogateway/internal/models"
 
 	"gorm.io/gorm"
 )
@@ -26,7 +27,9 @@ type PreviewReport struct {
 	Conflicts           ConflictReport `json:"conflicts"`
 	WillDeleteIfReplace Counts         `json:"will_delete_if_replace"`
 	Warnings            []string       `json:"warnings"`
-	ConfirmToken        string         `json:"confirm_token"`
+	// ConfirmToken 是 Preview 与 Import 之间的唯一令牌通道；调用方必须把它
+	// 原样回传给 /import，否则 Import 会以 STALE_PREVIEW 拒绝并要求重跑 Preview。
+	ConfirmToken string `json:"confirm_token"`
 }
 
 // ConflictReport 列出与本地已存在记录冲突的业务键。
@@ -45,7 +48,10 @@ type Service struct {
 	version string
 
 	tokensMu sync.Mutex
-	tokens   map[string]tokenEntry
+	// tokens 是单进程内存中的 preview-token 存储。多实例部署需要把
+	// preview→import 钉到同一实例（sticky session），否则 import 会返回
+	// STALE_PREVIEW，用户必须重跑 preview。
+	tokens map[string]tokenEntry
 }
 
 type tokenEntry struct {
@@ -92,11 +98,12 @@ func (s *Service) Export(ctx context.Context, password string) ([]byte, []string
 	return blob, warns, nil
 }
 
-// Preview 解密 + 解析 payload 但不写库，返回预检报告与 confirm_token。
-func (s *Service) Preview(ctx context.Context, blob []byte, password string) (string, *PreviewReport, error) {
+// Preview 解密 + 解析 payload 但不写库，返回预检报告。confirm_token 仅通过
+// rep.ConfirmToken 暴露，作为单一真相源回传给 /import。
+func (s *Service) Preview(ctx context.Context, blob []byte, password string) (*PreviewReport, error) {
 	bk, err := s.decode(blob, password)
 	if err != nil {
-		return "", nil, err
+		return nil, err
 	}
 
 	rep := &PreviewReport{
@@ -112,15 +119,15 @@ func (s *Service) Preview(ctx context.Context, blob []byte, password string) (st
 		},
 	}
 	if err := s.fillConflictsAndDeletes(ctx, bk, rep); err != nil {
-		return "", nil, err
+		return nil, err
 	}
 
 	tok, err := s.mintToken(blob)
 	if err != nil {
-		return "", nil, err
+		return nil, err
 	}
 	rep.ConfirmToken = tok
-	return tok, rep, nil
+	return rep, nil
 }
 
 // Import 校验 token + 重解密 + 调 Importer。
@@ -156,17 +163,23 @@ func (s *Service) fillConflictsAndDeletes(ctx context.Context, bk *BackupV1, rep
 
 	// will_delete_if_replace = 当前 DB 中 is_system=false 的实体数
 	var standardIDs []uint
-	if err := db.Table("groups").Where("is_system = ?", false).Pluck("id", &standardIDs).Error; err != nil {
+	if err := db.Model(&models.Group{}).Where("is_system = ?", false).Pluck("id", &standardIDs).Error; err != nil {
 		return err
 	}
 	rep.WillDeleteIfReplace.Groups = len(standardIDs)
 	if len(standardIDs) > 0 {
 		var n int64
-		db.Table("api_keys").Where("group_id IN ?", standardIDs).Count(&n)
+		if err := db.Model(&models.APIKey{}).Where("group_id IN ?", standardIDs).Count(&n).Error; err != nil {
+			return err
+		}
 		rep.WillDeleteIfReplace.APIKeys = int(n)
-		db.Table("model_aliases").Where("group_id IN ?", standardIDs).Count(&n)
+		if err := db.Model(&models.ModelAlias{}).Where("group_id IN ?", standardIDs).Count(&n).Error; err != nil {
+			return err
+		}
 		rep.WillDeleteIfReplace.ModelAliases = int(n)
-		db.Table("group_sub_groups").Where("group_id IN ? OR sub_group_id IN ?", standardIDs, standardIDs).Count(&n)
+		if err := db.Model(&models.GroupSubGroup{}).Where("group_id IN ? OR sub_group_id IN ?", standardIDs, standardIDs).Count(&n).Error; err != nil {
+			return err
+		}
 		rep.WillDeleteIfReplace.GroupSubGroups = int(n)
 	}
 
@@ -179,7 +192,9 @@ func (s *Service) fillConflictsAndDeletes(ctx context.Context, bk *BackupV1, rep
 	}
 	if len(groupNames) > 0 {
 		var hits []string
-		db.Table("groups").Where("name IN ?", groupNames).Pluck("name", &hits)
+		if err := db.Model(&models.Group{}).Where("name IN ?", groupNames).Pluck("name", &hits).Error; err != nil {
+			return err
+		}
 		rep.Conflicts.Groups = hits
 	}
 
@@ -192,7 +207,9 @@ func (s *Service) fillConflictsAndDeletes(ctx context.Context, bk *BackupV1, rep
 	}
 	if len(keys) > 0 {
 		var hits []string
-		db.Table("system_settings").Where("setting_key IN ?", keys).Pluck("setting_key", &hits)
+		if err := db.Model(&models.SystemSetting{}).Where("setting_key IN ?", keys).Pluck("setting_key", &hits).Error; err != nil {
+			return err
+		}
 		rep.Conflicts.SystemSettings = hits
 	}
 
@@ -203,7 +220,9 @@ func (s *Service) fillConflictsAndDeletes(ctx context.Context, bk *BackupV1, rep
 			hashes = append(hashes, s.enc.Hash(k.KeyValue))
 		}
 		var n int64
-		db.Table("api_keys").Where("key_hash IN ?", hashes).Count(&n)
+		if err := db.Model(&models.APIKey{}).Where("key_hash IN ?", hashes).Count(&n).Error; err != nil {
+			return err
+		}
 		rep.Conflicts.APIKeysByHash = int(n)
 	}
 
@@ -214,7 +233,9 @@ func (s *Service) fillConflictsAndDeletes(ctx context.Context, bk *BackupV1, rep
 			aliasNames = append(aliasNames, a.Alias)
 		}
 		var n int64
-		db.Table("model_aliases").Where("alias IN ?", aliasNames).Count(&n)
+		if err := db.Model(&models.ModelAlias{}).Where("alias IN ?", aliasNames).Count(&n).Error; err != nil {
+			return err
+		}
 		rep.Conflicts.Aliases = int(n)
 	}
 
