@@ -139,6 +139,7 @@ function formatErr(e: unknown): string {
             v-model:value="exportPwd"
             type="password"
             placeholder="Backup password (≥ 8 chars)"
+            aria-label="Backup password"
             style="width: 320px"
             show-password-on="click"
           />
@@ -162,6 +163,7 @@ function formatErr(e: unknown): string {
           v-model:value="importPwd"
           type="password"
           placeholder="Backup password"
+          aria-label="Backup password"
           style="width: 320px"
           show-password-on="click"
         />
@@ -189,6 +191,10 @@ function formatErr(e: unknown): string {
               {{ preview.counts.system_settings }}
               ({{ preview.conflicts.system_settings.length }} conflict)
             </NDescriptionsItem>
+            <NDescriptionsItem label="Sub-groups">
+              {{ preview.counts.group_sub_groups }}
+              ({{ preview.conflicts.group_sub_groups }} conflict)
+            </NDescriptionsItem>
           </NDescriptions>
 
           <div>Conflict strategy:</div>
@@ -210,6 +216,7 @@ function formatErr(e: unknown): string {
             <NInput
               v-model:value="deleteConfirm"
               placeholder="Type DELETE to confirm"
+              aria-label="Type DELETE to confirm replace"
               style="margin-top: 8px"
             />
           </NAlert>
