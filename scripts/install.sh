@@ -1,23 +1,36 @@
 #!/usr/bin/env bash
 # AutoGateway one-line installer.
 #
-# Usage:
+# === Quickest start (defaults: auto-generate AUTH_KEY, port 3001) ===
+#
 #   curl -fsSL https://raw.githubusercontent.com/zhuzhuyule/autogateway/main/scripts/install.sh | bash
 #
-# With overrides:
+# === Common: pick your own host port + login key ===
+#
 #   curl -fsSL https://raw.githubusercontent.com/zhuzhuyule/autogateway/main/scripts/install.sh | \
-#     AUTH_KEY=sk-mykey PORT=8080 IMAGE_TAG=1.1.0 bash
+#     HOST_PORT=8080 AUTH_KEY=sk-mypassword bash
 #
-# Supported env vars (any subset; sane defaults applied):
-#   AUTH_KEY         admin login key. Default: auto-generated 32-char random
-#   PORT             host port. Default: 3001
-#   ENCRYPTION_KEY   db field encryption. Default: "" (disabled, dev only)
-#   IMAGE_TAG        image tag. Default: latest
-#   CONTAINER_NAME   default: autogateway
-#   DATA_VOLUME      named volume for /app/data. Default: autogateway-data
-#   SKIP_DOCKER_INSTALL=1  don't auto-install docker even if missing
+# === Full control via CLI flags (saves to local install.sh first) ===
 #
-# Re-running this script upgrades in place: pulls the new image, recreates the
+#   curl -fsSL https://raw.githubusercontent.com/zhuzhuyule/autogateway/main/scripts/install.sh -o install.sh
+#   chmod +x install.sh
+#   ./install.sh \
+#     --port 8080 \
+#     --auth-key sk-mypassword \
+#     --encryption-key my-32-char-secret \
+#     --image-tag 1.1.0
+#
+# === All supported overrides (env var = CLI flag) ===
+#
+#   HOST_PORT         --port            Host port mapped to container's 3001. Default: 3001
+#   AUTH_KEY          --auth-key        Admin login key. Default: auto-generated sk-<32 random>
+#   ENCRYPTION_KEY    --encryption-key  DB field encryption. Default: "" (dev mode noop)
+#   IMAGE_TAG         --image-tag       latest | 1.1 | 1.1.0 etc. Default: latest
+#   CONTAINER_NAME    --name            Default: autogateway
+#   DATA_VOLUME       --data-volume     Named volume for /app/data. Default: autogateway-data
+#   SKIP_DOCKER_INSTALL=1               Do NOT auto-install docker if missing.
+#
+# Re-running the script upgrades in place: pulls the new image, recreates the
 # container, keeps the data volume intact.
 
 set -euo pipefail
@@ -27,13 +40,31 @@ say()  { printf "\033[1;36m[autogateway]\033[0m %s\n" "$*"; }
 warn() { printf "\033[1;33m[autogateway]\033[0m %s\n" "$*" >&2; }
 die()  { printf "\033[1;31m[autogateway]\033[0m %s\n" "$*" >&2; exit 1; }
 
-# ----- defaults -----
+# ----- defaults (env vars win over hardcoded; CLI flags win over env vars) -----
+HOST_PORT="${HOST_PORT:-${PORT:-3001}}"          # PORT kept for backward-compat
+CONTAINER_PORT=3001                              # fixed inside the image
 AUTH_KEY="${AUTH_KEY:-}"
-PORT="${PORT:-3001}"
 ENCRYPTION_KEY="${ENCRYPTION_KEY:-}"
 IMAGE_TAG="${IMAGE_TAG:-latest}"
 CONTAINER_NAME="${CONTAINER_NAME:-autogateway}"
 DATA_VOLUME="${DATA_VOLUME:-autogateway-data}"
+
+# ----- parse CLI flags (override env vars) -----
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --port)            HOST_PORT="$2";       shift 2 ;;
+    --auth-key)        AUTH_KEY="$2";        shift 2 ;;
+    --encryption-key)  ENCRYPTION_KEY="$2";  shift 2 ;;
+    --image-tag)       IMAGE_TAG="$2";       shift 2 ;;
+    --name)            CONTAINER_NAME="$2";  shift 2 ;;
+    --data-volume)     DATA_VOLUME="$2";     shift 2 ;;
+    -h|--help)
+      sed -n '2,/^set -e/p' "$0" | sed 's/^# \{0,1\}//'
+      exit 0 ;;
+    *) die "Unknown flag: $1 (try --help)" ;;
+  esac
+done
+
 IMAGE="ghcr.io/zhuzhuyule/autogateway:${IMAGE_TAG}"
 
 # ----- 1. ensure docker -----
@@ -56,7 +87,6 @@ if ! command -v docker >/dev/null 2>&1; then
   esac
 fi
 
-# Pre-flight: docker daemon reachable?
 if ! docker info >/dev/null 2>&1; then
   die "docker daemon not reachable. Start it (e.g. 'sudo systemctl start docker') and retry."
 fi
@@ -82,20 +112,21 @@ if docker container inspect "$CONTAINER_NAME" >/dev/null 2>&1; then
 fi
 
 # ----- 6. run -----
-say "Starting container '$CONTAINER_NAME' on port $PORT..."
-ENV_ARGS=(-e "AUTH_KEY=$AUTH_KEY" -e "PORT=$PORT")
+say "Starting '$CONTAINER_NAME' on host port $HOST_PORT (→ container ${CONTAINER_PORT})..."
+ENV_ARGS=(-e "AUTH_KEY=$AUTH_KEY" -e "PORT=${CONTAINER_PORT}")
 [ -n "$ENCRYPTION_KEY" ] && ENV_ARGS+=(-e "ENCRYPTION_KEY=$ENCRYPTION_KEY")
 
 docker run -d \
   --name "$CONTAINER_NAME" \
   --restart unless-stopped \
-  -p "${PORT}:${PORT}" \
+  -p "${HOST_PORT}:${CONTAINER_PORT}" \
   -v "${DATA_VOLUME}:/app/data" \
   "${ENV_ARGS[@]}" \
   "$IMAGE" >/dev/null
 
 # ----- 7. wait for healthcheck -----
 say "Waiting for healthcheck..."
+status=starting
 for i in $(seq 1 30); do
   status=$(docker inspect --format='{{.State.Health.Status}}' "$CONTAINER_NAME" 2>/dev/null || echo "starting")
   if [ "$status" = "healthy" ]; then
@@ -111,16 +142,16 @@ if [ "$status" != "healthy" ]; then
 fi
 
 # ----- 8. summary -----
+printf '\n\033[1;32m✓ AutoGateway is running.\033[0m\n\n'
 cat <<EOF
+  URL:        http://localhost:${HOST_PORT}
+  Auth key:   ${AUTH_KEY}
+  Container:  ${CONTAINER_NAME}  (data volume: ${DATA_VOLUME})
+  Image:      ${IMAGE}
 
-\033[1;32m✓ AutoGateway is running.\033[0m
-
-  URL:       http://localhost:${PORT}
-  Auth key:  ${AUTH_KEY}
-  Container: ${CONTAINER_NAME}    (data volume: ${DATA_VOLUME})
-
-Upgrade later:
-  curl -fsSL https://raw.githubusercontent.com/zhuzhuyule/autogateway/main/scripts/install.sh | bash
+Upgrade later (same command — data preserved):
+  curl -fsSL https://raw.githubusercontent.com/zhuzhuyule/autogateway/main/scripts/install.sh | \\
+    HOST_PORT=${HOST_PORT} AUTH_KEY=${AUTH_KEY} bash
 
 Stop / remove:
   docker stop ${CONTAINER_NAME} && docker rm ${CONTAINER_NAME}
