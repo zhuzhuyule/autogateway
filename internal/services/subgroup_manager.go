@@ -257,27 +257,49 @@ func (s *selector) selectNextForModelExcluding(requestedModel string, attempted 
 		return !attempted[it.name]
 	}
 
-	// 第一遍: 严格按 model 过滤(只考虑 hasModelsCache 且包含 model 的子分组,
-	// 以及尚未拉取过 model 列表的 sub-group——它们的能力未知,先给它们一次机会)
+	// 三阶段路由策略 (按权威性递减):
+	//   1. STRICT — 优先选明确声明能 serve 该 model 的 sub-group
+	//      (hasModelsCache=true 且 model 在 availableModels 集合里)
+	//   2. UNKNOWN — 全部已知 sub-group 都不含该 model 时, 给"未知能力"的
+	//      sub-group (hasModelsCache=false, 尚未拉过模型列表) 一次机会
+	//   3. FULL — 第 2 阶段也无候选, 退化到全量 SWRR (硬碰)
+	//
+	// 旧逻辑把 UNKNOWN 和 STRICT 合并在一遍, 导致"未知能力"会跟"明确含 model"
+	// 平等参与 SWRR. 实战表现: 聚合代理 GLM-4-Flash, zhipu 白名单含此 model,
+	// groq passthrough 模式没配白名单也没拉过 /v1/models → groq 被当未知能力
+	// 顶进 SWRR → 50% 概率选 groq → 上游 404. 三阶段分离后, 只要有一个
+	// sub-group 明确声明能 serve, 就锁定它(们).
 	if requestedModel != "" {
+		// 阶段 1: STRICT
 		if name := s.selectAmong(func(it *subGroupItem) bool {
-			if !notAttempted(it) {
+			if !notAttempted(it) || !it.hasModelsCache {
 				return false
-			}
-			if !it.hasModelsCache {
-				return true
 			}
 			_, ok := it.availableModels[requestedModel]
 			return ok
 		}); name != "" {
 			return name
 		}
+
+		// 阶段 2: UNKNOWN
+		if name := s.selectAmong(func(it *subGroupItem) bool {
+			return notAttempted(it) && !it.hasModelsCache
+		}); name != "" {
+			logrus.WithFields(logrus.Fields{
+				"aggregate_group": s.groupName,
+				"requested_model": requestedModel,
+				"selected":        name,
+			}).Debug("No strict match; falling through to UNKNOWN-capability sub-group")
+			return name
+		}
+
 		logrus.WithFields(logrus.Fields{
 			"aggregate_group": s.groupName,
 			"requested_model": requestedModel,
-		}).Debug("No sub-group matched requested model, falling back to full SWRR")
+		}).Debug("No strict or unknown-capability match; FULL fallback")
 	}
 
+	// 阶段 3: FULL (or requestedModel 为空, 直接 SWRR)
 	return s.selectAmong(notAttempted)
 }
 
