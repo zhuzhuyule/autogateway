@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref } from "vue";
+import { useI18n } from "vue-i18n";
 import {
   NAlert,
   NButton,
@@ -17,6 +18,7 @@ import {
 import { backupApi, type PreviewReport, type Strategy } from "@/api/backup";
 
 const msg = useMessage();
+const { t } = useI18n();
 
 // ---------- Export ----------
 const exportPwd = ref("");
@@ -24,7 +26,7 @@ const exporting = ref(false);
 
 async function doExport() {
   if (!exportPwd.value || exportPwd.value.length < 8) {
-    msg.warning("Password should be at least 8 characters.");
+    msg.warning(t("settings.backup.msgPasswordShort"));
     return;
   }
   exporting.value = true;
@@ -38,9 +40,9 @@ async function doExport() {
     a.click();
     a.remove();
     URL.revokeObjectURL(a.href);
-    msg.success("Backup downloaded. Keep the password safe.");
+    msg.success(t("settings.backup.msgExportSuccess"));
   } catch (e: unknown) {
-    msg.error(`Export failed: ${formatErr(e)}`);
+    msg.error(t("settings.backup.msgExportFailed", { detail: formatErr(e) }));
   } finally {
     exporting.value = false;
   }
@@ -72,7 +74,7 @@ function onFileChange(opts: { fileList: UploadFileInfo[] }) {
 
 async function doPreview() {
   if (!importFile.value || !importPwd.value) {
-    msg.warning("Pick a .acb file and enter the password.");
+    msg.warning(t("settings.backup.msgPickFile"));
     return;
   }
   previewing.value = true;
@@ -82,7 +84,7 @@ async function doPreview() {
       importPwd.value,
     );
   } catch (e: unknown) {
-    msg.error(`Preview failed: ${formatErr(e)}`);
+    msg.error(t("settings.backup.msgPreviewFailed", { detail: formatErr(e) }));
   } finally {
     previewing.value = false;
   }
@@ -91,7 +93,7 @@ async function doPreview() {
 async function doImport() {
   if (!preview.value || !importFile.value) return;
   if (strategy.value === "replace" && deleteConfirm.value !== "DELETE") {
-    msg.warning("Type DELETE (uppercase) to confirm replace.");
+    msg.warning(t("settings.backup.msgTypeDelete"));
     return;
   }
   importing.value = true;
@@ -103,12 +105,16 @@ async function doImport() {
       preview.value.confirm_token,
     );
     msg.success(
-      `Imported. applied groups=${rep.applied.groups}, keys=${rep.applied.api_keys}, aliases=${rep.applied.model_aliases}.`,
+      t("settings.backup.msgImportSuccess", {
+        groups: rep.applied.groups,
+        keys: rep.applied.api_keys,
+        aliases: rep.applied.model_aliases,
+      }),
     );
     preview.value = null;
     deleteConfirm.value = "";
   } catch (e: unknown) {
-    msg.error(`Import failed: ${formatErr(e)}`);
+    msg.error(t("settings.backup.msgImportFailed", { detail: formatErr(e) }));
   } finally {
     importing.value = false;
   }
@@ -128,101 +134,104 @@ function formatErr(e: unknown): string {
 
 <template>
   <NSpace vertical :size="16">
-    <NCard title="Export Configuration">
+    <NCard :title='t("settings.backup.exportTitle")'>
       <NSpace vertical :size="12">
         <NAlert type="warning">
-          The backup file is encrypted with the password you set below.
-          <strong>Lost password = lost data.</strong> Keep it together with the file.
+          {{ t("settings.backup.exportWarnHead") }}
+          <strong>{{ t("settings.backup.exportWarnBold") }}</strong>
+          {{ t("settings.backup.exportWarnTail") }}
         </NAlert>
         <NSpace>
           <NInput
             v-model:value="exportPwd"
             type="password"
-            placeholder="Backup password (≥ 8 chars)"
-            aria-label="Backup password"
+            :placeholder='t("settings.backup.exportPasswordPlaceholder")'
+            :aria-label='t("settings.backup.exportPasswordAria")'
             style="width: 320px"
             show-password-on="click"
           />
-          <NButton @click="generateRandomPassword">Random</NButton>
+          <NButton @click="generateRandomPassword">{{ t("settings.backup.randomBtn") }}</NButton>
           <NButton type="primary" :loading="exporting" @click="doExport">
-            Download Backup
+            {{ t("settings.backup.downloadBtn") }}
           </NButton>
         </NSpace>
       </NSpace>
     </NCard>
 
-    <NCard title="Restore from Backup">
+    <NCard :title='t("settings.backup.restoreTitle")'>
       <NSpace vertical :size="12">
         <NAlert type="info">
-          We strongly recommend exporting a current backup before restoring.
+          {{ t("settings.backup.restoreWarn") }}
         </NAlert>
         <NUpload :max="1" :default-upload="false" accept=".acb" @change="onFileChange">
-          <NButton>Choose .acb file</NButton>
+          <NButton>{{ t("settings.backup.chooseFile") }}</NButton>
         </NUpload>
         <NInput
           v-model:value="importPwd"
           type="password"
-          placeholder="Backup password"
-          aria-label="Backup password"
+          :placeholder='t("settings.backup.restorePasswordPlaceholder")'
+          :aria-label='t("settings.backup.restorePasswordAria")'
           style="width: 320px"
           show-password-on="click"
         />
         <NButton :loading="previewing" :disabled="!importFile || !importPwd" @click="doPreview">
-          Preview
+          {{ t("settings.backup.previewBtn") }}
         </NButton>
 
         <template v-if="preview">
           <NDescriptions :column="2" bordered size="small" label-placement="left">
-            <NDescriptionsItem label="Schema">{{ preview.schema_version }}</NDescriptionsItem>
-            <NDescriptionsItem label="Exported at">{{ preview.exported_at }}</NDescriptionsItem>
-            <NDescriptionsItem label="Groups">
+            <NDescriptionsItem :label='t("settings.backup.fieldSchema")'>{{ preview.schema_version }}</NDescriptionsItem>
+            <NDescriptionsItem :label='t("settings.backup.fieldExportedAt")'>{{ preview.exported_at }}</NDescriptionsItem>
+            <NDescriptionsItem :label='t("settings.backup.fieldGroups")'>
               {{ preview.counts.groups }}
-              ({{ preview.conflicts.groups.length }} conflict)
+              {{ t("settings.backup.conflictSuffix", { n: preview.conflicts.groups.length }) }}
             </NDescriptionsItem>
-            <NDescriptionsItem label="API Keys">
+            <NDescriptionsItem :label='t("settings.backup.fieldApiKeys")'>
               {{ preview.counts.api_keys }}
-              ({{ preview.conflicts.api_keys_by_hash }} conflict)
+              {{ t("settings.backup.conflictSuffix", { n: preview.conflicts.api_keys_by_hash }) }}
             </NDescriptionsItem>
-            <NDescriptionsItem label="Aliases">
+            <NDescriptionsItem :label='t("settings.backup.fieldAliases")'>
               {{ preview.counts.model_aliases }}
-              ({{ preview.conflicts.aliases }} conflict)
+              {{ t("settings.backup.conflictSuffix", { n: preview.conflicts.aliases }) }}
             </NDescriptionsItem>
-            <NDescriptionsItem label="Settings">
+            <NDescriptionsItem :label='t("settings.backup.fieldSettings")'>
               {{ preview.counts.system_settings }}
-              ({{ preview.conflicts.system_settings.length }} conflict)
+              {{ t("settings.backup.conflictSuffix", { n: preview.conflicts.system_settings.length }) }}
             </NDescriptionsItem>
-            <NDescriptionsItem label="Sub-groups">
+            <NDescriptionsItem :label='t("settings.backup.fieldSubGroups")'>
               {{ preview.counts.group_sub_groups }}
-              ({{ preview.conflicts.group_sub_groups }} conflict)
+              {{ t("settings.backup.conflictSuffix", { n: preview.conflicts.group_sub_groups }) }}
             </NDescriptionsItem>
           </NDescriptions>
 
-          <div>Conflict strategy:</div>
+          <div>{{ t("settings.backup.strategyLabel") }}</div>
           <NRadioGroup v-model:value="strategy">
-            <NRadio value="merge">Merge (upsert; existing fields overwritten)</NRadio>
-            <NRadio value="skip">Skip (keep all local; only add new)</NRadio>
+            <NRadio value="merge">{{ t("settings.backup.strategyMerge") }}</NRadio>
+            <NRadio value="skip">{{ t("settings.backup.strategySkip") }}</NRadio>
             <NRadio value="replace">
-              <strong style="color: var(--n-color-danger, #d03050)">Replace</strong>
-              (delete all non-system groups + their keys/aliases, then import)
+              <strong style="color: var(--n-color-danger, #d03050)">
+                {{ t("settings.backup.strategyReplaceTitle") }}
+              </strong>
+              {{ t("settings.backup.strategyReplaceDesc") }}
             </NRadio>
           </NRadioGroup>
 
           <NAlert v-if="strategy === 'replace'" type="error">
-            Replace will delete
-            <strong>{{ preview.will_delete_if_replace.groups }}</strong> groups,
-            <strong>{{ preview.will_delete_if_replace.api_keys }}</strong> keys,
-            <strong>{{ preview.will_delete_if_replace.model_aliases }}</strong> aliases.
-            Type <code>DELETE</code> below to confirm.
+            {{ t("settings.backup.replaceWarn", {
+                groups: preview.will_delete_if_replace.groups,
+                keys: preview.will_delete_if_replace.api_keys,
+                aliases: preview.will_delete_if_replace.model_aliases,
+            }) }}
             <NInput
               v-model:value="deleteConfirm"
-              placeholder="Type DELETE to confirm"
-              aria-label="Type DELETE to confirm replace"
+              :placeholder='t("settings.backup.deletePlaceholder")'
+              :aria-label='t("settings.backup.deleteAria")'
               style="margin-top: 8px"
             />
           </NAlert>
 
           <NButton type="primary" :loading="importing" @click="doImport">
-            Apply Import
+            {{ t("settings.backup.applyBtn") }}
           </NButton>
         </template>
       </NSpace>
