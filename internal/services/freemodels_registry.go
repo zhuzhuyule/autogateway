@@ -480,6 +480,13 @@ func (r *FreeModelsRegistry) IsFree(provider, modelID string) (isFree bool, foun
 }
 
 // Lookup returns the meta for `(provider, modelId)` or nil.
+//
+// 严格契约 (避免跨 provider 误匹配):
+//   - provider != "" → 只在 byProvMod 精确匹配, 找不到返回 nil. 不再 fallback
+//     到 byModelOnly 借另一个 provider 的元数据 (旧逻辑会把 "OpenRouter 上的
+//     付费 model" 错标成 free, 因为某个其他 provider 同名 model 是免费的).
+//   - provider == "" → byModelOnly 跨 provider 查 (调用方明确说"我不知道
+//     provider, 给我猜一个"), 返回任意一条 (list[0]).
 func (r *FreeModelsRegistry) Lookup(provider, modelID string) *FreeModelMeta {
 	if modelID == "" {
 		return nil
@@ -490,6 +497,7 @@ func (r *FreeModelsRegistry) Lookup(provider, modelID string) *FreeModelMeta {
 		if m, ok := r.byProvMod[provModKey(provider, modelID)]; ok {
 			return m
 		}
+		return nil
 	}
 	if list, ok := r.byModelOnly[strings.ToLower(modelID)]; ok && len(list) > 0 {
 		return list[0]

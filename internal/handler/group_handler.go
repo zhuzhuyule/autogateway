@@ -196,9 +196,16 @@ func (s *Server) RefreshGroupModels(c *gin.Context) {
 	if s.handleGroupError(c, err) {
 		return
 	}
-	// 把每个 modelId 在 FreeModels Registry 里 lookup 一次, 注入元数据.
-	// Provider hint 留空, 让 registry 用 bare modelId + 别名兜底.
-	enriched := s.enrichModels(models, "")
+	// 解析准确的 FreeModels provider id (上游 host 反查), 避免裸 modelId
+	// 跨 provider 误匹配 (e.g. openrouter 上的付费 model 被某个其他 provider
+	// 同名 model 借成 free).
+	providerHint := ""
+	if name, ok := s.GroupManager.GetGroupNameByID(uint(id)); ok {
+		if group, gerr := s.GroupManager.GetGroupByName(name); gerr == nil && group != nil {
+			providerHint = resolveFreeProviderHint(s.FreeModelsRegistry, group)
+		}
+	}
+	enriched := s.enrichModels(models, providerHint)
 	response.Success(c, gin.H{
 		"models": enriched,
 		"count":  len(enriched),

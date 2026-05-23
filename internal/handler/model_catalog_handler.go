@@ -52,18 +52,19 @@ type CatalogModel struct {
 	ContextLabel string   `json:"context_label,omitempty"`
 }
 
-// resolveProviderHint 从 group 的第一个 upstream URL 解析 host, 然后
-// 用 FreeModelsRegistry.LookupProviderByHost 反查 provider id, 提高
-// (provider, modelId) 精确匹配率. 解析失败回退 group.Name (大多数命名约定
-// 跟 FreeModels provider id 重叠).
-func (h *ModelCatalogHandler) resolveProviderHint(g *models.Group) string {
-	if h.freeRegistry != nil && len(g.Upstreams) > 0 {
+// resolveFreeProviderHint 从 group 的第一个 upstream URL 解析 host, 用
+// FreeModelsRegistry.LookupProviderByHost 反查 provider id, 提高 Lookup
+// 的精确匹配率. 解析失败回退 group.Name (大多数命名约定跟 FreeModels
+// provider id 重叠). 包级 helper, group_handler 与 model_catalog_handler
+// 共用.
+func resolveFreeProviderHint(reg *services.FreeModelsRegistry, g *models.Group) string {
+	if reg != nil && len(g.Upstreams) > 0 {
 		var defs []struct {
 			URL string `json:"url"`
 		}
 		if err := json.Unmarshal(g.Upstreams, &defs); err == nil && len(defs) > 0 {
 			if u, perr := url.Parse(defs[0].URL); perr == nil && u.Hostname() != "" {
-				if id, _, ok := h.freeRegistry.LookupProviderByHost(u.Hostname()); ok {
+				if id, _, ok := reg.LookupProviderByHost(u.Hostname()); ok {
 					return id
 				}
 			}
@@ -108,6 +109,18 @@ func (h *ModelCatalogHandler) ListModels(c *gin.Context) {
 		}
 		entry.Groups = appendUnique(entry.Groups, groupName)
 
+		// Rule-based free 判定: 某些 provider (主要 OpenRouter) 用 ":free"
+		// 后缀约定免费 tier (e.g. "google/gemma-3-12b-it:free"). 这是 provider
+		// 平台自身的命名契约, 不依赖第三方 Registry. 单独判一次保证 catalog
+		// 不会漏标 — Registry 通常只人工录入了部分模型, 用 :free 兜底覆盖
+		// OpenRouter 整个免费目录.
+		if strings.HasSuffix(strings.ToLower(modelID), ":free") {
+			entry.IsFree = true
+			if entry.FreeTier == "" {
+				entry.FreeTier = "full"
+			}
+		}
+
 		// Free-models enrichment: 同一 modelID 跨 provider 出现时取并集 —
 		// IsFree=true 优先 (任意 provider 免费即标免费); 其他字段首个非空值胜出.
 		if h.freeRegistry != nil {
@@ -144,7 +157,7 @@ func (h *ModelCatalogHandler) ListModels(c *gin.Context) {
 		if group.GroupType == "aggregate" {
 			continue
 		}
-		providerHint := h.resolveProviderHint(group)
+		providerHint := resolveFreeProviderHint(h.freeRegistry, group)
 
 		// 1. ModelRedirectMap 的 source model — 客户端可调的"虚拟"名
 		for sourceModel := range group.ModelRedirectMap {
