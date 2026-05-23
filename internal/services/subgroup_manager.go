@@ -117,10 +117,17 @@ func (m *SubGroupManager) RebuildSelectors(groups map[string]*models.Group) {
 	for _, group := range groups {
 		if group.GroupType == "aggregate" && len(group.SubGroups) > 0 {
 			if sel := m.createSelector(group); sel != nil {
-				// 注入每个子分组的 available_models 到 selector items
+				// 注入每个子分组的候选模型集合到 selector items.
+				// 用 candidateModelsForGroup 统一规则:
+				//   - specified mode: 先看 ExposedModels (用户白名单),
+				//     空了再 fallback 到 AvailableModels (上游 /v1/models 缓存)
+				//   - 其他 mode: 直接看 AvailableModels
+				// 关键: 跨实例 import 后 AvailableModels 是空的 (backup 不带运行时缓存),
+				// 但 ExposedModels 在 backup payload 里, 所以 specified 模式的
+				// sub-group 仍然能正确路由, 不会被算法当成 "未知能力" 而随机选中.
 				for i := range sel.subGroups {
 					if sub, ok := byID[sel.subGroups[i].subGroupID]; ok {
-						if set, has := parseModelsJSON(sub.AvailableModels); has {
+						if set := candidateModelsForGroup(sub); len(set) > 0 {
 							sel.subGroups[i].availableModels = set
 							sel.subGroups[i].hasModelsCache = true
 						}
