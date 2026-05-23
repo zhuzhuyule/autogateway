@@ -112,6 +112,17 @@ func (ps *ProxyServer) HandleProxy(c *gin.Context) {
 			response.Error(c, app_errors.ParseDBError(err))
 			return
 		}
+	} else if originalGroup.GroupType == "aggregate" && requestedModel != "" {
+		// 聚合层契约: 没有任何 sub-group 声明能 serve 此 model → 直接 404,
+		// 不允许退化到聚合自身 (aggregate group 没 upstreams, 也不该假设
+		// 任意 sub-group 能透传该 model).
+		logrus.WithFields(logrus.Fields{
+			"aggregate_group": originalGroup.Name,
+			"requested_model": requestedModel,
+		}).Warn("Model not served by any sub-group; refusing to proxy")
+		response.Error(c, app_errors.NewAPIError(app_errors.ErrResourceNotFound,
+			fmt.Sprintf("model %q is not served by any provider in aggregate %q", requestedModel, originalGroup.Name)))
+		return
 	}
 
 	channelHandler, err := ps.channelFactory.GetChannel(group)

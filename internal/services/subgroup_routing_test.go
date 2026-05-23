@@ -75,9 +75,10 @@ func TestSelectNextForModel_StrictWinsOverUnknown(t *testing.T) {
 	}
 }
 
-// TestSelectNextForModel_UnknownFallback 当没有任何 sub-group 严格匹配时,
-// "未知能力"的 sub-group 才参与候选 (阶段 2).
-func TestSelectNextForModel_UnknownFallback(t *testing.T) {
+// TestSelectNextForModel_NoMatchReturnsEmpty 严格语义: 已知能力的 sub-group
+// 都不含 model 时, 返回 "" 让上层 (handler / proxy) 报"未发现", 不再 fallback
+// 到未知能力的 sub-group. 不允许碰运气打上游。
+func TestSelectNextForModel_NoMatchReturnsEmpty(t *testing.T) {
 	items := []subGroupItem{
 		{
 			name:            "zhipu",
@@ -95,16 +96,16 @@ func TestSelectNextForModel_UnknownFallback(t *testing.T) {
 	}
 	sel := newTestSelector(items)
 
-	// "quux" 在 zhipu 白名单不存在 → strict 阶段无候选 → 退到阶段 2 → groq 中标
+	// "quux" 没有任何 sub-group 声明能 serve → 返回空串
 	got := sel.selectNextForModelExcluding("quux", nil)
-	if got != "groq" {
-		t.Fatalf("expected groq (UNKNOWN fallback), got %q", got)
+	if got != "" {
+		t.Fatalf("expected empty (refuse to fallback), got %q", got)
 	}
 }
 
-// TestSelectNextForModel_FullFallback 全部 sub-group 都已知能力且都不含 model →
-// 退到阶段 3 (硬碰所有), 返回非空.
-func TestSelectNextForModel_FullFallback(t *testing.T) {
+// TestSelectNextForModel_AllKnownNoMatchReturnsEmpty 全部 sub-group 都已知能力
+// 且都不含 model → 不再硬碰, 返回 "" (旧 v1.1.4 行为是退化到全量 SWRR).
+func TestSelectNextForModel_AllKnownNoMatchReturnsEmpty(t *testing.T) {
 	items := []subGroupItem{
 		{
 			name:            "a",
@@ -124,8 +125,35 @@ func TestSelectNextForModel_FullFallback(t *testing.T) {
 	sel := newTestSelector(items)
 
 	got := sel.selectNextForModelExcluding("quux", nil)
+	if got != "" {
+		t.Fatalf("expected empty (no fallback), got %q", got)
+	}
+}
+
+// TestSelectNextForModel_EmptyModelStillFallsBack requestedModel 为空时
+// (e.g. 不是 chat/completions, 或 body 没有 model 字段) 退化为全量 SWRR,
+// 不受严格语义限制.
+func TestSelectNextForModel_EmptyModelStillFallsBack(t *testing.T) {
+	items := []subGroupItem{
+		{
+			name:            "a",
+			subGroupID:      100,
+			weight:          1,
+			availableModels: map[string]struct{}{"foo": {}},
+			hasModelsCache:  true,
+		},
+		{
+			name:           "b",
+			subGroupID:     101,
+			weight:         1,
+			hasModelsCache: false,
+		},
+	}
+	sel := newTestSelector(items)
+
+	got := sel.selectNextForModelExcluding("", nil)
 	if got != "a" && got != "b" {
-		t.Fatalf("FULL fallback should pick one of {a,b}, got %q", got)
+		t.Fatalf("empty-model fallback should pick one of {a,b}, got %q", got)
 	}
 }
 

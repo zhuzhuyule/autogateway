@@ -257,20 +257,19 @@ func (s *selector) selectNextForModelExcluding(requestedModel string, attempted 
 		return !attempted[it.name]
 	}
 
-	// 三阶段路由策略 (按权威性递减):
-	//   1. STRICT — 优先选明确声明能 serve 该 model 的 sub-group
-	//      (hasModelsCache=true 且 model 在 availableModels 集合里)
-	//   2. UNKNOWN — 全部已知 sub-group 都不含该 model 时, 给"未知能力"的
-	//      sub-group (hasModelsCache=false, 尚未拉过模型列表) 一次机会
-	//   3. FULL — 第 2 阶段也无候选, 退化到全量 SWRR (硬碰)
+	// 严格路由 (聚合层契约):
+	//   - 聚合的"已知模型集合" = 各 sub-group 的 (ExposedModels ∪ AvailableModels)
+	//   - 请求 model 必须落在某 sub-group 的已知集合里; 命中者之间 SWRR;
+	//     无命中 → 返回 "" 让上层报"未发现该模型", 不去碰运气打上游.
 	//
-	// 旧逻辑把 UNKNOWN 和 STRICT 合并在一遍, 导致"未知能力"会跟"明确含 model"
-	// 平等参与 SWRR. 实战表现: 聚合代理 GLM-4-Flash, zhipu 白名单含此 model,
-	// groq passthrough 模式没配白名单也没拉过 /v1/models → groq 被当未知能力
-	// 顶进 SWRR → 50% 概率选 groq → 上游 404. 三阶段分离后, 只要有一个
-	// sub-group 明确声明能 serve, 就锁定它(们).
+	// 设计原则: 聚合层不能做 "passthrough", 透传只是 sub-group 自身的属性.
+	// passthrough 模式的 sub-group 想被聚合调用, 必须提供模型列表 (手动
+	// exposed_models 白名单或后端拉取 /v1/models 填充 available_models),
+	// 否则它在聚合下永远不会被选中 — 这是用户语义契约的必然推论.
+	//
+	// 兜底仍保留: requestedModel 为空 (e.g. proxy 收到的请求没 body 或不是
+	// chat/completions) 退化为全量 SWRR.
 	if requestedModel != "" {
-		// 阶段 1: STRICT
 		if name := s.selectAmong(func(it *subGroupItem) bool {
 			if !notAttempted(it) || !it.hasModelsCache {
 				return false
@@ -280,26 +279,13 @@ func (s *selector) selectNextForModelExcluding(requestedModel string, attempted 
 		}); name != "" {
 			return name
 		}
-
-		// 阶段 2: UNKNOWN
-		if name := s.selectAmong(func(it *subGroupItem) bool {
-			return notAttempted(it) && !it.hasModelsCache
-		}); name != "" {
-			logrus.WithFields(logrus.Fields{
-				"aggregate_group": s.groupName,
-				"requested_model": requestedModel,
-				"selected":        name,
-			}).Debug("No strict match; falling through to UNKNOWN-capability sub-group")
-			return name
-		}
-
 		logrus.WithFields(logrus.Fields{
 			"aggregate_group": s.groupName,
 			"requested_model": requestedModel,
-		}).Debug("No strict or unknown-capability match; FULL fallback")
+		}).Debug("No sub-group declares it serves this model — refusing to fallback")
+		return ""
 	}
 
-	// 阶段 3: FULL (or requestedModel 为空, 直接 SWRR)
 	return s.selectAmong(notAttempted)
 }
 
