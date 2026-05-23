@@ -124,19 +124,21 @@ docker run -d \
   "${ENV_ARGS[@]}" \
   "$IMAGE" >/dev/null
 
-# ----- 7. wait for healthcheck -----
-say "Waiting for healthcheck..."
-status=starting
+# ----- 7. wait for /health -----
+# 不依赖镜像自带的 docker healthcheck (docker run 不会从 compose.yml 继承),
+# 直接打 /health 端点更可靠.
+say "Waiting for http://localhost:${HOST_PORT}/health ..."
+ok=0
 for i in $(seq 1 30); do
-  status=$(docker inspect --format='{{.State.Health.Status}}' "$CONTAINER_NAME" 2>/dev/null || echo "starting")
-  if [ "$status" = "healthy" ]; then
+  if curl -fsS -m 2 "http://localhost:${HOST_PORT}/health" >/dev/null 2>&1; then
+    ok=1
     break
   fi
   sleep 2
 done
 
-if [ "$status" != "healthy" ]; then
-  warn "Container did not become healthy in 60s. Status=$status. Logs:"
+if [ "$ok" != "1" ]; then
+  warn "Service did not respond on /health in 60s. Logs:"
   docker logs --tail=30 "$CONTAINER_NAME"
   exit 1
 fi

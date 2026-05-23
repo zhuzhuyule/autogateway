@@ -34,4 +34,8 @@ RUN apk add --no-cache ca-certificates tzdata \
 
 COPY --from=builder2 /build/autogateway .
 EXPOSE 3001
+# 让 docker run (绕过 compose) 起的容器也有 healthcheck.
+# 30s 间隔, 10s 超时, 3 次失败标记 unhealthy, 启动后给 40s 宽限期.
+HEALTHCHECK --interval=30s --timeout=10s --retries=3 --start-period=40s \
+  CMD wget -q --spider -T 5 -O /dev/null http://localhost:3001/health || exit 1
 ENTRYPOINT ["/app/autogateway"]
