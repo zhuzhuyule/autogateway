@@ -1,10 +1,14 @@
 services:
   autogateway:
+    # 默认拉本项目预 build 的镜像 (multi-arch: linux/amd64 + linux/arm64).
+    # docker compose pull && docker compose up -d 即可滚动升级.
+    image: ghcr.io/zhuzhuyule/autogateway:latest
     # 也可改用上游 GPT-Load 官方镜像(不含本项目的免费 Provider/系统聚合等增强):
     # image: ghcr.io/tbphp/gpt-load:latest
-    build:
-      context: .
-      dockerfile: Dockerfile
+    # 想从源码本地 build 时, 把上面 image 行注释掉, 启用以下 build 块:
+    # build:
+    #   context: .
+    #   dockerfile: Dockerfile
     container_name: autogateway
     ports:
       - "${PORT:-3001}:${PORT:-3001}"
