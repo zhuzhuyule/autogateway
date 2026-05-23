@@ -165,6 +165,7 @@ func BuildContainer() (*dig.Container, error) {
 		groupManager *services.GroupManager,
 		aggSvc *services.AggregateGroupService,
 		settingsManager *config.SystemSettingsManager,
+		keyProvider *keypool.KeyProvider,
 	) *backup.Service {
 		svc := backup.NewService(db, enc, version.Version)
 		// 1) Backfill: 让新导入的 standard 分组自动挂回 default-openai/gemini/anthropic 等系统聚合。
@@ -177,6 +178,9 @@ func BuildContainer() (*dig.Container, error) {
 		// 3) Invalidate SystemSettingsManager：让 app_url/auth_key 等 SystemSetting
 		//    在所有节点立刻生效，不需要重启。
 		svc = svc.WithInvalidator(settingsManager.Invalidate)
+		// 4) Reload in-memory key pool from DB: import 写入的新 key 必须立刻
+		//    出现在 keypool 里，否则 SelectKey 还命中 boot 时的快照 → NO_KEYS_AVAILABLE.
+		svc = svc.WithInvalidator(keyProvider.LoadKeysFromDB)
 		return svc
 	}); err != nil {
 		return nil, err
