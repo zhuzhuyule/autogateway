@@ -1094,79 +1094,50 @@ export function findFreeModel(modelId: string): FreeModel | undefined {
 }
 
 /**
- * 三层免费检测,统一入口:
+ * 单一可信源 + 命名约定. 用户契约:
+ *   "只有当 model ID 与 Free Models 列表一致时才显示 Free 标志"
  *
- * 1. provider 自己的 freeFromMeta adapter (有 upstream meta 时, 最高置信度)
- * 2. 静态 FREE_MODELS map (provider-aware; 无 providerId 时全局回退)
- * 3. modelId 启发式 (`:free` 后缀等, 跨 provider 通用)
+ * 检测顺序 (任一命中即 true):
+ *   1. FreeModels Registry (上游 ofind/FreeModels 人工维护, 6h CDN 刷新)
+ *   2. provider 平台命名约定: ":free" 后缀 (OpenRouter 等显式声明)
+ *
+ * 故意移除 (旧版有, 但跟用户契约冲突):
+ *   - provider 自家 freeFromMeta adapter (e.g. OpenRouter 按 pricing=0 判断)
+ *     → OpenRouter 给很多促销 model 设 pricing=0 不带 :free 后缀,
+ *       会爆出 100+ 个假的 free 标签
+ *   - 静态 FREE_MODELS 表 + 局部 modelId 模糊匹配 → 早期 hardcoded,
+ *     现在 Registry 已经覆盖, 多重源会导致前端/后端不一致
+ *   - "/_-free([/_-]|$)" 启发式 → 跨 provider 误标
+ *
+ * 想让某个 model 显示 Free 但 Registry 没收录的:
+ *   → 去 https://github.com/zhuzhuyule/FreeModels 提 PR, 而不是改前端
  *
  * 返回值:
- * - true  = 明确免费
- * - false = 明确付费 (仅 tier 1 adapter 能给出)
- * - null  = 未知 (不要当作付费!)
+ *   - true  = 明确免费
+ *   - null  = 未知 (前端按"不免费"渲染, 但保留语义区分 false vs null
+ *     给未来可能的 "明确付费" tier)
  */
 export function isFree(
   providerId: string | undefined,
   modelId: string,
-  upstreamMeta?: unknown
+  _upstreamMeta?: unknown
 ): boolean | null {
   if (!modelId) {
     return null;
   }
 
-  // Tier 0: FreeModels Registry (聚合 9 家 provider 的实时清单, 6h 刷新)
-  // 在所有静态规则之前查 — 这是单一可信源,优先级最高。
-  // 注: 动态 import 避免循环依赖, 模块加载时 registry 可能还没初始化。
+  // 1. FreeModels Registry
   const r0 = isFreeFromRegistry(providerId, modelId);
-  if (r0 !== null) {
-    return r0;
-  }
-
-  // Tier 1: provider adapter
-  if (providerId && upstreamMeta != null) {
-    const provider = FREE_PROVIDERS.find(p => p.id === providerId);
-    if (provider?.freeFromMeta) {
-      const r = provider.freeFromMeta(upstreamMeta);
-      if (r !== null) {
-        return r;
-      }
-    }
-  }
-
-  // Tier 2: 静态 FREE_MODELS map
-  if (providerId) {
-    const exact = FREE_MODELS.find(
-      m => m.providerId === providerId && m.modelId === modelId
-    );
-    if (exact) {
-      return true;
-    }
-    const ci = FREE_MODELS.find(
-      m =>
-        m.providerId === providerId && m.modelId.toLowerCase() === modelId.toLowerCase()
-    );
-    if (ci) {
-      return true;
-    }
-  } else {
-    // 无 providerId:全局回退
-    if (freeModelMap.has(modelId) || freeModelMap.has(modelId.toLowerCase())) {
-      return true;
-    }
-  }
-
-  // Tier 3: 启发式 (跨 provider 通用)
-  const lower = modelId.toLowerCase();
-  // OpenRouter / 部分 router 用 :free 标识
-  if (lower.endsWith(":free")) {
-    return true;
-  }
-  // 名字里独立的 free 段(如 "llama-3-free", "model_free_v1") — 排除 freeway / freeform
-  if (/(^|[/_-])free([/_-]|$)/.test(lower)) {
+  if (r0 === true) {
     return true;
   }
 
-  return null;
+  // 2. 平台命名约定 (OpenRouter :free 等)
+  if (modelId.toLowerCase().endsWith(":free")) {
+    return true;
+  }
+
+  return r0; // null 或 false from registry
 }
 
 /**
