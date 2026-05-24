@@ -109,12 +109,10 @@ func (h *ModelCatalogHandler) ListModels(c *gin.Context) {
 		}
 		entry.Groups = appendUnique(entry.Groups, groupName)
 
-		// Rule-based free 判定: 某些 provider (主要 OpenRouter) 用 ":free"
-		// 后缀约定免费 tier (e.g. "google/gemma-3-12b-it:free"). 这是 provider
-		// 平台自身的命名契约, 不依赖第三方 Registry. 单独判一次保证 catalog
-		// 不会漏标 — Registry 通常只人工录入了部分模型, 用 :free 兜底覆盖
-		// OpenRouter 整个免费目录.
-		if strings.HasSuffix(strings.ToLower(modelID), ":free") {
+		// 命名约定兜底 (OpenRouter :free 等). 复用 enrichModels 同一 helper
+		// 保证两条 API 路径 (/api/models 与 /api/groups/:id/refresh-models)
+		// is_free 判定完全一致.
+		if isFreeByNamingConvention(modelID) {
 			entry.IsFree = true
 			if entry.FreeTier == "" {
 				entry.FreeTier = "full"
