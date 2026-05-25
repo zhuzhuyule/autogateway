@@ -92,7 +92,10 @@ function highlightModelOnRoute(retriesLeft = 10, isFirstAttempt = true) {
       clearTimeout(highlightRetryTimer);
       highlightRetryTimer = null;
     }
-    tab.value = "keys";
+    // P8.11: 切到 models tab (model card 在这里渲染), 不是 keys.
+    // standard group: tab="models" → 走 v-else-if="tab === 'models'" 块
+    // aggregate group: 同上 (aggregate 的 models tab 也走 models 块)
+    tab.value = "models";
     modelSearch.value = "";
     if (availFilter.value !== "all") {
       availFilter.value = "all";

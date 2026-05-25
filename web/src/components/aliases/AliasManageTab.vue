@@ -447,12 +447,13 @@ const groupExposureById = computed<
 
 // 失效 alias 一键修复: 跳到 Keys 页对应 group + 高亮该 real_model,
 // 让 admin 立刻看到 model 卡片右上角"+加入"按钮 (V3GroupDetail 内置的 addToExposed).
-// P8.5: 同时强制 tab=keys (覆盖 V3GroupDetail localStorage 上次切到 settings 的情况).
+// P8.5+P8.11: 强制 tab=models (model card 渲染在 v-else-if="tab === 'models'"
+// 块, 不是 keys tab). 之前写成 keys 导致跳过去只看到 API key 列表, 找不到 model.
 function goFixAlias(row: ModelAliasRow): void {
   if (!row.group_id) return;
   router.push({
     name: "keys",
-    query: { groupId: row.group_id, tab: "keys", highlight: row.real_model },
+    query: { groupId: row.group_id, tab: "models", highlight: row.real_model },
   });
 }
 
