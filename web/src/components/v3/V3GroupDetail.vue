@@ -166,15 +166,9 @@ watch(tab, v => {
   } catch {
     /* ignore */
   }
-  // P8.5: tab 切换同步到 URL, 让"复制 URL 给别人"或"刷新页面"都保留当前 tab.
-  // 用 replace 不污染 history. 保留其他 query (groupId / highlight 等).
-  const cur = route.query;
-  if (cur.tab !== v) {
-    router.replace({
-      name: "keys",
-      query: { ...cur, tab: v },
-    });
-  }
+  // P8.6 紧急回滚: tab → router.replace 同步段疑似让 click 卡死, 暂时移除.
+  // tab URL 激活功能 (alias 跳转 ?tab=keys 强制激活) 通过 readInitialTab 仍生效.
+  // 刷新页恢复 tab 用 localStorage 兜底 (跳转场景的 ?tab= 走 readInitialTab 优先级).
 });
 const faviconFailed = ref(false);
 
