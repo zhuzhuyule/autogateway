@@ -1208,16 +1208,18 @@ export default {
     alEmptySub:
       "別名を作成して、複数の (グループ, モデル) を 1 つの分かりやすい名前にまとめましょう",
   },
-  v6: {
-    healthTitle: "サブグループの健全性",
-    healthMeta: "{n} 個のサブグループ · 10秒ごとに自動更新",
-    healthColSubGroup: "サブグループ",
-    healthColLatency: "レイテンシ (EWMA)",
-    healthColWeight: "重み (実効 / 元値)",
-    healthColModels: "モデル",
-    healthColStatus: "ステータス",
-    healthStatusCooldown: "クールダウン {t}",
-    healthStatusFails: "{n} 回失敗",
-    healthStatusOk: "正常",
+  // ---- 機能ドメイン namespace (新規約) ----
+  // v3.* / v5.* は UI バージョン更新の遺産. 新規 key はトピック単位で分ける.
+  health: {
+    title: "サブグループの健全性",
+    meta: "{n} 個のサブグループ · 10秒ごとに自動更新",
+    colSubGroup: "サブグループ",
+    colLatency: "レイテンシ (EWMA)",
+    colWeight: "重み (実効 / 元値)",
+    colModels: "モデル",
+    colStatus: "ステータス",
+    statusCooldown: "クールダウン {t}",
+    statusFails: "{n} 回失敗",
+    statusOk: "正常",
   },
 };

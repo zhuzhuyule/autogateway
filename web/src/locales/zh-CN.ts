@@ -1247,16 +1247,19 @@ export default {
     alEmpty: "还没有别名",
     alEmptySub: "新建一个别名，把多个 (分组, 模型) 路由到同一个易记名字",
   },
-  v6: {
-    healthTitle: "子分组健康度",
-    healthMeta: "{n} 个子分组 · 每 10s 自动刷新",
-    healthColSubGroup: "子分组",
-    healthColLatency: "延迟 (EWMA)",
-    healthColWeight: "权重 (有效 / 原始)",
-    healthColModels: "模型缓存",
-    healthColStatus: "状态",
-    healthStatusCooldown: "冷却 {t}",
-    healthStatusFails: "{n} 次失败",
-    healthStatusOk: "正常",
+  // ---- 功能域 namespace (新规约) ----
+  // 老 v3.* / v5.* 是 UI 改版历史残留, 新加 key 一律按主题划 namespace.
+  // 例: health.* 子分组健康度 dashboard.
+  health: {
+    title: "子分组健康度",
+    meta: "{n} 个子分组 · 每 10s 自动刷新",
+    colSubGroup: "子分组",
+    colLatency: "延迟 (EWMA)",
+    colWeight: "权重 (有效 / 原始)",
+    colModels: "模型缓存",
+    colStatus: "状态",
+    statusCooldown: "冷却 {t}",
+    statusFails: "{n} 次失败",
+    statusOk: "正常",
   },
 };

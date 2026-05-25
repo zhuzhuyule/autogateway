@@ -1710,17 +1710,17 @@ const filterCounts = computed(() => ({
         <!-- P6: 健康度 dashboard (10s 自动刷新) -->
         <details v-if="healthRows.length" open style="margin: 0 0 16px; padding: 12px 16px; border: 1px solid var(--v3-line); border-radius: 8px; background: var(--v3-bg-soft, transparent)">
           <summary style="cursor: pointer; font: 600 13px var(--v3-sans); display: flex; justify-content: space-between; align-items: center">
-            <span>{{ t("v6.healthTitle") }}</span>
-            <span style="font: 400 11px var(--v3-mono); color: var(--v3-ink-4)">{{ t("v6.healthMeta", { n: healthRows.length }) }}</span>
+            <span>{{ t("health.title") }}</span>
+            <span style="font: 400 11px var(--v3-mono); color: var(--v3-ink-4)">{{ t("health.meta", { n: healthRows.length }) }}</span>
           </summary>
           <table style="width: 100%; margin-top: 10px; border-collapse: collapse; font: 12px var(--v3-sans)">
             <thead>
               <tr style="text-align: left; color: var(--v3-ink-4); border-bottom: 1px solid var(--v3-line)">
-                <th style="padding: 6px 8px; font-weight: 500">{{ t("v6.healthColSubGroup") }}</th>
-                <th style="padding: 6px 8px; font-weight: 500">{{ t("v6.healthColLatency") }}</th>
-                <th style="padding: 6px 8px; font-weight: 500">{{ t("v6.healthColWeight") }}</th>
-                <th style="padding: 6px 8px; font-weight: 500">{{ t("v6.healthColModels") }}</th>
-                <th style="padding: 6px 8px; font-weight: 500">{{ t("v6.healthColStatus") }}</th>
+                <th style="padding: 6px 8px; font-weight: 500">{{ t("health.colSubGroup") }}</th>
+                <th style="padding: 6px 8px; font-weight: 500">{{ t("health.colLatency") }}</th>
+                <th style="padding: 6px 8px; font-weight: 500">{{ t("health.colWeight") }}</th>
+                <th style="padding: 6px 8px; font-weight: 500">{{ t("health.colModels") }}</th>
+                <th style="padding: 6px 8px; font-weight: 500">{{ t("health.colStatus") }}</th>
               </tr>
             </thead>
             <tbody>
@@ -1733,12 +1733,12 @@ const filterCounts = computed(() => ({
                 <td style="padding: 6px 8px; font: 12px var(--v3-mono)">{{ h.has_models_cache ? h.models_count : "—" }}</td>
                 <td style="padding: 6px 8px">
                   <span v-if="h.in_cooldown" style="padding: 2px 6px; border-radius: 4px; font: 500 11px var(--v3-mono); color: var(--v3-warn); background: oklch(from var(--v3-warn) l c h / 0.15)">
-                    {{ t("v6.healthStatusCooldown", { t: cooldownRemain(h.cooldown_until) }) }}
+                    {{ t("health.statusCooldown", { t: cooldownRemain(h.cooldown_until) }) }}
                   </span>
                   <span v-else-if="h.consecutive_failures > 0" style="padding: 2px 6px; border-radius: 4px; font: 500 11px var(--v3-mono); color: var(--v3-warn); background: oklch(from var(--v3-warn) l c h / 0.1)">
-                    {{ t("v6.healthStatusFails", { n: h.consecutive_failures }) }}
+                    {{ t("health.statusFails", { n: h.consecutive_failures }) }}
                   </span>
-                  <span v-else style="padding: 2px 6px; border-radius: 4px; font: 500 11px var(--v3-mono); color: var(--v3-ok); background: oklch(from var(--v3-ok) l c h / 0.12)">{{ t("v6.healthStatusOk") }}</span>
+                  <span v-else style="padding: 2px 6px; border-radius: 4px; font: 500 11px var(--v3-mono); color: var(--v3-ok); background: oklch(from var(--v3-ok) l c h / 0.12)">{{ t("health.statusOk") }}</span>
                 </td>
               </tr>
             </tbody>

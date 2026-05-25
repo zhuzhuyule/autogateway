@@ -1258,16 +1258,18 @@ export default {
     alEmpty: "No aliases yet",
     alEmptySub: "Create one to route multiple (group, model) candidates under a friendly name",
   },
-  v6: {
-    healthTitle: "Sub-group Health",
-    healthMeta: "{n} sub-groups · auto-refresh every 10s",
-    healthColSubGroup: "Sub-group",
-    healthColLatency: "Latency (EWMA)",
-    healthColWeight: "Weight (eff / raw)",
-    healthColModels: "Models",
-    healthColStatus: "Status",
-    healthStatusCooldown: "cooldown {t}",
-    healthStatusFails: "{n} fails",
-    healthStatusOk: "ok",
+  // ---- Feature-domain namespace (new convention) ----
+  // v3.* / v5.* are UI-revision legacy; new keys go under topical namespaces.
+  health: {
+    title: "Sub-group Health",
+    meta: "{n} sub-groups · auto-refresh every 10s",
+    colSubGroup: "Sub-group",
+    colLatency: "Latency (EWMA)",
+    colWeight: "Weight (eff / raw)",
+    colModels: "Models",
+    colStatus: "Status",
+    statusCooldown: "cooldown {t}",
+    statusFails: "{n} fails",
+    statusOk: "ok",
   },
 };
