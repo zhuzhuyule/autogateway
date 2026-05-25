@@ -1079,6 +1079,7 @@ export default {
     suggestFamilyMeta: "{n} 个模型 · ×{hits}",
     suggestFamilyCreate: "新建",
     suggestFamilyAppend: "追加",
+    suggestFamilyQuickAdopt: "一键采纳（跳过预览，直接批量创建）",
     suggestFamilyTooltipCreate: "一键创建别名 “{alias}” 并聚合下列模型",
     suggestFamilyTooltipAppend: "一键追加到现有别名 “{alias}”",
     suggestFamilyInGroups: "{n} 个分组",

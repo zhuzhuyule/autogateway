@@ -1060,6 +1060,7 @@ export default {
     suggestFamilyMeta: "{n} 個のモデル · ×{hits}",
     suggestFamilyCreate: "新規",
     suggestFamilyAppend: "追加",
+    suggestFamilyQuickAdopt: "ワンタッチ採用（プレビュー不要、一括作成）",
     suggestFamilyTooltipCreate: "エイリアス「{alias}」を作成し、以下のモデルを一括登録",
     suggestFamilyTooltipAppend: "既存エイリアス「{alias}」へ一括追加",
     suggestFamilyInGroups: "{n} グループ",

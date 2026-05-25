@@ -574,6 +574,43 @@ function dismissSuggestions() {
   suggestionsDismissed.value = true;
 }
 
+// P7: family suggestion 一键采纳 -- 不开 picker, 直接 batch create alias.
+// 跳过会跟现有 alias 行冲突的 (group_id, real_model) 候选 (后端会 409, 浪费请求).
+// 创建完刷新 alias 表 + suggestions (刚采纳的 family 应该消失 / 标 existing_alias).
+async function quickAdoptFamilySuggestion(s: AliasSuggestion) {
+  const alias = (s.existing_alias || s.family || "").trim();
+  if (!alias || !s.models?.length) {
+    return;
+  }
+  type Task = { groupId: number; realModel: string };
+  const tasks: Task[] = [];
+  const seen = new Set<string>();
+  for (const fm of s.models) {
+    const ids = fm.in_group_ids || [];
+    for (const gid of ids) {
+      const dup = rows.value.some(
+        r => r.alias === alias && r.group_id === gid && r.real_model === fm.name
+      );
+      if (dup) continue;
+      const key = `${gid}:${fm.name}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      tasks.push({ groupId: gid, realModel: fm.name });
+    }
+  }
+  if (tasks.length === 0) {
+    return;
+  }
+  await Promise.all(
+    tasks.map(t =>
+      aliasesApi
+        .create({ alias, group_id: t.groupId, real_model: t.realModel, weight: 1, enabled: true })
+        .catch(() => null) // 静默吞 (409 重复等); 后续 loadAll/loadSuggestions 会反映真实状态
+    )
+  );
+  await Promise.all([loadAll(), loadSuggestions()]);
+}
+
 onMounted(() => {
   // 并行触发，banner 出现 race-free，无需阻塞主列表
   Promise.all([loadAll(), loadSuggestions(), loadTimings()]);
@@ -752,18 +789,26 @@ function saveSettingsThrottled() {
                exists → "append" rather than "create"). -->
           <n-tooltip v-if="s.kind === 'family'" trigger="hover" placement="top">
             <template #trigger>
-              <button class="v5-suggest-chip v5-suggest-chip--family" @click="onClickSuggestion(s)">
-                <span class="v5-suggest-chip__family">{{ s.family }}</span>
-                <span class="v5-suggest-chip__sub">
-                  {{ t("v5.suggestFamilyMeta", { n: (s.models || []).length, hits: s.count }) }}
-                </span>
-                <span
-                  class="v5-suggest-chip__pill"
-                  :class="s.existing_alias ? 'v5-suggest-chip__pill--append' : 'v5-suggest-chip__pill--new'"
-                >
-                  {{ s.existing_alias ? t("v5.suggestFamilyAppend") : t("v5.suggestFamilyCreate") }}
-                </span>
-              </button>
+              <span class="v5-suggest-chip-wrap">
+                <button class="v5-suggest-chip v5-suggest-chip--family" @click="onClickSuggestion(s)">
+                  <span class="v5-suggest-chip__family">{{ s.family }}</span>
+                  <span class="v5-suggest-chip__sub">
+                    {{ t("v5.suggestFamilyMeta", { n: (s.models || []).length, hits: s.count }) }}
+                  </span>
+                  <span
+                    class="v5-suggest-chip__pill"
+                    :class="s.existing_alias ? 'v5-suggest-chip__pill--append' : 'v5-suggest-chip__pill--new'"
+                  >
+                    {{ s.existing_alias ? t("v5.suggestFamilyAppend") : t("v5.suggestFamilyCreate") }}
+                  </span>
+                </button>
+                <!-- P7: 一键采纳, 跳过 picker 直接 batch create. -->
+                <button
+                  class="v5-suggest-chip__zap"
+                  :title="t('v5.suggestFamilyQuickAdopt')"
+                  @click.stop="quickAdoptFamilySuggestion(s)"
+                >⚡</button>
+              </span>
             </template>
             <div style="font: 500 11px var(--v3-sans); margin-bottom: 4px">
               {{ s.existing_alias
@@ -1952,6 +1997,39 @@ function saveSettingsThrottled() {
 .v5-suggest-chip__pill--append {
   color: var(--v3-warn);
   background: oklch(from var(--v3-warn) l c h / 0.12);
+}
+/* P7: family chip 容器 + ⚡ 一键采纳按钮 */
+.v5-suggest-chip-wrap {
+  display: inline-flex;
+  align-items: stretch;
+}
+.v5-suggest-chip-wrap .v5-suggest-chip {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+  border-right-width: 0;
+}
+.v5-suggest-chip__zap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  padding: 0 6px;
+  border: 1px solid var(--v3-line);
+  border-left: 1px solid var(--v3-line-soft, var(--v3-line));
+  border-top-right-radius: 6px;
+  border-bottom-right-radius: 6px;
+  background: var(--v3-surface);
+  color: var(--v3-accent);
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  transition: background 0.1s;
+}
+.v5-suggest-chip__zap:hover {
+  background: oklch(from var(--v3-accent) l c h / 0.15);
+}
+.v5-suggest-chip__zap:active {
+  background: oklch(from var(--v3-accent) l c h / 0.28);
 }
 @keyframes v5-alias-glow {
   0% { box-shadow: 0 0 0 0 var(--v3-accent); }
