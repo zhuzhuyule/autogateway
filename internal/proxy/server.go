@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"strconv"
 	"errors"
 	"fmt"
 	"io"
@@ -73,6 +74,23 @@ const (
 	ctxKeyP4Candidates = "p4_candidates"
 	ctxKeyP4Cursor     = "p4_cursor"
 )
+
+// parseRetryAfter 解析 Retry-After 响应头, 返回 0 表示头不存在/解析失败.
+// 仅支持"整数秒"格式 (大部分 LLM provider 用这个), HTTP date 格式暂不支持.
+// P5.1 用于 429 cooldown 时长决定.
+func parseRetryAfter(h http.Header) time.Duration {
+	if h == nil {
+		return 0
+	}
+	v := h.Get("Retry-After")
+	if v == "" {
+		return 0
+	}
+	if secs, err := strconv.Atoi(v); err == nil && secs > 0 {
+		return time.Duration(secs) * time.Second
+	}
+	return 0
+}
 
 // rewriteBodyModel 改写 JSON body 里的 "model" 字段为 newModel. multipart/form-data
 // 等非 JSON body 当前不支持改写 (会原样返回, 调用方决定是否继续).
@@ -409,8 +427,12 @@ func (ps *ProxyServer) executeRequestWithRetry(
 				attemptedSubGroups = make(map[string]bool)
 			}
 			attemptedSubGroups[group.Name] = true
-			// 当前子分组累计失败 → 通知熔断器
-			ps.subGroupManager.RecordSubGroupResult(originalGroup.ID, group.Name, false)
+			// 当前子分组累计失败 → 通知熔断器 (P5.1: 透传 statusCode + Retry-After 让 429 走专项 cooldown)
+			var retryAfter time.Duration
+			if resp != nil {
+				retryAfter = parseRetryAfter(resp.Header)
+			}
+			ps.subGroupManager.RecordSubGroupResult(originalGroup.ID, group.Name, false, statusCode, retryAfter)
 
 			// P4 智能路由 candidate pool 优先: 如果入口解析了 candidates,
 			// fallback 从池里取下一个 (跟 SubGroupManager 老路径互斥).
@@ -479,7 +501,11 @@ func (ps *ProxyServer) executeRequestWithRetry(
 		if isLastAttempt {
 			// 该子分组的最终失败 → 通知熔断器(failover 路径已记录,不会重复:这里走的是 standard 直连或 aggregate 全部 sub-group 都尝试过)
 			if originalGroup.GroupType == "aggregate" && group.Name != originalGroup.Name {
-				ps.subGroupManager.RecordSubGroupResult(originalGroup.ID, group.Name, false)
+				var retryAfter time.Duration
+				if resp != nil {
+					retryAfter = parseRetryAfter(resp.Header)
+				}
+				ps.subGroupManager.RecordSubGroupResult(originalGroup.ID, group.Name, false, statusCode, retryAfter)
 			}
 			var errorJSON map[string]any
 			if err := json.Unmarshal([]byte(errorMessage), &errorJSON); err == nil {
@@ -500,7 +526,7 @@ func (ps *ProxyServer) executeRequestWithRetry(
 
 	// 通知熔断器:该子分组本次请求成功(若是聚合请求)
 	if originalGroup.GroupType == "aggregate" && group.Name != originalGroup.Name {
-		ps.subGroupManager.RecordSubGroupResult(originalGroup.ID, group.Name, true)
+		ps.subGroupManager.RecordSubGroupResult(originalGroup.ID, group.Name, true, resp.StatusCode, 0)
 	}
 
 	// Check if this is a model list request (needs special handling)

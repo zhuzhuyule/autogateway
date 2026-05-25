@@ -17,6 +17,10 @@ import (
 const (
 	subGroupBreakerThreshold = 3
 	subGroupBreakerCooldown  = 30 * time.Second
+	// P5.1: 429 (rate limit) 跟 5xx (服务故障) 性质不同 -- 不算 consecutive
+	// failure, 直接进 cooldown. 默认 60s, 上游给了 Retry-After 用真值.
+	rateLimitDefaultCooldown = 60 * time.Second
+	rateLimitMaxCooldown     = 10 * time.Minute
 )
 
 // SubGroupManager manages weighted round-robin selection for all aggregate groups
@@ -61,7 +65,11 @@ func (m *SubGroupManager) SelectSubGroupForModel(group *models.Group, requestedM
 
 // RecordSubGroupResult 上层(proxy server)在每次请求结束后调用,驱动子分组级熔断器.
 // aggregateGroupID 必须是 aggregate 类型;如果原始请求是直接命中 standard 分组,该方法 no-op.
-func (m *SubGroupManager) RecordSubGroupResult(aggregateGroupID uint, subGroupName string, success bool) {
+//
+// statusCode 是上游 HTTP 响应码 (success=true 时忽略). P5.1: 429 走专项路径
+// (不算 consecutive failure, 直接 cooldown), 5xx/network 错误走老熔断逻辑.
+// retryAfter 是 Retry-After 头解析出的秒数 (429 时用); 0 表示用默认 cooldown.
+func (m *SubGroupManager) RecordSubGroupResult(aggregateGroupID uint, subGroupName string, success bool, statusCode int, retryAfter time.Duration) {
 	if subGroupName == "" {
 		return
 	}
@@ -71,7 +79,7 @@ func (m *SubGroupManager) RecordSubGroupResult(aggregateGroupID uint, subGroupNa
 	if !ok || sel == nil {
 		return
 	}
-	sel.recordResult(subGroupName, success)
+	sel.recordResult(subGroupName, success, statusCode, retryAfter)
 }
 
 // SelectSubGroupForModelExcluding 与 SelectSubGroupForModel 类似,但额外排除 attempted 集合中的子分组.
@@ -353,7 +361,8 @@ func (s *selector) selectAmong(pred func(*subGroupItem) bool) string {
 
 // recordResult 记录一次该子分组上游请求的最终成败,驱动熔断器开关.
 // 调用方不需要持有 selector.mu;此方法内部加锁.
-func (s *selector) recordResult(name string, success bool) {
+// statusCode + retryAfter 用于 P5.1: 区分 429 (rate limit) vs 5xx (服务故障).
+func (s *selector) recordResult(name string, success bool, statusCode int, retryAfter time.Duration) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for i := range s.subGroups {
@@ -372,6 +381,30 @@ func (s *selector) recordResult(name string, success bool) {
 			it.cooldownUntil = time.Time{}
 			return
 		}
+
+		// P5.1: 429 (rate limit) 是配额耗尽不是服务故障 -- 直接进 cooldown,
+		// 不算 consecutive failure (避免触发 5xx 的 3-次失败长熔断).
+		// cooldown 时长按 Retry-After 头优先, 没头用默认 60s. clamp 到 10 分钟避免恶意值.
+		if statusCode == 429 {
+			cooldown := rateLimitDefaultCooldown
+			if retryAfter > 0 {
+				cooldown = retryAfter
+				if cooldown > rateLimitMaxCooldown {
+					cooldown = rateLimitMaxCooldown
+				}
+			}
+			it.cooldownUntil = time.Now().Add(cooldown)
+			logrus.WithFields(logrus.Fields{
+				"aggregate_group":  s.groupName,
+				"sub_group":        it.name,
+				"cooldown_seconds": int(cooldown.Seconds()),
+				"reason":           "429 rate limit",
+				"retry_after_hdr":  retryAfter > 0,
+			}).Info("Sub-group rate-limited, cooling down")
+			return
+		}
+
+		// 5xx / network error: 老熔断逻辑 (consecutive failures + 30s cooldown)
 		it.consecutiveFailures++
 		if it.consecutiveFailures >= subGroupBreakerThreshold {
 			it.cooldownUntil = time.Now().Add(subGroupBreakerCooldown)
@@ -380,6 +413,7 @@ func (s *selector) recordResult(name string, success bool) {
 				"sub_group":        it.name,
 				"failures":         it.consecutiveFailures,
 				"cooldown_seconds": int(subGroupBreakerCooldown.Seconds()),
+				"status_code":      statusCode,
 			}).Warn("Sub-group circuit breaker tripped")
 		}
 		return
