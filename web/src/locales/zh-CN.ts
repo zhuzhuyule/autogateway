@@ -1083,6 +1083,8 @@ export default {
     suggestFamilyReview: "审查 / 编辑候选后再创建",
     suggestFamilyReviewBtn: "审查",
     aliasUnexposedFixTip: "跳转到对应分组的密钥页, 高亮该模型 (右上角 +加入 立即生效)",
+    aliasJumpToModel: "跳转到此 →",
+    aliasJumpToModelTip: "跳转到该模型的密钥页, 高亮显示",
     modelClickToCopy: "点击复制 model ID",
     modelCopied: "已复制 model ID: {model}",
     suggestionsExpand: "展开建议列表",

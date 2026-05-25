@@ -1064,6 +1064,8 @@ export default {
     suggestFamilyReview: "候補をレビュー / 編集してから作成",
     suggestFamilyReviewBtn: "確認",
     aliasUnexposedFixTip: "対応するグループの鍵ページへジャンプし、該当モデルをハイライト（右上の +追加 ボタンで修復）",
+    aliasJumpToModel: "ここへジャンプ →",
+    aliasJumpToModelTip: "このモデルの鍵ページへジャンプしてハイライト",
     modelClickToCopy: "クリックして model ID をコピー",
     modelCopied: "コピー完了: {model}",
     suggestionsExpand: "提案リストを展開",

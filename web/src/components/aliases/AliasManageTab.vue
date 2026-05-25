@@ -1524,6 +1524,22 @@ function saveSettingsThrottled() {
           </button>
           <div style="display: flex; gap: 12px">
             <button class="v3-btn" @click="editModalOpen = false">{{ t("common.cancel") }}</button>
+            <!-- P8.12: 跳转到此 — 关弹窗后跳到对应 group 的 model card. -->
+            <button
+              class="v3-btn"
+              :title="t('v3.aliasJumpToModelTip') || '跳转到该模型的密钥页, 高亮显示'"
+              @click="
+                () => {
+                  if (editDraft) {
+                    const draft = editDraft;
+                    editModalOpen = false;
+                    goFixAlias(draft);
+                  }
+                }
+              "
+            >
+              {{ t("v3.aliasJumpToModel") || "跳转到此 →" }}
+            </button>
             <button class="v3-btn v3-btn--accent" @click="commitEdit">
               {{ t("common.save") }}
             </button>
