@@ -1094,39 +1094,44 @@ function saveSettingsThrottled() {
             "
             @click="openEdit(m)"
           >
-            <ProviderLogo
-              v-if="hasProviderLogo(aliasLogoHint(m))"
-              :hint="aliasLogoHint(m)"
-              :size="16"
-              style="border-radius: 3px"
-            />
-            <span
-              v-else
-              :class="pavClass(inferProvider(m))"
-              style="width: 16px; height: 16px; border-radius: 3px; font-size: 8px"
-            >
-              {{
-                V3_PROVIDER_DIR[inferProvider(m)]?.short ||
-                  inferProvider(m).slice(0, 2).toUpperCase()
-              }}
-            </span>
-            <span class="v3-alias-chip__name">{{ m.real_model }}</span>
-            <span
-              v-if="avgMsFor(m.real_model) > 0"
-              class="v3-alias-chip__avgms"
-              :title="t('v3.aliasAvgMsTip') || '全程耗时 · 24h 平均(含流式回答时长)'"
-            >
-              {{ formatAvgMs(avgMsFor(m.real_model)) }}
-            </span>
-            <button
-              v-if="aliasIsDeadByExposure(m)"
-              type="button"
-              class="v3-alias-chip__deadbadge v3-alias-chip__deadbadge--fix"
-              :title="t('v3.aliasUnexposedFixTip') || '跳转到对应分组的密钥页, 高亮该模型 → 一键加入暴露列表'"
-              @click.stop="goFixAlias(m)"
-            >
-              {{ t("v3.aliasUnexposed") || "失效" }} →
-            </button>
+            <!-- P8.13: 双行 chip — header(provider + metadata) + body(model id 可折行) -->
+            <div class="v3-alias-chip__head">
+              <ProviderLogo
+                v-if="hasProviderLogo(aliasLogoHint(m))"
+                :hint="aliasLogoHint(m)"
+                :size="14"
+                style="border-radius: 3px; flex-shrink: 0"
+              />
+              <span
+                v-else
+                :class="pavClass(inferProvider(m))"
+                style="width: 14px; height: 14px; border-radius: 3px; font-size: 7px; flex-shrink: 0"
+              >
+                {{
+                  V3_PROVIDER_DIR[inferProvider(m)]?.short ||
+                    inferProvider(m).slice(0, 2).toUpperCase()
+                }}
+              </span>
+              <span class="v3-alias-chip__provider-label">{{ inferProvider(m) }}</span>
+              <span class="v3-alias-chip__head-spacer"></span>
+              <span
+                v-if="avgMsFor(m.real_model) > 0"
+                class="v3-alias-chip__avgms"
+                :title="t('v3.aliasAvgMsTip') || '全程耗时 · 24h 平均(含流式回答时长)'"
+              >
+                {{ formatAvgMs(avgMsFor(m.real_model)) }}
+              </span>
+              <button
+                v-if="aliasIsDeadByExposure(m)"
+                type="button"
+                class="v3-alias-chip__deadbadge v3-alias-chip__deadbadge--fix"
+                :title="t('v3.aliasUnexposedFixTip') || '跳转到对应分组的密钥页, 高亮该模型 → 一键加入暴露列表'"
+                @click.stop="goFixAlias(m)"
+              >
+                {{ t("v3.aliasUnexposed") || "失效" }} →
+              </button>
+            </div>
+            <div class="v3-alias-chip__name">{{ m.real_model }}</div>
           </button>
           <div v-if="!tier.models.length" class="v3-tier__empty-hint">
             {{ t("v3.noMappings") }}
@@ -1777,20 +1782,46 @@ function saveSettingsThrottled() {
 }
 
 .v3-alias-chip {
+  /* P8.13: 双行布局 — head (provider + metadata) + body (model id 可折行).
+     长 id 在 body 内 wrap, head 永远在顶部独立行. */
   display: inline-flex;
-  align-items: center;
-  gap: 5px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 3px;
   background: var(--v3-surface-2);
   border: 1px solid var(--v3-line);
-  padding: 2px 6px;
-  border-radius: 4px;
-  height: 24px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  min-height: 36px;
   transition: all 120ms;
   position: relative;
   flex-shrink: 0;
   cursor: pointer;
   font-family: inherit;
   color: inherit;
+  max-width: 320px;
+  min-width: 140px;
+  text-align: left;
+}
+.v3-alias-chip__head {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: nowrap;
+  min-width: 0;
+}
+.v3-alias-chip__head-spacer {
+  flex: 1;
+  min-width: 4px;
+}
+.v3-alias-chip__provider-label {
+  font: 500 9.5px var(--v3-mono);
+  color: var(--v3-ink-4);
+  text-transform: lowercase;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .v3-alias-chip:hover {
   border-color: var(--v3-accent);
@@ -1887,9 +1918,13 @@ function saveSettingsThrottled() {
   border-bottom-right-radius: 0;
 }
 .v3-alias-chip__name {
-  font: 500 11px var(--v3-mono);
+  font: 500 11px/1.35 var(--v3-mono);
   color: var(--v3-ink-2);
-  white-space: nowrap;
+  /* P8.13: 长 model id 完整展示, 允许任意位置换行 (含 / : -). */
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  white-space: normal;
+  user-select: text;
 }
 .v3-alias-chip__avgms {
   font: 500 9.5px var(--v3-mono);
