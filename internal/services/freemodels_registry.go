@@ -186,6 +186,7 @@ type FreeModelsRegistry struct {
 	envelope       freeModelsEnvelope
 	byProvMod      map[string]*FreeModelMeta    // key: "<provider>/<lower-modelId>"
 	byModelOnly    map[string][]*FreeModelMeta
+	byFamily       map[string][]*FreeModelMeta  // key: lower(modelFamily) — P4 智能路由用
 	byHost         map[string]string            // host (lowercase) → providerId
 	providerByName map[string]*FreeProviderMeta // providerId → meta
 	stopCh         chan struct{}
@@ -196,6 +197,7 @@ func NewFreeModelsRegistry() *FreeModelsRegistry {
 	return &FreeModelsRegistry{
 		byProvMod:      make(map[string]*FreeModelMeta),
 		byModelOnly:    make(map[string][]*FreeModelMeta),
+		byFamily:       make(map[string][]*FreeModelMeta),
 		byHost:         make(map[string]string),
 		providerByName: make(map[string]*FreeProviderMeta),
 		stopCh:         make(chan struct{}),
@@ -377,10 +379,15 @@ func (r *FreeModelsRegistry) replaceIndex(env freeModelsEnvelope) {
 	// FreeModels 端已经统一剥掉 "<provider>/" 前缀), 不需要双索引.
 	byProvMod := make(map[string]*FreeModelMeta, len(env.Models))
 	byModelOnly := make(map[string][]*FreeModelMeta)
+	byFamily := make(map[string][]*FreeModelMeta)
 	for i := range env.Models {
 		m := &env.Models[i]
 		byProvMod[provModKey(m.Provider, m.ModelID)] = m
 		byModelOnly[strings.ToLower(m.ModelID)] = append(byModelOnly[strings.ToLower(m.ModelID)], m)
+		if m.ModelFamily != "" {
+			fk := strings.ToLower(m.ModelFamily)
+			byFamily[fk] = append(byFamily[fk], m)
+		}
 	}
 	// 从 providerMeta.apiBaseUrl 派生 host → providerId 索引, 让前端反查
 	// 用户分组 upstream URL 时能在 O(1) 命中. 缺 apiBaseUrl 的 provider
@@ -400,6 +407,7 @@ func (r *FreeModelsRegistry) replaceIndex(env freeModelsEnvelope) {
 	r.envelope = env
 	r.byProvMod = byProvMod
 	r.byModelOnly = byModelOnly
+	r.byFamily = byFamily
 	r.byHost = byHost
 	r.providerByName = providerByName
 	r.mu.Unlock()
@@ -511,6 +519,26 @@ func (r *FreeModelsRegistry) Lookup(provider, modelID string) *FreeModelMeta {
 		return list[0]
 	}
 	return nil
+}
+
+// ListByFamily 返回 model_family 下所有 (provider, raw model id) 候选.
+// family 名大小写不敏感. 返回空切片 (不是 nil) 表示无候选.
+//
+// P4 智能路由的核心方法 -- 让 aggregate 路由可以"用户填 family 名
+// (如 'llama-3.3-70b') → 自动展开所有 provider 的 raw API id 候选 →
+// 复用现有 SWRR + fallback".
+func (r *FreeModelsRegistry) ListByFamily(family string) []FreeModelMeta {
+	if family == "" {
+		return nil
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	metas := r.byFamily[strings.ToLower(family)]
+	out := make([]FreeModelMeta, 0, len(metas))
+	for _, m := range metas {
+		out = append(out, *m)
+	}
+	return out
 }
 
 // ListModelIDsByProvider 返回该 provider 在 registry 中的 model ID 列表.

@@ -129,6 +129,11 @@ func BuildContainer() (*dig.Container, error) {
 	if err := container.Provide(services.NewAliasService); err != nil {
 		return nil, err
 	}
+	// P4 智能路由解析层: 三层链 alias > family > raw, 把 user model name
+	// 展开成 candidate pool 供 proxy 选 sub-group + 改写 body.model.
+	if err := container.Provide(services.NewModelResolver); err != nil {
+		return nil, err
+	}
 	if err := container.Provide(services.NewAliasSuggestionService); err != nil {
 		return nil, err
 	}

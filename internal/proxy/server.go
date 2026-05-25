@@ -36,6 +36,7 @@ type ProxyServer struct {
 	requestLogService *services.RequestLogService
 	aliasService      *services.AliasService
 	selector          *router_engine.Selector
+	modelResolver     *services.ModelResolver
 	encryptionSvc     encryption.Service
 }
 
@@ -49,6 +50,7 @@ func NewProxyServer(
 	requestLogService *services.RequestLogService,
 	aliasService *services.AliasService,
 	selector *router_engine.Selector,
+	modelResolver *services.ModelResolver,
 	encryptionSvc encryption.Service,
 ) (*ProxyServer, error) {
 	return &ProxyServer{
@@ -60,8 +62,33 @@ func NewProxyServer(
 		requestLogService: requestLogService,
 		aliasService:      aliasService,
 		selector:          selector,
+		modelResolver:     modelResolver,
 		encryptionSvc:     encryptionSvc,
 	}, nil
+}
+
+// P4 智能路由 candidate pool 在 gin context 里的 key. 入口解析后存 pool + cursor,
+// fallback 时从 pool 取下一个 candidate, 实现 alias/family 命中场景的跨 sub-group 切换.
+const (
+	ctxKeyP4Candidates = "p4_candidates"
+	ctxKeyP4Cursor     = "p4_cursor"
+)
+
+// rewriteBodyModel 改写 JSON body 里的 "model" 字段为 newModel. multipart/form-data
+// 等非 JSON body 当前不支持改写 (会原样返回, 调用方决定是否继续).
+// 用于 P4 智能路由 -- 入口选定 candidate 后, body.model 改成 candidate.RealModel
+// 转发给上游 (e.g. 用户填 "llama-3.3-70b", 转发到 Groq 时改成 "llama-3.3-70b-versatile").
+func rewriteBodyModel(bodyBytes []byte, newModel string) ([]byte, error) {
+	if len(bodyBytes) == 0 || newModel == "" {
+		return bodyBytes, nil
+	}
+	var body map[string]any
+	if err := json.Unmarshal(bodyBytes, &body); err != nil {
+		// 非 JSON body (multipart 等), 不改写
+		return bodyBytes, nil
+	}
+	body["model"] = newModel
+	return json.Marshal(body)
 }
 
 // extractRequestedModel 从请求体中粗解析 "model" 字段;OpenAI/Anthropic/Gemini 三种 channel 都用这个字段.
@@ -92,6 +119,36 @@ func (ps *ProxyServer) HandleProxy(c *gin.Context) {
 	}
 	c.Request.Body.Close()
 	requestedModel := extractRequestedModel(c.GetHeader("Content-Type"), bodyBytes)
+
+	// P4 智能路由: aggregate group 上先解析 candidates (alias > family > raw).
+	// 命中候选池则用第一个 candidate 钉死 sub-group + 改写 body.model, 剩余
+	// candidates 存到 gin context 供 fallback 时取下一个.
+	// 未命中 (raw 字符串匹配) → 走老 SelectSubGroupForModel 路径.
+	if ps.modelResolver != nil && originalGroup.GroupType == "aggregate" && requestedModel != "" {
+		if cands := ps.modelResolver.Resolve(c.Request.Context(), originalGroup, requestedModel); len(cands) > 0 {
+			first := cands[0]
+			subGroup, gerr := ps.groupManager.GetGroupByName(first.GroupName)
+			if gerr == nil && subGroup != nil {
+				newBody, berr := rewriteBodyModel(bodyBytes, first.RealModel)
+				if berr == nil {
+					bodyBytes = newBody
+					// 存 candidate pool + cursor=1 (下次 fallback 取 [1])
+					c.Set(ctxKeyP4Candidates, cands)
+					c.Set(ctxKeyP4Cursor, 1)
+					logrus.WithFields(logrus.Fields{
+						"aggregate_group": originalGroup.Name,
+						"requested_model": requestedModel,
+						"resolved_source": first.Source,
+						"chosen_sub":      first.GroupName,
+						"real_model":      first.RealModel,
+						"pool_size":       len(cands),
+					}).Info("P4 router: candidate resolved")
+					ps.handleResolvedCandidate(c, originalGroup, subGroup, bodyBytes, startTime, requestedModel)
+					return
+				}
+			}
+		}
+	}
 
 	// 模型感知的 sub-group 选择(聚合分组才走;请求 model 为空时退化为普通 SWRR)
 	subGroupName, err := ps.subGroupManager.SelectSubGroupForModel(originalGroup, requestedModel)
@@ -146,6 +203,59 @@ func (ps *ProxyServer) HandleProxy(c *gin.Context) {
 	}
 
 	ps.executeRequestWithRetry(c, channelHandler, originalGroup, group, finalBodyBytes, isStream, startTime, 0, attemptedSubGroups, requestedModel)
+}
+
+// handleResolvedCandidate P4 智能路由分支: candidate 已经选定 sub-group + body
+// 已改写, 跳过 SubGroupManager.SelectSubGroupForModel 直接走转发. fallback
+// 时从 gin context 的 candidate pool 取下一个 (executeRequestWithRetry 处理).
+func (ps *ProxyServer) handleResolvedCandidate(
+	c *gin.Context,
+	originalGroup *models.Group,
+	chosenGroup *models.Group,
+	bodyBytes []byte,
+	startTime time.Time,
+	requestedModel string,
+) {
+	channelHandler, err := ps.channelFactory.GetChannel(chosenGroup)
+	if err != nil {
+		response.Error(c, app_errors.NewAPIError(app_errors.ErrInternalServer,
+			fmt.Sprintf("Failed to get channel for group '%s': %v", chosenGroup.Name, err)))
+		return
+	}
+	finalBodyBytes, err := ps.applyParamOverrides(bodyBytes, chosenGroup)
+	if err != nil {
+		response.Error(c, app_errors.NewAPIError(app_errors.ErrInternalServer,
+			fmt.Sprintf("Failed to apply parameter overrides: %v", err)))
+		return
+	}
+	isStream := channelHandler.IsStreamRequest(c, bodyBytes)
+	attemptedSubGroups := map[string]bool{chosenGroup.Name: true}
+	ps.executeRequestWithRetry(c, channelHandler, originalGroup, chosenGroup, finalBodyBytes, isStream, startTime, 0, attemptedSubGroups, requestedModel)
+}
+
+// nextP4Candidate 从 gin context 的 candidate pool 取下一个未尝试的 candidate.
+// 返回 nil 表示池耗尽或 cursor 越界, 调用方走老 fallback (raw id 字符串匹配).
+func (ps *ProxyServer) nextP4Candidate(c *gin.Context, attempted map[string]bool) *services.ModelCandidate {
+	raw, ok := c.Get(ctxKeyP4Candidates)
+	if !ok {
+		return nil
+	}
+	pool, ok := raw.([]services.ModelCandidate)
+	if !ok || len(pool) == 0 {
+		return nil
+	}
+	cursorRaw, _ := c.Get(ctxKeyP4Cursor)
+	cursor, _ := cursorRaw.(int)
+	for cursor < len(pool) {
+		cand := pool[cursor]
+		cursor++
+		if !attempted[cand.GroupName] {
+			c.Set(ctxKeyP4Cursor, cursor)
+			return &cand
+		}
+	}
+	c.Set(ctxKeyP4Cursor, cursor)
+	return nil
 }
 
 // executeRequestWithRetry is the core recursive function for handling requests and retries.
@@ -301,6 +411,36 @@ func (ps *ProxyServer) executeRequestWithRetry(
 			attemptedSubGroups[group.Name] = true
 			// 当前子分组累计失败 → 通知熔断器
 			ps.subGroupManager.RecordSubGroupResult(originalGroup.ID, group.Name, false)
+
+			// P4 智能路由 candidate pool 优先: 如果入口解析了 candidates,
+			// fallback 从池里取下一个 (跟 SubGroupManager 老路径互斥).
+			if cand := ps.nextP4Candidate(c, attemptedSubGroups); cand != nil {
+				if nextGroup, ge := ps.groupManager.GetGroupByName(cand.GroupName); ge == nil && nextGroup != nil {
+					if nextChannel, ce := ps.channelFactory.GetChannel(nextGroup); ce == nil {
+						nextBody, berr := rewriteBodyModel(bodyBytes, cand.RealModel)
+						if berr != nil {
+							nextBody = bodyBytes
+						}
+						logrus.WithFields(logrus.Fields{
+							"aggregate_group": originalGroup.Name,
+							"from_sub_group":  group.Name,
+							"to_sub_group":    cand.GroupName,
+							"requested_model": requestedModel,
+							"real_model":      cand.RealModel,
+							"resolved_source": cand.Source,
+							"reason":          parsedError,
+						}).Info("P4 router: candidate failover")
+						ps.logRequest(c, originalGroup, group, apiKey, startTime, statusCode, errors.New(parsedError), isStream, upstreamURL, channelHandler, bodyBytes, models.RequestTypeRetry)
+						overrideBody, oerr := ps.applyParamOverrides(nextBody, nextGroup)
+						if oerr != nil {
+							overrideBody = nextBody
+						}
+						ps.executeRequestWithRetry(c, nextChannel, originalGroup, nextGroup, overrideBody, isStream, startTime, 0, attemptedSubGroups, requestedModel)
+						return
+					}
+				}
+			}
+
 			nextName, selErr := ps.subGroupManager.SelectSubGroupForModelExcluding(originalGroup, requestedModel, attemptedSubGroups)
 			if selErr == nil && nextName != "" && nextName != group.Name {
 				if nextGroup, ge := ps.groupManager.GetGroupByName(nextName); ge == nil && nextGroup != nil {

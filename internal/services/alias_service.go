@@ -141,6 +141,20 @@ func (s *AliasService) ListByAlias(ctx context.Context, alias string) ([]models.
 	return rows, nil
 }
 
+// ListEnabledByAlias 是 P4 智能路由专用 -- 只返回 enabled=true 的候选,
+// 按 SWRR 排序参数 (weight desc, priority asc) 返回. proxy 入口收到
+// model name 后查这个判断是否走 alias 路径.
+func (s *AliasService) ListEnabledByAlias(ctx context.Context, alias string) ([]models.ModelAlias, error) {
+	var rows []models.ModelAlias
+	if err := s.db.WithContext(ctx).
+		Where("alias = ? AND group_id <> 0 AND enabled = ?", alias, true).
+		Order("weight desc, priority asc, id asc").
+		Find(&rows).Error; err != nil {
+		return nil, app_errors.ParseDBError(err)
+	}
+	return rows, nil
+}
+
 // CreateRequest is the JSON payload for POST /api/aliases.
 type AliasCreateRequest struct {
 	Alias     string `json:"alias"`
