@@ -1067,7 +1067,7 @@ export default {
     aliasJumpToModel: "ここへジャンプ →",
     aliasJumpToModelTip: "このモデルの鍵ページへジャンプしてハイライト",
     modelClickToCopy: "クリックして model ID をコピー",
-    modelCopied: "コピー完了: {model}",
+    modelCopied: "コピー完了",
     suggestionsExpand: "提案リストを展開",
     suggestionsCollapse: "提案リストを折りたたみ",
     suggestionsDismissOne: "この提案を隠す",
@@ -1207,5 +1207,17 @@ export default {
     alEmpty: "別名がまだありません",
     alEmptySub:
       "別名を作成して、複数の (グループ, モデル) を 1 つの分かりやすい名前にまとめましょう",
+  },
+  v6: {
+    healthTitle: "サブグループの健全性",
+    healthMeta: "{n} 個のサブグループ · 10秒ごとに自動更新",
+    healthColSubGroup: "サブグループ",
+    healthColLatency: "レイテンシ (EWMA)",
+    healthColWeight: "重み (実効 / 元値)",
+    healthColModels: "モデル",
+    healthColStatus: "ステータス",
+    healthStatusCooldown: "クールダウン {t}",
+    healthStatusFails: "{n} 回失敗",
+    healthStatusOk: "正常",
   },
 };

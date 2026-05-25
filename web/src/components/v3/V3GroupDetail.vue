@@ -69,10 +69,11 @@ const route = useRoute();
 // 用 nextTick + setTimeout(0) 等 v-for 渲染 + filter 应用完, 才能 querySelector
 // 到. DOM selector 用 data-model-id 属性 (template 给所有 model card 加).
 // P8.3: 单击 model name 复制 ID 到剪贴板, 弹 toast 提示.
+// P8.14: 提示简化为 "已复制" 不含 id (长 id 会撑大 toast 且冗余).
 async function copyModelId(modelId: string) {
   try {
     await copyToClipboard(modelId);
-    message.success(t("v3.modelCopied", { model: modelId }) || `已复制: ${modelId}`);
+    message.success(t("v3.modelCopied"));
   } catch {
     message.error(t("common.copyFailed") || "复制失败");
   }
@@ -1709,17 +1710,17 @@ const filterCounts = computed(() => ({
         <!-- P6: 健康度 dashboard (10s 自动刷新) -->
         <details v-if="healthRows.length" open style="margin: 0 0 16px; padding: 12px 16px; border: 1px solid var(--v3-line); border-radius: 8px; background: var(--v3-bg-soft, transparent)">
           <summary style="cursor: pointer; font: 600 13px var(--v3-sans); display: flex; justify-content: space-between; align-items: center">
-            <span>Sub-group 健康度</span>
-            <span style="font: 400 11px var(--v3-mono); color: var(--v3-ink-4)">{{ healthRows.length }} sub-groups · auto 10s</span>
+            <span>{{ t("v6.healthTitle") }}</span>
+            <span style="font: 400 11px var(--v3-mono); color: var(--v3-ink-4)">{{ t("v6.healthMeta", { n: healthRows.length }) }}</span>
           </summary>
           <table style="width: 100%; margin-top: 10px; border-collapse: collapse; font: 12px var(--v3-sans)">
             <thead>
               <tr style="text-align: left; color: var(--v3-ink-4); border-bottom: 1px solid var(--v3-line)">
-                <th style="padding: 6px 8px; font-weight: 500">Sub-group</th>
-                <th style="padding: 6px 8px; font-weight: 500">Latency (EWMA)</th>
-                <th style="padding: 6px 8px; font-weight: 500">Weight (eff / raw)</th>
-                <th style="padding: 6px 8px; font-weight: 500">Models</th>
-                <th style="padding: 6px 8px; font-weight: 500">Status</th>
+                <th style="padding: 6px 8px; font-weight: 500">{{ t("v6.healthColSubGroup") }}</th>
+                <th style="padding: 6px 8px; font-weight: 500">{{ t("v6.healthColLatency") }}</th>
+                <th style="padding: 6px 8px; font-weight: 500">{{ t("v6.healthColWeight") }}</th>
+                <th style="padding: 6px 8px; font-weight: 500">{{ t("v6.healthColModels") }}</th>
+                <th style="padding: 6px 8px; font-weight: 500">{{ t("v6.healthColStatus") }}</th>
               </tr>
             </thead>
             <tbody>
@@ -1732,12 +1733,12 @@ const filterCounts = computed(() => ({
                 <td style="padding: 6px 8px; font: 12px var(--v3-mono)">{{ h.has_models_cache ? h.models_count : "—" }}</td>
                 <td style="padding: 6px 8px">
                   <span v-if="h.in_cooldown" style="padding: 2px 6px; border-radius: 4px; font: 500 11px var(--v3-mono); color: var(--v3-warn); background: oklch(from var(--v3-warn) l c h / 0.15)">
-                    cooldown {{ cooldownRemain(h.cooldown_until) }}
+                    {{ t("v6.healthStatusCooldown", { t: cooldownRemain(h.cooldown_until) }) }}
                   </span>
                   <span v-else-if="h.consecutive_failures > 0" style="padding: 2px 6px; border-radius: 4px; font: 500 11px var(--v3-mono); color: var(--v3-warn); background: oklch(from var(--v3-warn) l c h / 0.1)">
-                    {{ h.consecutive_failures }} fails
+                    {{ t("v6.healthStatusFails", { n: h.consecutive_failures }) }}
                   </span>
-                  <span v-else style="padding: 2px 6px; border-radius: 4px; font: 500 11px var(--v3-mono); color: var(--v3-ok); background: oklch(from var(--v3-ok) l c h / 0.12)">ok</span>
+                  <span v-else style="padding: 2px 6px; border-radius: 4px; font: 500 11px var(--v3-mono); color: var(--v3-ok); background: oklch(from var(--v3-ok) l c h / 0.12)">{{ t("v6.healthStatusOk") }}</span>
                 </td>
               </tr>
             </tbody>
