@@ -307,6 +307,26 @@ export const keysApi = {
     return res.data || [];
   },
 
+  // P6: 拉取 aggregate sub-group 健康度快照 (latency EWMA / cooldown / 熔断)
+  async getGroupHealth(groupId: number): Promise<{
+    group_type: string;
+    sub_groups: Array<{
+      name: string;
+      sub_group_id: number;
+      weight: number;
+      effective_weight: number;
+      latency_ewma_ms: number;
+      consecutive_failures: number;
+      cooldown_until?: string;
+      in_cooldown: boolean;
+      has_models_cache: boolean;
+      models_count: number;
+    }> | null;
+  }> {
+    const res = await http.get(`/groups/${groupId}/health`);
+    return res.data;
+  },
+
   // 为聚合分组添加子分组
   async addSubGroups(
     aggregateGroupId: number,

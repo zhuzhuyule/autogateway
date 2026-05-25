@@ -39,7 +39,7 @@ import CapabilityIcons from "@/components/common/CapabilityIcons.vue";
 import ProviderLogo from "@/components/common/ProviderLogo.vue";
 import { hasProviderLogo } from "@/data/providerLogos";
 import { freeModelsRef, getFreeStatus, lookupRegistry } from "@/api/freemodels";
-import { computed, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRouter } from "vue-router";
 
@@ -166,6 +166,61 @@ async function loadSubGroups() {
   } finally {
     subGroupsLoading.value = false;
   }
+}
+
+// P6: aggregate sub-group 健康度 (latency EWMA / effective_weight / cooldown / 熔断)
+// 10s poll, 仅 aggregate group + sub-group tab 时拉取.
+type SubGroupHealthRow = Awaited<ReturnType<typeof keysApi.getGroupHealth>>["sub_groups"];
+const healthRows = ref<NonNullable<SubGroupHealthRow>>([]);
+const healthLoading = ref(false);
+let healthPollTimer: number | null = null;
+async function loadHealth() {
+  if (!isAggregate.value || !props.group?.id) {
+    healthRows.value = [];
+    return;
+  }
+  healthLoading.value = true;
+  try {
+    const r = await keysApi.getGroupHealth(props.group.id);
+    healthRows.value = r.sub_groups || [];
+  } catch (e) {
+    console.error("load health failed", e);
+  } finally {
+    healthLoading.value = false;
+  }
+}
+function startHealthPoll() {
+  stopHealthPoll();
+  if (!isAggregate.value) return;
+  void loadHealth();
+  healthPollTimer = window.setInterval(() => void loadHealth(), 10000);
+}
+function stopHealthPoll() {
+  if (healthPollTimer !== null) {
+    window.clearInterval(healthPollTimer);
+    healthPollTimer = null;
+  }
+}
+onMounted(startHealthPoll);
+onBeforeUnmount(stopHealthPoll);
+watch(
+  () => [props.group?.id, isAggregate.value] as [number | undefined, boolean],
+  () => {
+    startHealthPoll();
+  }
+);
+
+function formatLatency(ms: number): string {
+  if (!ms || ms <= 0) return "—";
+  if (ms < 1000) return `${ms}ms`;
+  return `${(ms / 1000).toFixed(2)}s`;
+}
+function cooldownRemain(until?: string): string {
+  if (!until) return "";
+  const ms = new Date(until).getTime() - Date.now();
+  if (ms <= 0) return "";
+  if (ms < 60000) return `${Math.ceil(ms / 1000)}s`;
+  return `${Math.ceil(ms / 60000)}m`;
 }
 
 const matchedProvider = computed(() => findProviderByUpstreams(props.group?.upstreams || []));
@@ -1547,6 +1602,43 @@ const filterCounts = computed(() => ({
     <div class="v5-content scroll">
       <!-- ===== AGGREGATE: SUB-GROUPS TAB ===== -->
       <div v-if="tab === 'keys' && isAggregate">
+        <!-- P6: 健康度 dashboard (10s 自动刷新) -->
+        <details v-if="healthRows.length" open style="margin: 0 0 16px; padding: 12px 16px; border: 1px solid var(--v3-line); border-radius: 8px; background: var(--v3-bg-soft, transparent)">
+          <summary style="cursor: pointer; font: 600 13px var(--v3-sans); display: flex; justify-content: space-between; align-items: center">
+            <span>Sub-group 健康度</span>
+            <span style="font: 400 11px var(--v3-mono); color: var(--v3-ink-4)">{{ healthRows.length }} sub-groups · auto 10s</span>
+          </summary>
+          <table style="width: 100%; margin-top: 10px; border-collapse: collapse; font: 12px var(--v3-sans)">
+            <thead>
+              <tr style="text-align: left; color: var(--v3-ink-4); border-bottom: 1px solid var(--v3-line)">
+                <th style="padding: 6px 8px; font-weight: 500">Sub-group</th>
+                <th style="padding: 6px 8px; font-weight: 500">Latency (EWMA)</th>
+                <th style="padding: 6px 8px; font-weight: 500">Weight (eff / raw)</th>
+                <th style="padding: 6px 8px; font-weight: 500">Models</th>
+                <th style="padding: 6px 8px; font-weight: 500">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="h in healthRows" :key="h.sub_group_id" style="border-bottom: 1px solid var(--v3-line-soft, var(--v3-line))">
+                <td style="padding: 6px 8px"><code style="font: 12px var(--v3-mono)">{{ h.name }}</code></td>
+                <td style="padding: 6px 8px; font: 12px var(--v3-mono)">{{ formatLatency(h.latency_ewma_ms) }}</td>
+                <td style="padding: 6px 8px; font: 12px var(--v3-mono)">
+                  {{ h.effective_weight }}<span v-if="h.effective_weight !== h.weight" style="color: var(--v3-ink-4)"> / {{ h.weight }}</span>
+                </td>
+                <td style="padding: 6px 8px; font: 12px var(--v3-mono)">{{ h.has_models_cache ? h.models_count : "—" }}</td>
+                <td style="padding: 6px 8px">
+                  <span v-if="h.in_cooldown" style="padding: 2px 6px; border-radius: 4px; font: 500 11px var(--v3-mono); color: var(--v3-warn); background: oklch(from var(--v3-warn) l c h / 0.15)">
+                    cooldown {{ cooldownRemain(h.cooldown_until) }}
+                  </span>
+                  <span v-else-if="h.consecutive_failures > 0" style="padding: 2px 6px; border-radius: 4px; font: 500 11px var(--v3-mono); color: var(--v3-warn); background: oklch(from var(--v3-warn) l c h / 0.1)">
+                    {{ h.consecutive_failures }} fails
+                  </span>
+                  <span v-else style="padding: 2px 6px; border-radius: 4px; font: 500 11px var(--v3-mono); color: var(--v3-ok); background: oklch(from var(--v3-ok) l c h / 0.12)">ok</span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </details>
         <v3-sub-group-table
           :selected-group="group"
           :sub-groups="subGroups"
