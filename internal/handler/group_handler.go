@@ -186,6 +186,35 @@ func (s *Server) TestGroupModel(c *gin.Context) {
 }
 
 // RefreshGroupModels triggers an upstream /v1/models fetch and caches the result.
+// GroupHealth P6: 返回 aggregate group 的 sub-group 运行时健康状态
+// (latency EWMA, effective weight, 熔断器, cooldown). standard group 返回 null.
+func (s *Server) GroupHealth(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		response.ErrorI18nFromAPIError(c, app_errors.ErrBadRequest, "validation.invalid_group_id")
+		return
+	}
+	name, ok := s.GroupManager.GetGroupNameByID(uint(id))
+	if !ok {
+		response.Error(c, app_errors.ErrResourceNotFound)
+		return
+	}
+	group, gerr := s.GroupManager.GetGroupByName(name)
+	if gerr != nil || group == nil {
+		response.Error(c, app_errors.ParseDBError(gerr))
+		return
+	}
+	if group.GroupType != "aggregate" {
+		response.Success(c, gin.H{"group_type": group.GroupType, "sub_groups": nil})
+		return
+	}
+	snapshot := s.SubGroupManager.Snapshot(uint(id))
+	response.Success(c, gin.H{
+		"group_type": "aggregate",
+		"sub_groups": snapshot,
+	})
+}
+
 func (s *Server) RefreshGroupModels(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {

@@ -77,6 +77,56 @@ func (m *SubGroupManager) SelectSubGroupForModel(group *models.Group, requestedM
 	return m.SelectSubGroupForModelExcluding(group, requestedModel, nil)
 }
 
+// SubGroupHealth P6: 单个 sub-group 在 aggregate selector 中的运行时快照.
+// 供 admin dashboard 展示, 用于诊断"为什么这家被跳过 / 这家凭什么优先".
+type SubGroupHealth struct {
+	Name                string    `json:"name"`
+	SubGroupID          uint      `json:"sub_group_id"`
+	Weight              int       `json:"weight"`              // 配置 raw weight
+	EffectiveWeight     int       `json:"effective_weight"`    // P5.3 latency-adjusted
+	LatencyEWMAMs       int64     `json:"latency_ewma_ms"`     // 0 = cold start
+	ConsecutiveFailures int       `json:"consecutive_failures"` // 5xx/network 累计 (P5.1)
+	CooldownUntil       time.Time `json:"cooldown_until,omitempty"` // zero = 不在冷却
+	InCooldown          bool      `json:"in_cooldown"`
+	HasModelsCache      bool      `json:"has_models_cache"`    // 是否有 available_models 缓存
+	ModelsCount         int       `json:"models_count"`        // 缓存模型数 (0 = 无缓存或空)
+}
+
+// Snapshot P6: 返回该 aggregate selector 内部状态快照. 仅 aggregate group 有数据,
+// standard / 未初始化 selector 返回 nil. 内部加 RLock + EFFECTIVE weight 重算.
+func (m *SubGroupManager) Snapshot(aggregateGroupID uint) []SubGroupHealth {
+	m.mu.RLock()
+	sel, ok := m.selectors[aggregateGroupID]
+	m.mu.RUnlock()
+	if !ok || sel == nil {
+		return nil
+	}
+	sel.mu.Lock()
+	defer sel.mu.Unlock()
+	now := time.Now()
+	effWeights := sel.computeEffectiveWeights()
+	out := make([]SubGroupHealth, 0, len(sel.subGroups))
+	for i := range sel.subGroups {
+		it := &sel.subGroups[i]
+		health := SubGroupHealth{
+			Name:                it.name,
+			SubGroupID:          it.subGroupID,
+			Weight:              it.weight,
+			EffectiveWeight:     effWeights[i],
+			LatencyEWMAMs:       it.latencyEWMA.Milliseconds(),
+			ConsecutiveFailures: it.consecutiveFailures,
+			HasModelsCache:      it.hasModelsCache,
+			ModelsCount:         len(it.availableModels),
+			InCooldown:          it.inCooldown(now),
+		}
+		if !it.cooldownUntil.IsZero() {
+			health.CooldownUntil = it.cooldownUntil
+		}
+		out = append(out, health)
+	}
+	return out
+}
+
 // RecordLatency P5.3: 上层在成功响应后调用, 更新该 sub-group 的 latency EWMA.
 // 仅 aggregate 子分组场景需要 (standard 直连路径 no-op). 失败/超时不记录
 // (避免熔断超时污染延迟统计).

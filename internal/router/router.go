@@ -180,6 +180,8 @@ func registerProtectedAPIRoutes(
 		groups.POST("/:id/copy", serverHandler.CopyGroup)
 		groups.POST("/:id/refresh-models", serverHandler.RefreshGroupModels)
 		groups.POST("/:id/test-model", serverHandler.TestGroupModel)
+		// P6: aggregate sub-group 健康度 (latency EWMA / effective weight / cooldown / 熔断 / 缓存模型数)
+		groups.GET("/:id/health", serverHandler.GroupHealth)
 
 		groups.GET("/:id/sub-groups", serverHandler.GetSubGroups)
 		groups.POST("/:id/sub-groups", serverHandler.AddSubGroups)
