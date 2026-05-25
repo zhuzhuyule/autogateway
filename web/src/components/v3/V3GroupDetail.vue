@@ -78,25 +78,45 @@ async function copyModelId(modelId: string) {
   }
 }
 
-function highlightModelOnRoute() {
+// P8.6 修复跳转失效:
+// 之前 setTimeout(400) 单次找 DOM, Keys.vue 异步 loadGroups + 我们的 group
+// switch + groupModels computed + v-for 渲染整链路可能超 400ms, querySelector
+// 找不到就静默退出. 改为 retry 机制 (最多 10 次, 间隔 200ms = 2 秒上限) 直到
+// DOM 出现或超时.
+function highlightModelOnRoute(retriesLeft = 10) {
   const target = route.query.highlight;
   if (!target || typeof target !== "string") return;
   // 切到 keys tab + 清 search filter 避免 model 被过滤掉
   tab.value = "keys";
   modelSearch.value = "";
-  setTimeout(() => {
-    const el = document.querySelector(`[data-model-id="${CSS.escape(target)}"]`);
-    if (!el) return;
-    el.scrollIntoView({ behavior: "smooth", block: "center" });
-    el.classList.add("v5-modelcard--highlight");
-    setTimeout(() => el.classList.remove("v5-modelcard--highlight"), 2400);
-    // 清 highlight query 避免下次切 tab 又 trigger, 保留 groupId + tab
-    // (P8.5: tab 要持久化让刷新页面能回到正确 tab)
-    router.replace({
-      name: "keys",
-      query: { groupId: props.group?.id || "", tab: tab.value },
-    });
-  }, 400);
+  // 清掉 dismiss filter (若选了 trial/paid 也可能让 model 不显示)
+  if (availFilter.value !== "all") {
+    availFilter.value = "all";
+  }
+  const el = document.querySelector(`[data-model-id="${CSS.escape(target)}"]`);
+  if (!el) {
+    if (retriesLeft > 0) {
+      setTimeout(() => highlightModelOnRoute(retriesLeft - 1), 200);
+    } else {
+      // 超时仍找不到, 可能 model 真的不在 group 里. message 提示用户.
+      logrus_warn(`highlight model "${target}" not found in current group`);
+    }
+    return;
+  }
+  el.scrollIntoView({ behavior: "smooth", block: "center" });
+  el.classList.add("v5-modelcard--highlight");
+  setTimeout(() => (el as HTMLElement).classList.remove("v5-modelcard--highlight"), 2400);
+  // 清 highlight query 避免下次切 tab 又 trigger, 保留 groupId + tab
+  // (P8.5: tab 要持久化让刷新页面能回到正确 tab)
+  router.replace({
+    name: "keys",
+    query: { groupId: props.group?.id || "", tab: tab.value },
+  });
+}
+
+function logrus_warn(msg: string) {
+  // eslint-disable-next-line no-console
+  console.warn("[V3GroupDetail]", msg);
 }
 
 const stats = ref<GroupStatsResponse | null>(null);
@@ -253,9 +273,20 @@ function stopHealthPoll() {
 }
 onMounted(() => {
   startHealthPoll();
-  highlightModelOnRoute(); // 首次进入 keys?highlight=MODEL 时触发
+  // P8.6: 不在 onMounted 调 highlight, 改由 watch [props.group?.id, highlight]
+  // 触发. V3GroupDetail mount 时 Keys.vue 可能还在 loadGroups, props.group
+  // 还是 undefined, model card 也未渲染. 等 group 真正注入再跑.
 });
-watch(() => route.query.highlight, () => highlightModelOnRoute());
+
+// P8.6: group 注入后或 query.highlight 变化时, 尝试 highlight + scroll.
+// immediate:true 保证带 ?highlight= 跳转过来时立刻触发 (mount 阶段就赶上).
+watch(
+  () => [props.group?.id, route.query.highlight] as const,
+  ([gid, hl]) => {
+    if (gid && hl) highlightModelOnRoute();
+  },
+  { immediate: true }
+);
 onBeforeUnmount(stopHealthPoll);
 watch(
   () => [props.group?.id, isAggregate.value] as [number | undefined, boolean],
