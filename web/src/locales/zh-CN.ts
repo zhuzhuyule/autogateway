@@ -1080,6 +1080,8 @@ export default {
     suggestFamilyCreate: "新建",
     suggestFamilyAppend: "追加",
     suggestFamilyQuickAdopt: "一键采纳（跳过预览，直接批量创建）",
+    suggestFamilyReview: "审查 / 编辑候选后再创建",
+    suggestFamilyReviewBtn: "审查",
     suggestFamilyTooltipCreate: "一键创建别名 “{alias}” 并聚合下列模型",
     suggestFamilyTooltipAppend: "一键追加到现有别名 “{alias}”",
     suggestFamilyInGroups: "{n} 个分组",

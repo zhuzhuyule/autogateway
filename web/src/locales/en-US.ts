@@ -1104,6 +1104,8 @@ export default {
     suggestFamilyCreate: "Create",
     suggestFamilyAppend: "Append",
     suggestFamilyQuickAdopt: "Quick adopt (skip preview, batch create)",
+    suggestFamilyReview: "Review & edit candidates before creating",
+    suggestFamilyReviewBtn: "Review",
     suggestFamilyTooltipCreate: "One-click: create alias \"{alias}\" with the models below",
     suggestFamilyTooltipAppend: "One-click: append to existing alias \"{alias}\"",
     suggestFamilyInGroups: "{n} group(s)",

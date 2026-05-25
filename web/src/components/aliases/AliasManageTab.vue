@@ -790,7 +790,9 @@ function saveSettingsThrottled() {
           <n-tooltip v-if="s.kind === 'family'" trigger="hover" placement="top">
             <template #trigger>
               <span class="v5-suggest-chip-wrap">
-                <button class="v5-suggest-chip v5-suggest-chip--family" @click="onClickSuggestion(s)">
+                <!-- 主行: 默认行为 = 一键采纳 (跳过 picker, 直接 batch create alias).
+                     admin 信任 backend 推荐时 1 click 完成. 想审查就用旁边"审查" 按钮. -->
+                <button class="v5-suggest-chip v5-suggest-chip--family" @click="quickAdoptFamilySuggestion(s)">
                   <span class="v5-suggest-chip__family">{{ s.family }}</span>
                   <span class="v5-suggest-chip__sub">
                     {{ t("v5.suggestFamilyMeta", { n: (s.models || []).length, hits: s.count }) }}
@@ -802,12 +804,12 @@ function saveSettingsThrottled() {
                     {{ s.existing_alias ? t("v5.suggestFamilyAppend") : t("v5.suggestFamilyCreate") }}
                   </span>
                 </button>
-                <!-- P7: 一键采纳, 跳过 picker 直接 batch create. -->
+                <!-- 次要操作: 打开 picker 让 admin 检查/调整候选. -->
                 <button
                   class="v5-suggest-chip__zap"
-                  :title="t('v5.suggestFamilyQuickAdopt')"
-                  @click.stop="quickAdoptFamilySuggestion(s)"
-                >⚡</button>
+                  :title="t('v5.suggestFamilyReview')"
+                  @click.stop="onClickSuggestion(s)"
+                >{{ t("v5.suggestFamilyReviewBtn") }}</button>
               </span>
             </template>
             <div style="font: 500 11px var(--v3-sans); margin-bottom: 4px">
@@ -2012,18 +2014,17 @@ function saveSettingsThrottled() {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  padding: 0 6px;
+  padding: 0 10px;
   border: 1px solid var(--v3-line);
   border-left: 1px solid var(--v3-line-soft, var(--v3-line));
   border-top-right-radius: 6px;
   border-bottom-right-radius: 6px;
   background: var(--v3-surface);
-  color: var(--v3-accent);
+  color: var(--v3-ink-4);
   cursor: pointer;
-  font-size: 13px;
+  font: 500 11px var(--v3-sans);
   line-height: 1;
-  transition: background 0.1s;
+  transition: background 0.1s, color 0.1s;
 }
 .v5-suggest-chip__zap:hover {
   background: oklch(from var(--v3-accent) l c h / 0.15);
