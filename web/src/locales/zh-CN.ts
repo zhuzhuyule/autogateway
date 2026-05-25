@@ -1082,6 +1082,7 @@ export default {
     suggestFamilyQuickAdopt: "一键采纳（跳过预览，直接批量创建）",
     suggestFamilyReview: "审查 / 编辑候选后再创建",
     suggestFamilyReviewBtn: "审查",
+    aliasUnexposedFixTip: "跳转到对应分组的密钥页, 高亮该模型 (右上角 +加入 立即生效)",
     suggestFamilyTooltipCreate: "一键创建别名 “{alias}” 并聚合下列模型",
     suggestFamilyTooltipAppend: "一键追加到现有别名 “{alias}”",
     suggestFamilyInGroups: "{n} 个分组",

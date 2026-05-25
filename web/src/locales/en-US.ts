@@ -1106,6 +1106,7 @@ export default {
     suggestFamilyQuickAdopt: "Quick adopt (skip preview, batch create)",
     suggestFamilyReview: "Review & edit candidates before creating",
     suggestFamilyReviewBtn: "Review",
+    aliasUnexposedFixTip: "Jump to target group's keys page, highlight this model (use top-right '+ Add' to fix)",
     suggestFamilyTooltipCreate: "One-click: create alias \"{alias}\" with the models below",
     suggestFamilyTooltipAppend: "One-click: append to existing alias \"{alias}\"",
     suggestFamilyInGroups: "{n} group(s)",

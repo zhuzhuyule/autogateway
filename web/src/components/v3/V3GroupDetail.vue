@@ -41,7 +41,7 @@ import { hasProviderLogo } from "@/data/providerLogos";
 import { freeModelsRef, getFreeStatus, lookupRegistry } from "@/api/freemodels";
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
-import { useRouter } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 
 const { t } = useI18n();
 
@@ -63,6 +63,27 @@ const isAggregate = computed(() => props.group?.group_type === "aggregate");
 const message = useMessage();
 const dialog = useDialog();
 const router = useRouter();
+const route = useRoute();
+
+// P8.2: alias 失效项跳来 (?highlight=MODEL) → scroll 到 model card + 高亮 1.5s.
+// 用 nextTick + setTimeout(0) 等 v-for 渲染 + filter 应用完, 才能 querySelector
+// 到. DOM selector 用 data-model-id 属性 (template 给所有 model card 加).
+function highlightModelOnRoute() {
+  const target = route.query.highlight;
+  if (!target || typeof target !== "string") return;
+  // 切到 keys tab + 清 search filter 避免 model 被过滤掉
+  tab.value = "keys";
+  modelSearch.value = "";
+  setTimeout(() => {
+    const el = document.querySelector(`[data-model-id="${CSS.escape(target)}"]`);
+    if (!el) return;
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    el.classList.add("v5-modelcard--highlight");
+    setTimeout(() => el.classList.remove("v5-modelcard--highlight"), 2400);
+    // 清 query 避免下次切 tab 又 trigger
+    router.replace({ name: "keys", query: { groupId: props.group?.id || "" } });
+  }, 400);
+}
 
 const stats = ref<GroupStatsResponse | null>(null);
 const statsLoading = ref(false);
@@ -201,7 +222,11 @@ function stopHealthPoll() {
     healthPollTimer = null;
   }
 }
-onMounted(startHealthPoll);
+onMounted(() => {
+  startHealthPoll();
+  highlightModelOnRoute(); // 首次进入 keys?highlight=MODEL 时触发
+});
+watch(() => route.query.highlight, () => highlightModelOnRoute());
 onBeforeUnmount(stopHealthPoll);
 watch(
   () => [props.group?.id, isAggregate.value] as [number | undefined, boolean],
@@ -2017,6 +2042,7 @@ const filterCounts = computed(() => ({
             <div
               v-for="modelId in filteredExposed"
               :key="`exposed-${modelId}`"
+              :data-model-id="modelId"
               class="v5-modelcard v5-modelcard--exposed"
               :class="{
                 'v5-modelcard--dragging': dragIdx === exposedModels.indexOf(modelId),
@@ -2099,6 +2125,7 @@ const filterCounts = computed(() => ({
             <div
               v-for="modelId in filteredAvailable"
               :key="`avail-${modelId}`"
+              :data-model-id="modelId"
               class="v5-modelcard"
               :class="{
                 'v5-modelcard--inexposed': exposedSet.has(modelId),

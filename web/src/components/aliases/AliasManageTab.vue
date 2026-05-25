@@ -443,6 +443,16 @@ const groupExposureById = computed<
   return out;
 });
 
+// 失效 alias 一键修复: 跳到 Keys 页对应 group + 高亮该 real_model,
+// 让 admin 立刻看到 model 卡片右上角"+加入"按钮 (V3GroupDetail 内置的 addToExposed).
+function goFixAlias(row: ModelAliasRow): void {
+  if (!row.group_id) return;
+  router.push({
+    name: "keys",
+    query: { groupId: row.group_id, highlight: row.real_model },
+  });
+}
+
 function aliasIsDeadByExposure(row: ModelAliasRow): boolean {
   if (row.is_reserved && row.group_id === 0) {
     return false;
@@ -1053,9 +1063,15 @@ function saveSettingsThrottled() {
             >
               {{ formatAvgMs(avgMsFor(m.real_model)) }}
             </span>
-            <span v-if="aliasIsDeadByExposure(m)" class="v3-alias-chip__deadbadge">
-              {{ t("v3.aliasUnexposed") || "失效" }}
-            </span>
+            <button
+              v-if="aliasIsDeadByExposure(m)"
+              type="button"
+              class="v3-alias-chip__deadbadge v3-alias-chip__deadbadge--fix"
+              :title="t('v3.aliasUnexposedFixTip') || '跳转到对应分组的密钥页, 高亮该模型 → 一键加入暴露列表'"
+              @click.stop="goFixAlias(m)"
+            >
+              {{ t("v3.aliasUnexposed") || "失效" }} →
+            </button>
           </button>
           <div v-if="!tier.models.length" class="v3-tier__empty-hint">
             {{ t("v3.noMappings") }}
@@ -1170,9 +1186,15 @@ function saveSettingsThrottled() {
               >
                 {{ formatAvgMs(avgMsFor(m.real_model)) }}
               </span>
-              <span v-if="aliasIsDeadByExposure(m)" class="v3-alias-chip__deadbadge">
-                {{ t("v3.aliasUnexposed") || "失效" }}
-              </span>
+              <button
+                v-if="aliasIsDeadByExposure(m)"
+                type="button"
+                class="v3-alias-chip__deadbadge v3-alias-chip__deadbadge--fix"
+                :title="t('v3.aliasUnexposedFixTip') || '跳转到对应分组的密钥页, 高亮该模型 → 一键加入暴露列表'"
+                @click.stop="goFixAlias(m)"
+              >
+                {{ t("v3.aliasUnexposed") || "失效" }} →
+              </button>
             </button>
             <div v-if="!grp.members.length" class="v3-tier__empty-hint">
               {{ t("v3.noMappings") }}
@@ -1726,6 +1748,17 @@ function saveSettingsThrottled() {
   color: var(--v3-warn, oklch(0.55 0.18 70));
   text-transform: uppercase;
   flex-shrink: 0;
+}
+/* P8.2: 失效 badge 升级为可点击按钮, hover 显著反馈 */
+.v3-alias-chip__deadbadge--fix {
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s, border-color 0.1s;
+}
+.v3-alias-chip__deadbadge--fix:hover {
+  background: var(--v3-warn, oklch(0.55 0.18 70));
+  color: white;
+  border-color: var(--v3-warn, oklch(0.55 0.18 70));
 }
 .v3-alias-chip__name {
   font: 500 11px var(--v3-mono);

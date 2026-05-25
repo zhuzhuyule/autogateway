@@ -701,6 +701,17 @@
   border-color: var(--v3-accent);
 }
 
+/* P8.2: alias 失效项跳转后 model card 高亮 2s 淡出 */
+@keyframes v5-modelcard-highlight {
+  0% { box-shadow: 0 0 0 0 var(--v3-accent); background: oklch(from var(--v3-accent) l c h / 0.18); }
+  60% { box-shadow: 0 0 0 6px transparent; background: oklch(from var(--v3-accent) l c h / 0.1); }
+  100% { box-shadow: 0 0 0 0 transparent; background: transparent; }
+}
+.v5-modelcard--highlight {
+  animation: v5-modelcard-highlight 2.4s ease-out 1;
+  border-color: var(--v3-accent) !important;
+}
+
 /* 多选批量操作 floating bar */
 .v5-bulk-bar {
   position: sticky;
