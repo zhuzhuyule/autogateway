@@ -273,19 +273,22 @@ function stopHealthPoll() {
 }
 onMounted(() => {
   startHealthPoll();
-  // P8.6: 不在 onMounted 调 highlight, 改由 watch [props.group?.id, highlight]
-  // 触发. V3GroupDetail mount 时 Keys.vue 可能还在 loadGroups, props.group
-  // 还是 undefined, model card 也未渲染. 等 group 真正注入再跑.
+  // P8.9 修 TDZ: 之前 watch immediate:true 在 setup 早期跑, 访问还没声明
+  // 的 modelSearch / availFilter ref → ReferenceError. 改 onMounted 时
+  // 调一次 (setup 已完成所有 ref init), 后续靠下面的 non-immediate watch
+  // 处理 group/highlight 变化.
+  if (props.group?.id && route.query.highlight) {
+    highlightModelOnRoute();
+  }
 });
 
 // P8.6: group 注入后或 query.highlight 变化时, 尝试 highlight + scroll.
-// immediate:true 保证带 ?highlight= 跳转过来时立刻触发 (mount 阶段就赶上).
+// 不用 immediate (TDZ), onMounted 兜底初次调用.
 watch(
   () => [props.group?.id, route.query.highlight] as const,
   ([gid, hl]) => {
     if (gid && hl) highlightModelOnRoute();
-  },
-  { immediate: true }
+  }
 );
 onBeforeUnmount(stopHealthPoll);
 watch(
