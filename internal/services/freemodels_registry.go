@@ -328,10 +328,11 @@ func parseUpstream(body []byte) (freeModelsEnvelope, error) {
 				freeTier = "trial"
 			}
 		}
-		// is_free=false 但所有用户有体验额度 (Gitee) — 标记为 trial 并视为可用
+		// is_free=false 但所有用户有体验额度 (主要是 Gitee 的"体验" 136 个 model).
+		// 用户契约 (2026-05): Gitee 体验消耗 token 配额, 不算"真免费",
+		// 应该归到付费而非 trial. 其他 provider 当前也没用 trial_scope=all,
+		// 留 isExperienceable 标记给 UI 显示辅助信息, 但不改 isFree.
 		if !isFree && u.TrialScope == "all" {
-			isFree = true
-			freeTier = "trial"
 			isExperienceable = true
 		}
 		// model_id / owned_by 已从上游 schema 删除 (与 id / provider 100% 重复).
