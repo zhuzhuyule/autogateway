@@ -42,7 +42,21 @@ type subGroupItem struct {
 	// 熔断器状态(由 selector.mu 保护)
 	consecutiveFailures int
 	cooldownUntil       time.Time
+
+	// P5.3: 延迟 EWMA, 用于动态调整 SWRR 有效权重让快的 sub-group 优先.
+	// 0 = cold start (无 sample), selectByWeight 退化到 raw weight.
+	latencyEWMA time.Duration
 }
+
+const (
+	// P5.3: EWMA 平滑系数. alpha 越大对新样本越敏感.
+	// 0.3 在"反应快"和"抗抖动"之间折中, 大约 6 个样本收敛.
+	latencyEWMAAlpha = 0.3
+	// effective weight clamp. 慢的最多减到 0.3x raw weight, 快的不加权.
+	// 不加权理由: SWRR 总权重稳定才能保证公平 + 抗振荡.
+	latencyWeightScaleMin = 0.3
+	latencyWeightScaleMax = 1.0
+)
 
 // NewSubGroupManager creates a new sub-group manager service
 func NewSubGroupManager(store store.Store) *SubGroupManager {
@@ -61,6 +75,35 @@ func (m *SubGroupManager) SelectSubGroup(group *models.Group) (string, error) {
 // requestedModel 为空 → 等同 SelectSubGroup. 过滤后无候选 → 退化到全量(graceful degrade).
 func (m *SubGroupManager) SelectSubGroupForModel(group *models.Group, requestedModel string) (string, error) {
 	return m.SelectSubGroupForModelExcluding(group, requestedModel, nil)
+}
+
+// RecordLatency P5.3: 上层在成功响应后调用, 更新该 sub-group 的 latency EWMA.
+// 仅 aggregate 子分组场景需要 (standard 直连路径 no-op). 失败/超时不记录
+// (避免熔断超时污染延迟统计).
+func (m *SubGroupManager) RecordLatency(aggregateGroupID uint, subGroupName string, d time.Duration) {
+	if subGroupName == "" || d <= 0 {
+		return
+	}
+	m.mu.RLock()
+	sel, ok := m.selectors[aggregateGroupID]
+	m.mu.RUnlock()
+	if !ok || sel == nil {
+		return
+	}
+	sel.mu.Lock()
+	defer sel.mu.Unlock()
+	for i := range sel.subGroups {
+		it := &sel.subGroups[i]
+		if it.name != subGroupName {
+			continue
+		}
+		if it.latencyEWMA == 0 {
+			it.latencyEWMA = d
+		} else {
+			it.latencyEWMA = time.Duration(float64(it.latencyEWMA)*(1-latencyEWMAAlpha) + float64(d)*latencyEWMAAlpha)
+		}
+		return
+	}
 }
 
 // RecordSubGroupResult 上层(proxy server)在每次请求结束后调用,驱动子分组级熔断器.
@@ -425,17 +468,21 @@ func (it *subGroupItem) inCooldown(now time.Time) bool {
 	return !it.cooldownUntil.IsZero() && now.Before(it.cooldownUntil)
 }
 
-// selectByWeight implements smooth weighted round-robin algorithm
+// selectByWeight implements smooth weighted round-robin algorithm.
+// P5.3: 用 latency-adjusted effective weight 替代 raw weight, 让快的 sub-group
+// 在 SWRR 中拿更大的有效权重. raw weight 仍是配置上限, 仅"减权慢的".
 func (s *selector) selectByWeight() *subGroupItem {
+	effWeights := s.computeEffectiveWeights()
 	totalWeight := 0
 	var best *subGroupItem
 
 	for i := range s.subGroups {
 		item := &s.subGroups[i]
-		totalWeight += item.weight
-		item.currentWeight += item.weight
+		w := effWeights[i]
+		totalWeight += w
+		item.currentWeight += w
 
-		if best == nil || item.currentWeight > best.currentWeight {
+		if w > 0 && (best == nil || item.currentWeight > best.currentWeight) {
 			best = item
 		}
 	}
@@ -446,6 +493,50 @@ func (s *selector) selectByWeight() *subGroupItem {
 
 	best.currentWeight -= totalWeight
 	return best
+}
+
+// computeEffectiveWeights P5.3: 按 latencyEWMA 算 latency-adjusted weight.
+// 规则:
+//   - weight <= 0 → 0 (禁用语义保留)
+//   - 没 EWMA 数据 (cold start) → 用 raw weight
+//   - 池中找 base = min EWMA 作基线; 比基线慢的按 base/latency 比例减权
+//   - clamp 到 [0.3, 1.0] × raw weight, 至少 1 (避免完全饿死)
+func (s *selector) computeEffectiveWeights() []int {
+	out := make([]int, len(s.subGroups))
+	var base time.Duration
+	for i := range s.subGroups {
+		it := &s.subGroups[i]
+		if it.weight <= 0 || it.latencyEWMA == 0 {
+			continue
+		}
+		if base == 0 || it.latencyEWMA < base {
+			base = it.latencyEWMA
+		}
+	}
+	for i := range s.subGroups {
+		it := &s.subGroups[i]
+		if it.weight <= 0 {
+			out[i] = 0
+			continue
+		}
+		if base == 0 || it.latencyEWMA == 0 {
+			out[i] = it.weight
+			continue
+		}
+		scale := float64(base) / float64(it.latencyEWMA)
+		if scale < latencyWeightScaleMin {
+			scale = latencyWeightScaleMin
+		}
+		if scale > latencyWeightScaleMax {
+			scale = latencyWeightScaleMax
+		}
+		eff := int(float64(it.weight) * scale)
+		if eff < 1 {
+			eff = 1
+		}
+		out[i] = eff
+	}
+	return out
 }
 
 // hasActiveKeys checks if a sub-group has available API keys

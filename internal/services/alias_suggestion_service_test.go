@@ -73,7 +73,7 @@ func TestSuggestionsFromUnmatchedLogs(t *testing.T) {
 		t.Fatalf("seed logs: %v", err)
 	}
 
-	svc := NewAliasSuggestionService(db)
+	svc := NewAliasSuggestionService(db, nil, nil)
 	got, err := svc.Suggest(context.Background(), 24*time.Hour)
 	if err != nil {
 		t.Fatalf("Suggest: %v", err)
@@ -107,7 +107,7 @@ func TestSuggestionsExcludeAlreadyAliased(t *testing.T) {
 		t.Fatalf("seed alias: %v", err)
 	}
 
-	svc := NewAliasSuggestionService(db)
+	svc := NewAliasSuggestionService(db, nil, nil)
 	got, err := svc.Suggest(context.Background(), 24*time.Hour)
 	if err != nil {
 		t.Fatalf("Suggest: %v", err)
@@ -146,7 +146,7 @@ func TestSuggestionsFamilyPromotion(t *testing.T) {
 		t.Fatalf("seed group: %v", err)
 	}
 
-	svc := NewAliasSuggestionService(db)
+	svc := NewAliasSuggestionService(db, nil, nil)
 	got, err := svc.Suggest(context.Background(), 24*time.Hour)
 	if err != nil {
 		t.Fatalf("Suggest: %v", err)
@@ -217,7 +217,7 @@ func TestSuggestionsSingleLogPromotedByGroupSiblings(t *testing.T) {
 		t.Fatalf("seed group: %v", err)
 	}
 
-	svc := NewAliasSuggestionService(db)
+	svc := NewAliasSuggestionService(db, nil, nil)
 	got, err := svc.Suggest(context.Background(), 24*time.Hour)
 	if err != nil {
 		t.Fatalf("Suggest: %v", err)
@@ -252,7 +252,7 @@ func TestSuggestionsFamilyExistingAlias(t *testing.T) {
 		t.Fatalf("seed alias: %v", err)
 	}
 
-	svc := NewAliasSuggestionService(db)
+	svc := NewAliasSuggestionService(db, nil, nil)
 	got, err := svc.Suggest(context.Background(), 24*time.Hour)
 	if err != nil {
 		t.Fatalf("Suggest: %v", err)

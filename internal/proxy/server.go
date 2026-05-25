@@ -525,8 +525,10 @@ func (ps *ProxyServer) executeRequestWithRetry(
 	ps.markRoutingCandidate(c, resp.StatusCode)
 
 	// 通知熔断器:该子分组本次请求成功(若是聚合请求)
+	// P5.3: 同步 record latency, 让 selectByWeight 按 EWMA 减权慢的 sub-group.
 	if originalGroup.GroupType == "aggregate" && group.Name != originalGroup.Name {
 		ps.subGroupManager.RecordSubGroupResult(originalGroup.ID, group.Name, true, resp.StatusCode, 0)
+		ps.subGroupManager.RecordLatency(originalGroup.ID, group.Name, time.Since(startTime))
 	}
 
 	// Check if this is a model list request (needs special handling)
