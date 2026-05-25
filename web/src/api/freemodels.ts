@@ -96,60 +96,10 @@ interface CachedEnvelope {
 // envelope is replaced (i.e. after the network fetch completes).
 export const freeModelsRef = ref<FreeModelsEnvelope | null>(null);
 
-// FreeModels CDN 的 modelId 格式不统一:
-//   groq/cerebras/bigmodel/openrouter/xinghuo/xingchen/longcat → 加 "<provider>/" 前缀
-//     groq/minimax-m2.5, bigmodel/glm-4-flash, groq/qwen/qwen3-vl-32b
-//   gitee/nvidia/google → 直接用上游 raw modelId, 不加前缀
-//     jina-clip-v1 (gitee), bytedance/seed-oss-36b-instruct (nvidia 上托管的 ByteDance 模型)
-//
-// 而我们 group.available_models 是上游 /v1/models 真实返回的裸 id, 总不带 provider 前缀.
-// 对齐方法: 只在 modelId 第一段 === provider 名时剥, 否则保留原样.
-//   - "groq/minimax-m2.5"          + provider="groq"   → "minimax-m2.5"           (剥)
-//   - "groq/qwen/qwen3-vl-32b"     + provider="groq"   → "qwen/qwen3-vl-32b"      (剥, 保留作者前缀)
-//   - "bytedance/seed-oss-36b-instruct" + provider="nvidia" → 不剥 (第一段 != "nvidia")
-//   - "jina-clip-v1"               + provider="gitee"  → "jina-clip-v1"           (无 /)
-function bareModelId(idWithMaybePrefix: string, provider?: string): string {
-  const slash = idWithMaybePrefix.indexOf("/");
-  if (slash <= 0) {
-    return idWithMaybePrefix;
-  }
-  const head = idWithMaybePrefix.slice(0, slash).toLowerCase();
-  // 仅当首段等于 provider 名 (含 alias) 时才视为前缀
-  if (provider) {
-    const providerAliases = expandProviderAliases(provider);
-    if (providerAliases.includes(head)) {
-      return idWithMaybePrefix.slice(slash + 1);
-    }
-    return idWithMaybePrefix; // 首段是模型作者名 (e.g. "bytedance/", "google/") — 保留
-  }
-  // 不知 provider, 保守:仅当首段命中桥接表时剥
-  if (isKnownProviderId(head)) {
-    return idWithMaybePrefix.slice(slash + 1);
-  }
-  return idWithMaybePrefix;
-}
-
-// =============================================================================
-// 10 家 FreeModels 上游 provider id, 跟本地 freeProviders.ts 已统一为同名:
-// bigmodel / cerebras / gitee / google / groq / longcat / nvidia / openrouter /
-// xinghuo (讯飞星火 Spark API) / xingchen (讯飞星辰 MaaS).
-// 因此不需要别名映射表,id 直通即可.
-// =============================================================================
-const KNOWN_FREEMODELS_PROVIDERS = new Set([
-  "bigmodel",
-  "cerebras",
-  "gitee",
-  "google",
-  "groq",
-  "longcat",
-  "nvidia",
-  "openrouter",
-  "xinghuo",
-  "xingchen",
-]);
-function isKnownProviderId(s: string): boolean {
-  return KNOWN_FREEMODELS_PROVIDERS.has(s.toLowerCase());
-}
+// FreeModels (2026-05 schema) 端的 `modelId` 已经是 raw API id (POST body.model
+// 直接填的字符串), FreeModels 内部用 toCanonicalId 统一处理. 前端不再需要任何
+// 归一化 (剥前缀 / 加前缀 / 后缀启发式), 直接跟 group.available_models 和上游
+// /v1/models 返回的 id 严格 string 求交.
 
 /**
  * Provider ID 对齐 — registry 与本地 freeProviders.ts 的 ID 不完全一致时,
@@ -190,16 +140,14 @@ const indexCache = computed(() => {
     return { byProvMod, byBareModel, byHost };
   }
   for (const m of env.models) {
-    const bare = bareModelId(m.modelId, m.provider).toLowerCase();
+    const id = m.modelId.toLowerCase();
     for (const alias of expandProviderAliases(m.provider)) {
-      byProvMod.set(`${alias}/${bare}`, m);
+      byProvMod.set(`${alias}/${id}`, m);
     }
-    byProvMod.set(m.modelId.toLowerCase(), m);
-
-    if (!byBareModel.has(bare)) {
-      byBareModel.set(bare, []);
+    if (!byBareModel.has(id)) {
+      byBareModel.set(id, []);
     }
-    byBareModel.get(bare)!.push(m);
+    byBareModel.get(id)!.push(m);
   }
   if (env.providerMeta) {
     for (const [providerId, meta] of Object.entries(env.providerMeta)) {
@@ -270,20 +218,13 @@ export function lookupRegistry(provider: string | undefined, modelId: string): F
   if (!freeModelsRef.value) {
     void loadFreeModelsRegistry();
   }
-  const bare = bareModelId(modelId, provider).toLowerCase();
+  const id = modelId.toLowerCase();
   if (provider) {
-    // OpenRouter 平台契约: 上游 /v1/models 返回的 model id 里, ":free"
-    // 后缀就是免费 tier 的固定标识. OpenRouter 自家的 ID 列表本身即唯一可信源,
-    // 不依赖 Registry, 也不做后缀剥离/拼接这类 patch.
-    if (provider.toLowerCase() === "openrouter") {
-      if (bare.endsWith(":free")) {
-        return { isFree: true, freeTier: "full" } as FreeModelMeta;
-      }
-      return null;
-    }
-    // 其他 provider: 严格 (provider, bare) 精确匹配, miss 不跨 provider fallback
+    // 严格 (provider, modelId) 精确匹配, 不做归一化. Registry 的 modelId
+    // 已经是 raw API id (FreeModels 端 toCanonicalId 统一), 跟上游
+    // /v1/models 返回完全一致. miss 不跨 provider fallback.
     for (const alias of expandProviderAliases(provider)) {
-      const hit = byProvMod.get(`${alias}/${bare}`);
+      const hit = byProvMod.get(`${alias}/${id}`);
       if (hit) {
         return hit;
       }
@@ -291,11 +232,7 @@ export function lookupRegistry(provider: string | undefined, modelId: string): F
     return null;
   }
   // 调用方未提供 provider → 才走跨 provider 兜底
-  const direct = byProvMod.get(modelId.toLowerCase());
-  if (direct) {
-    return direct;
-  }
-  const list = byBareModel.get(bare);
+  const list = byBareModel.get(id);
   if (list && list.length) {
     return list[0];
   }

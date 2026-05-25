@@ -119,7 +119,11 @@ type freeModelsEnvelope struct {
 // only touch this file.
 //
 // 2026-05 schema 调整:
-//   - model 上的 object / model_id / owned_by / price_currency / price_unit 已上游删除
+//   - model 上的 model_id / price_currency / price_unit 已上游删除
+//   - object / owned_by 重新加回 (OpenAI /v1/models 标准必填字段, FreeModels
+//     重新定位为 "OpenAI client drop-in 数据源" 后必须严格输出)
+//   - data[].id 改为 raw API id (POST body.model 直接填的字符串), 已剥
+//     "<provider>/" 前缀 -- 调用方不需要做任何归一化
 //   - providerMeta 顶层新增 apiBaseUrl / channelType / priceCurrency / priceUnit
 type upstreamEnvelope struct {
 	Object    string                          `json:"object"`
@@ -142,8 +146,10 @@ type upstreamProviderMeta struct {
 }
 
 type upstreamModel struct {
-	ID               string         `json:"id"`       // "<provider>/<rawId>"
-	Provider         string         `json:"provider"` // owned_by 已删除 (≡ provider)
+	ID               string         `json:"id"`       // raw API id (POST body.model 直接填)
+	Object           string         `json:"object"`   // OpenAI 标准, 恒等 "model"
+	OwnedBy          string         `json:"owned_by"` // OpenAI 标准, ≡ Provider (兼容字段)
+	Provider         string         `json:"provider"` // FreeModels 历史字段, 与 OwnedBy 同值
 	Name             string         `json:"name"`
 	Description      string         `json:"description"`
 	Created          int64          `json:"created"` // Unix ts
@@ -367,28 +373,14 @@ func parseUpstream(body []byte) (freeModelsEnvelope, error) {
 
 func (r *FreeModelsRegistry) replaceIndex(env freeModelsEnvelope) {
 	// freeTier / isFree / freeKind normalize 已在 parseUpstream 完成,
-	// 这里只负责建索引.
-	byProvMod := make(map[string]*FreeModelMeta, len(env.Models)*2)
+	// 这里只负责建索引. 新 schema 下 m.ModelID 已经是 raw API id (上游
+	// FreeModels 端已经统一剥掉 "<provider>/" 前缀), 不需要双索引.
+	byProvMod := make(map[string]*FreeModelMeta, len(env.Models))
 	byModelOnly := make(map[string][]*FreeModelMeta)
 	for i := range env.Models {
 		m := &env.Models[i]
-		// 原样索引: provider + 完整 modelID (上游 ofind/FreeModels 的命名约定
-		// 经常是 "<provider>/<bare_id>", 例如 "openrouter/deepseek/deepseek-v4-flash")
 		byProvMod[provModKey(m.Provider, m.ModelID)] = m
-		// 双索引: 如果 modelID 带了 "<provider>/" 前缀, 剥掉前缀再存一份.
-		// 因为调用方 (handler/proxy) 收到的是上游 /v1/models 返回的 bare id
-		// (e.g. "deepseek/deepseek-v4-flash"), 不带 "openrouter/" 前缀.
-		// 不剥前缀会导致 Lookup 永远 miss → Registry 对 OpenRouter 等多层
-		// 命名的 provider 全失效.
-		lowerProv := strings.ToLower(m.Provider)
-		lowerID := strings.ToLower(m.ModelID)
-		prefix := lowerProv + "/"
-		if strings.HasPrefix(lowerID, prefix) {
-			bareID := m.ModelID[len(prefix):]
-			byProvMod[provModKey(m.Provider, bareID)] = m
-			byModelOnly[strings.ToLower(bareID)] = append(byModelOnly[strings.ToLower(bareID)], m)
-		}
-		byModelOnly[lowerID] = append(byModelOnly[lowerID], m)
+		byModelOnly[strings.ToLower(m.ModelID)] = append(byModelOnly[strings.ToLower(m.ModelID)], m)
 	}
 	// 从 providerMeta.apiBaseUrl 派生 host → providerId 索引, 让前端反查
 	// 用户分组 upstream URL 时能在 O(1) 命中. 缺 apiBaseUrl 的 provider
@@ -521,12 +513,14 @@ func (r *FreeModelsRegistry) Lookup(provider, modelID string) *FreeModelMeta {
 	return nil
 }
 
-// ListModelIDsByProvider 返回该 provider 在 registry 中的 bare modelId 列表
-// (剥掉 "<provider>/" 前缀). providerId 大小写不敏感.
+// ListModelIDsByProvider 返回该 provider 在 registry 中的 model ID 列表.
+// providerId 大小写不敏感. 新 schema 下 Registry 的 ModelID 已经是 raw API id
+// (FreeModels 端用 toCanonicalId 统一处理), 跟上游 /v1/models 返回完全一致,
+// 不需要做任何归一化.
 //
 // freeOnly=true: 只返回 is_free=true 的子集. 用于 group.free_models 计算 —
-// 当前 ofind/FreeModels CDN 同时收录 free 和 paid model (673 条里 310 free,
-// 363 paid), 不过滤会把付费 model 污染进 free_models.
+// FreeModels CDN 同时收录 free 和 paid (673 条里 310 free, 363 paid),
+// 不过滤会把付费 model 污染进 free_models.
 //
 // freeOnly=false: 返回该 provider 全部. 用于上游无 /v1/models 端点的 provider
 // (e.g. iFlytek Spark) 的回退兜底, 要 best-effort 拿全清单, 不只 free.
@@ -538,7 +532,6 @@ func (r *FreeModelsRegistry) ListModelIDsByProvider(providerID string, freeOnly 
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	out := make([]string, 0, 16)
-	prefix := target + "/"
 	for _, m := range r.envelope.Models {
 		if strings.ToLower(m.Provider) != target {
 			continue
@@ -546,15 +539,8 @@ func (r *FreeModelsRegistry) ListModelIDsByProvider(providerID string, freeOnly 
 		if freeOnly && !m.IsFree {
 			continue
 		}
-		id := m.ModelID
-		// FreeModels 部分 provider (groq/cerebras/bigmodel/openrouter/xinghuo/
-		// xingchen/longcat) 的 modelId 带 "<provider>/" 前缀, 上游 /v1/models
-		// 返回的是裸 id, 这里统一剥掉以保持下游 group.available_models 一致.
-		if strings.HasPrefix(strings.ToLower(id), prefix) {
-			id = id[len(prefix):]
-		}
-		if id != "" {
-			out = append(out, id)
+		if m.ModelID != "" {
+			out = append(out, m.ModelID)
 		}
 	}
 	return out

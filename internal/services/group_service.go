@@ -475,11 +475,8 @@ func (s *GroupService) RefreshAvailableModels(ctx context.Context, groupID uint)
 }
 
 // computeFreeModelIDs 按 "Registry × upstream" 契约算出免费子集:
-//   1. 从 Registry 拿该 provider 下 is_free=true 的 entry, 剥前缀得 bare ID 集
-//   2. 对每个上游 ID 做 provider-aware 归一化 (OpenRouter 剥 ":free" 后缀;
-//      其他 provider 不变), 在 bare 集合里查
-//   3. 命中 → 该上游 ID (保留原样, 不剥后缀) 进 freeIDs
-// 不靠 ":free" 字面后缀判 free; 不依赖跨 provider fallback.
+// Registry 的 model ID 已经是 raw API id (FreeModels 端用 toCanonicalId 统一,
+// 跟上游 /v1/models 返回完全一致), 直接 string 求交集, 零归一化.
 func computeFreeModelIDs(group *models.Group, upstreamIDs []string, registry *FreeModelsRegistry) []string {
 	if registry == nil || len(upstreamIDs) == 0 {
 		return []string{}
@@ -497,41 +494,15 @@ func computeFreeModelIDs(group *models.Group, upstreamIDs []string, registry *Fr
 		providerID = group.Name
 	}
 
-	// Registry 下该 provider 的 free bare ID 集合 (entry.id 已剥 provider 前缀).
-	// freeOnly=true: CDN 同时收录 free 和 paid, 不过滤会让 free_models 被
-	// paid 污染.
-	bareSet := make(map[string]struct{}, 32)
-	regList := registry.ListModelIDsByProvider(providerID, true)
-	for _, bareID := range regList {
-		bareSet[strings.ToLower(bareID)] = struct{}{}
-	}
-	sampleReg := regList
-	if len(sampleReg) > 5 {
-		sampleReg = sampleReg[:5]
-	}
-	sampleUp := upstreamIDs
-	if len(sampleUp) > 5 {
-		sampleUp = sampleUp[:5]
-	}
-	logrus.WithFields(logrus.Fields{
-		"group":            group.Name,
-		"provider_id":      providerID,
-		"registry_n":       len(regList),
-		"upstream_n":       len(upstreamIDs),
-		"registry_sample":  sampleReg,
-		"upstream_sample":  sampleUp,
-	}).Info("computeFreeModelIDs: starting match")
-	if len(bareSet) == 0 {
-		return []string{}
+	freeSet := make(map[string]struct{}, 32)
+	for _, id := range registry.ListModelIDsByProvider(providerID, true) {
+		freeSet[id] = struct{}{}
 	}
 
-	// 直接 string 严格匹配, 不做任何 ID patch (剥前缀/剥后缀都不要).
-	// Registry 数据本身已经维护了正确的 model id 形态 (含 ":free" 等真实
-	// 后缀, 跟上游 /v1/models 返回完全一致). 任何归一化都会引入数据错位.
-	out := make([]string, 0, len(bareSet))
+	out := make([]string, 0, len(freeSet))
 	for _, id := range upstreamIDs {
-		if _, ok := bareSet[strings.ToLower(id)]; ok {
-			out = append(out, id) // 原样保留
+		if _, ok := freeSet[id]; ok {
+			out = append(out, id)
 		}
 	}
 	return out
