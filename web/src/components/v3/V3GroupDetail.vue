@@ -886,10 +886,11 @@ const filteredExposed = computed(() => {
     list = list.filter(m => m.toLowerCase().includes(q));
   }
   if (availFilter.value === "free") {
-    // "免费" = 完全免费 (full), 不含 trial — 让用户能区分
+    // "免费" = 凡 isFree=true 都算 (含 NVIDIA trial-credits / LongCat daily-tokens
+    // 等配额限免, 用户视角"能免费用的"无需细分). full/trial 区分通过 badge 显示.
     list = list.filter(m => {
       const k = modelFreeKind(m);
-      if (k === "full") return true;
+      if (k === "full" || k === "trial") return true;
       if (k !== null) return false;
       return isFreeModel(m); // registry miss fallback
     });
@@ -914,10 +915,11 @@ const filteredAvailable = computed(() => {
     list = list.filter(m => m.toLowerCase().includes(q));
   }
   if (availFilter.value === "free") {
-    // "免费" = 完全免费 (full), 不含 trial — 让用户能区分
+    // "免费" = 凡 isFree=true 都算 (含 NVIDIA trial-credits / LongCat daily-tokens
+    // 等配额限免, 用户视角"能免费用的"无需细分). full/trial 区分通过 badge 显示.
     list = list.filter(m => {
       const k = modelFreeKind(m);
-      if (k === "full") return true;
+      if (k === "full" || k === "trial") return true;
       if (k !== null) return false;
       return isFreeModel(m); // registry miss fallback
     });

@@ -608,6 +608,26 @@ async function quickAdoptFamilySuggestion(s: AliasSuggestion) {
         .catch(() => null) // 静默吞 (409 重复等); 后续 loadAll/loadSuggestions 会反映真实状态
     )
   );
+
+  // 关键修复: 目标 group 是 specified 模式时, 把 real_model 自动加入 exposed_models.
+  // 否则 alias 创建后立刻"失效" (router_engine 跳过未暴露的 real_model).
+  // 按 groupId 聚合避免单 group 多次 PUT.
+  const exposureAdds = new Map<number, string[]>();
+  for (const t of tasks) {
+    const info = groupExposureById.value[t.groupId];
+    if (!info || info.mode !== "specified") continue;
+    if (info.exposed.has(t.realModel)) continue;
+    const arr = exposureAdds.get(t.groupId) || [];
+    if (!arr.includes(t.realModel)) arr.push(t.realModel);
+    exposureAdds.set(t.groupId, arr);
+  }
+  await Promise.all(
+    Array.from(exposureAdds.entries()).map(([gid, models]) => {
+      const info = groupExposureById.value[gid];
+      const next = [...Array.from(info.exposed), ...models];
+      return keysApi.updateGroup(gid, { exposed_models: next } as Partial<Group>).catch(() => null);
+    })
+  );
   await Promise.all([loadAll(), loadSuggestions()]);
 }
 
