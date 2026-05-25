@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"autogateway/internal/config"
+	"autogateway/internal/failover"
 	"autogateway/internal/models"
 	"autogateway/internal/store"
 	"autogateway/internal/syncer"
@@ -71,6 +72,18 @@ func (gm *GroupManager) Initialize() error {
 			g := *group
 			g.EffectiveConfig = gm.settingsManager.GetEffectiveConfig(g.Config)
 			g.ProxyKeysMap = utils.StringToSet(g.ProxyKeys, ",")
+
+			// 解析 failover_status_codes 到 matcher 缓存. 解析失败保持零值 matcher
+			// (Match 永远 false), 配合 proxy 层 alias-routed 404 兜底依然能 retry.
+			if matcher, err := failover.ParseStatusCodeMatcher(g.EffectiveConfig.FailoverStatusCodes); err != nil {
+				logrus.WithFields(logrus.Fields{
+					"group_name": g.Name,
+					"spec":       g.EffectiveConfig.FailoverStatusCodes,
+					"error":      err,
+				}).Warn("Invalid failover_status_codes spec, falling back to empty matcher")
+			} else {
+				g.FailoverStatusCodeMatcher = matcher
+			}
 
 			// Parse header rules with error handling
 			if len(group.HeaderRules) > 0 {

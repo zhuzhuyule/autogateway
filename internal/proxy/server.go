@@ -375,11 +375,14 @@ func (ps *ProxyServer) executeRequestWithRetry(
 		}
 	}
 
-	// Unified error handling for retries. 404 is normally passed through for
-	// direct requests, but alias-routed candidates should still be marked as
-	// failed so future alias selections can avoid unsupported destinations.
-	isRetryableHTTPError := resp != nil && resp.StatusCode >= 400 &&
-		(resp.StatusCode != http.StatusNotFound || ps.hasRoutingCandidate(c))
+	// 决定本次响应是否触发 retry / failover:
+	//   1) group.FailoverStatusCodeMatcher 匹配 (默认 spec "400-403,405-999",
+	//      未配置时 matcher 为零值, Match 永远 false — 走 2 兜底);
+	//   2) alias 路由候选场景下的 404 始终算 failover (P4 智能路由依赖,
+	//      让后续 alias 选择避开不支持该 model 的目标).
+	shouldFailoverByStatus := resp != nil && shouldFailoverOnStatusCode(resp.StatusCode, group)
+	aliasRouted404 := resp != nil && resp.StatusCode == http.StatusNotFound && ps.hasRoutingCandidate(c)
+	isRetryableHTTPError := shouldFailoverByStatus || aliasRouted404
 	if err != nil || isRetryableHTTPError {
 		if err != nil && app_errors.IsIgnorableError(err) {
 			logrus.Debugf("Client-side ignorable error for key %s, aborting retries: %v", utils.MaskAPIKey(apiKey.KeyValue), err)
@@ -574,6 +577,15 @@ func (ps *ProxyServer) hasRoutingCandidate(c *gin.Context) bool {
 	}
 	candidate, ok := raw.(*router_engine.Candidate)
 	return ok && candidate != nil
+}
+
+// shouldFailoverOnStatusCode 用 group.FailoverStatusCodeMatcher 判定该状态码
+// 是否触发 retry / failover. group 为 nil 时一律返回 false (退化到 alias 兜底).
+func shouldFailoverOnStatusCode(statusCode int, group *models.Group) bool {
+	if group == nil {
+		return false
+	}
+	return group.FailoverStatusCodeMatcher.Match(statusCode)
 }
 
 // logRequest is a helper function to create and record a request log.

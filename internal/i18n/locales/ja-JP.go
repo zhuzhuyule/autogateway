@@ -175,6 +175,8 @@ var MessagesJaJP = map[string]string{
 	"config.max_retries_desc":                "異なるキーを使用した単一リクエストの最大リトライ数、0でリトライなし。",
 	"config.blacklist_threshold":             "ブラックリストしきい値",
 	"config.blacklist_threshold_desc":        "キーがブラックリストに入るまでの連続失敗回数、0でブラックリスト無効。",
+	"config.failover_status_codes":           "フェイルオーバー対象ステータスコード",
+	"config.failover_status_codes_desc":      "上流がこれらの HTTP ステータスコードを返したとき、retry / failover を発火させます。単一値とレンジをカンマ区切りで指定でき、例: 400-403,405-999,250-260。デフォルトは 404 を除外しますが、alias ルーティング下の 404 は自動で failover します。",
 	"config.key_validation_interval":         "キー検証間隔（分）",
 	"config.key_validation_interval_desc":    "バックグラウンドキー検証のデフォルト間隔（分）。",
 	"config.key_validation_concurrency":      "キー検証並行数",

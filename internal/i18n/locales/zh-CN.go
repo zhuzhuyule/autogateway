@@ -175,6 +175,8 @@ var MessagesZhCN = map[string]string{
 	"config.max_retries_desc":                "单个请求使用不同 Key 的最大重试次数，0为不重试。",
 	"config.blacklist_threshold":             "黑名单阈值",
 	"config.blacklist_threshold_desc":        "一个 Key 连续失败多少次后进入黑名单，0为不拉黑。",
+	"config.failover_status_codes":           "故障转移状态码",
+	"config.failover_status_codes_desc":      "上游返回这些 HTTP 状态码时触发 retry / failover。支持单值与区间，逗号分隔，例如 400-403,405-999,250-260。默认值已排除 404，但 alias 路由命中时 404 仍会自动 failover。",
 	"config.key_validation_interval":         "密钥验证间隔（分钟）",
 	"config.key_validation_interval_desc":    "后台验证密钥的默认间隔（分钟）。",
 	"config.key_validation_concurrency":      "密钥验证并发数",

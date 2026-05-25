@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"autogateway/internal/db"
+	"autogateway/internal/failover"
 	"autogateway/internal/models"
 	"autogateway/internal/store"
 	"autogateway/internal/syncer"
@@ -19,6 +20,17 @@ import (
 	"gorm.io/datatypes"
 	"gorm.io/gorm/clause"
 )
+
+// validateStringSettingValue 对 string 类型 setting key 做内容级校验.
+// 类型校验在 reflect 走完后才能进入这里, 这里只关心 "格式是否合法".
+func validateStringSettingValue(key, val string) error {
+	if key == "failover_status_codes" {
+		if _, err := failover.ParseStatusCodeMatcher(val); err != nil {
+			return fmt.Errorf("invalid value for %s (%q): %w", key, val, err)
+		}
+	}
+	return nil
+}
 
 const SettingsUpdateChannel = "system_settings:updated"
 
@@ -337,6 +349,9 @@ func (sm *SystemSettingsManager) ValidateSettings(settingsMap map[string]any) er
 					}
 				}
 			}
+			if err := validateStringSettingValue(key, strVal); err != nil {
+				return err
+			}
 		default:
 			return fmt.Errorf("unsupported type for setting key validation: %s", key)
 		}
@@ -406,6 +421,9 @@ func (sm *SystemSettingsManager) ValidateGroupConfigOverrides(configMap map[stri
 						return fmt.Errorf("value for %s is required", key)
 					}
 				}
+			}
+			if err := validateStringSettingValue(key, strVal); err != nil {
+				return err
 			}
 		case reflect.Bool:
 			_, ok := value.(bool)
