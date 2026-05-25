@@ -101,6 +101,13 @@ func (s *AliasSuggestionService) SuggestFromRegistry(ctx context.Context, aggreg
 		if len(sub.AvailableModels) > 0 {
 			_ = json.Unmarshal(sub.AvailableModels, &availIDs)
 		}
+		// Fallback: 新装实例 sub-group 还没 refresh /v1/models → 用 Registry
+		// 该 provider 的 free model 当候选, 让 admin 第一次进 alias 页就能
+		// 看到 suggestion. Registry 是 truth source, 跟未来 refresh 后的真实
+		// 候选 (Registry ∩ upstream) 重叠度 ≥80%, 偶尔含已下架 model 也不阻塞.
+		if len(availIDs) == 0 {
+			availIDs = s.freeReg.ListModelIDsByProvider(providerID, true)
+		}
 		for _, mid := range availIDs {
 			meta := s.freeReg.Lookup(providerID, mid)
 			if meta == nil || meta.ModelFamily == "" {

@@ -90,8 +90,12 @@ function highlightModelOnRoute() {
     el.scrollIntoView({ behavior: "smooth", block: "center" });
     el.classList.add("v5-modelcard--highlight");
     setTimeout(() => el.classList.remove("v5-modelcard--highlight"), 2400);
-    // 清 query 避免下次切 tab 又 trigger
-    router.replace({ name: "keys", query: { groupId: props.group?.id || "" } });
+    // 清 highlight query 避免下次切 tab 又 trigger, 保留 groupId + tab
+    // (P8.5: tab 要持久化让刷新页面能回到正确 tab)
+    router.replace({
+      name: "keys",
+      query: { groupId: props.group?.id || "", tab: tab.value },
+    });
   }, 400);
 }
 
@@ -118,23 +122,38 @@ const aliasModalModel = ref<string>("");
 // 存 localStorage; 非法值直接降级到 "keys".
 type GroupDetailTab = "keys" | "models" | "settings";
 const TAB_STORAGE_KEY = "v3-group-detail-tab";
-function readPersistedTab(): GroupDetailTab {
+function isValidTab(v: unknown): v is GroupDetailTab {
+  return v === "keys" || v === "models" || v === "settings";
+}
+// P8.5: tab 优先级 URL query.tab > localStorage > "keys".
+// URL query 优先让 alias 失效跳转 (?tab=keys&highlight=MODEL) 强制激活,
+// 不受用户之前 localStorage 上次切到 settings 的影响.
+function readInitialTab(): GroupDetailTab {
+  const q = (route.query.tab as string | undefined) || "";
+  if (isValidTab(q)) return q;
   try {
     const raw = localStorage.getItem(TAB_STORAGE_KEY);
-    if (raw === "keys" || raw === "models" || raw === "settings") {
-      return raw;
-    }
+    if (isValidTab(raw)) return raw;
   } catch {
     /* ignore */
   }
   return "keys";
 }
-const tab = ref<GroupDetailTab>(readPersistedTab());
+const tab = ref<GroupDetailTab>(readInitialTab());
 watch(tab, v => {
   try {
     localStorage.setItem(TAB_STORAGE_KEY, v);
   } catch {
     /* ignore */
+  }
+  // P8.5: tab 切换同步到 URL, 让"复制 URL 给别人"或"刷新页面"都保留当前 tab.
+  // 用 replace 不污染 history. 保留其他 query (groupId / highlight 等).
+  const cur = route.query;
+  if (cur.tab !== v) {
+    router.replace({
+      name: "keys",
+      query: { ...cur, tab: v },
+    });
   }
 });
 const faviconFailed = ref(false);

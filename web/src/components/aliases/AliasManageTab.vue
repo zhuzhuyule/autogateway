@@ -20,6 +20,8 @@ import {
   AddOutline,
   BanOutline,
   CheckmarkCircle,
+  ChevronDownOutline,
+  ChevronForwardOutline,
   CloseOutline,
   CubeOutline,
   FlashOutline,
@@ -445,11 +447,12 @@ const groupExposureById = computed<
 
 // 失效 alias 一键修复: 跳到 Keys 页对应 group + 高亮该 real_model,
 // 让 admin 立刻看到 model 卡片右上角"+加入"按钮 (V3GroupDetail 内置的 addToExposed).
+// P8.5: 同时强制 tab=keys (覆盖 V3GroupDetail localStorage 上次切到 settings 的情况).
 function goFixAlias(row: ModelAliasRow): void {
   if (!row.group_id) return;
   router.push({
     name: "keys",
-    query: { groupId: row.group_id, highlight: row.real_model },
+    query: { groupId: row.group_id, tab: "keys", highlight: row.real_model },
   });
 }
 
@@ -485,6 +488,41 @@ async function loadAll() {
 
 const suggestions = ref<AliasSuggestion[]>([]);
 const suggestionsDismissed = ref(false);
+// P8.4: 单条 dismiss + 折叠状态. localStorage 持久化避免每次进页面又出现.
+const dismissedFamilies = ref<Set<string>>(loadDismissedFamilies());
+const suggestionsCollapsed = ref<boolean>(localStorage.getItem("alias-suggest-collapsed") === "true");
+function loadDismissedFamilies(): Set<string> {
+  try {
+    const raw = localStorage.getItem("alias-suggest-dismissed-families");
+    return new Set(raw ? (JSON.parse(raw) as string[]) : []);
+  } catch {
+    return new Set();
+  }
+}
+function saveDismissedFamilies(): void {
+  localStorage.setItem(
+    "alias-suggest-dismissed-families",
+    JSON.stringify(Array.from(dismissedFamilies.value))
+  );
+}
+function dismissOneFamily(family: string): void {
+  if (!family) return;
+  const s = new Set(dismissedFamilies.value);
+  s.add(family);
+  dismissedFamilies.value = s;
+  saveDismissedFamilies();
+}
+function toggleSuggestionsCollapsed(): void {
+  suggestionsCollapsed.value = !suggestionsCollapsed.value;
+  localStorage.setItem("alias-suggest-collapsed", String(suggestionsCollapsed.value));
+}
+const visibleSuggestions = computed(() => {
+  // family 类型按 dismissedFamilies 过滤; single 类型按 model 名过滤 (复用同套)
+  return suggestions.value.filter(s => {
+    const key = s.kind === "family" ? s.family : s.model;
+    return key && !dismissedFamilies.value.has(key);
+  });
+});
 async function loadSuggestions() {
   try {
     // 同时拉两个数据源: 现有 logs-driven (reactive) + P4.2 registry-driven
@@ -800,9 +838,17 @@ function saveSettingsThrottled() {
       </span>
     </h1>
 
-    <div v-if="suggestions.length && !suggestionsDismissed" class="v5-suggest-banner">
+    <div v-if="visibleSuggestions.length && !suggestionsDismissed" class="v5-suggest-banner">
       <div class="v5-suggest-banner__head">
-        <div class="v5-suggest-banner__title">{{ t("v5.suggestionsTitle") }}</div>
+        <button
+          class="v5-suggest-banner__title v5-suggest-banner__title--toggle"
+          :title="suggestionsCollapsed ? t('v5.suggestionsExpand') : t('v5.suggestionsCollapse')"
+          @click="toggleSuggestionsCollapsed"
+        >
+          <n-icon :component="suggestionsCollapsed ? ChevronForwardOutline : ChevronDownOutline" :size="12" />
+          {{ t("v5.suggestionsTitle") }}
+          <span class="v5-suggest-banner__count">{{ visibleSuggestions.length }}</span>
+        </button>
         <button
           class="v5-suggest-banner__close"
           :title="t('v5.suggestionsDismiss')"
@@ -811,8 +857,8 @@ function saveSettingsThrottled() {
           <n-icon :component="CloseOutline" :size="13" />
         </button>
       </div>
-      <div class="v5-suggest-banner__list">
-        <template v-for="(s, idx) in suggestions" :key="s.kind === 'family' ? `f:${s.family}` : `s:${s.model}-${idx}`">
+      <div v-if="!suggestionsCollapsed" class="v5-suggest-banner__list">
+        <template v-for="(s, idx) in visibleSuggestions" :key="s.kind === 'family' ? `f:${s.family}` : `s:${s.model}-${idx}`">
           <!-- Family suggestion: one click pre-fills the picker with every
                (group, model) sibling the backend found, target alias = family
                name (or existing_alias when an alias by that name already
@@ -840,6 +886,14 @@ function saveSettingsThrottled() {
                   :title="t('v5.suggestFamilyReview')"
                   @click.stop="onClickSuggestion(s)"
                 >{{ t("v5.suggestFamilyReviewBtn") }}</button>
+                <!-- P8.4: 单条 dismiss ✕, localStorage 持久化, 不影响其他 family. -->
+                <button
+                  class="v5-suggest-chip__dismiss"
+                  :title="t('v5.suggestionsDismissOne')"
+                  @click.stop="dismissOneFamily(s.family || '')"
+                >
+                  <n-icon :component="CloseOutline" :size="10" />
+                </button>
               </span>
             </template>
             <div style="font: 500 11px var(--v3-sans); margin-bottom: 4px">
@@ -1759,6 +1813,61 @@ function saveSettingsThrottled() {
   background: var(--v3-warn, oklch(0.55 0.18 70));
   color: white;
   border-color: var(--v3-warn, oklch(0.55 0.18 70));
+}
+/* P8.4: suggestion banner head 按钮化 + count chip + 单条 dismiss ✕ */
+.v5-suggest-banner__title--toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: none;
+  padding: 2px 6px;
+  margin: -2px -6px;
+  border-radius: 4px;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+  transition: background 0.1s;
+}
+.v5-suggest-banner__title--toggle:hover {
+  background: var(--v3-line-soft, oklch(0.95 0 0));
+}
+.v5-suggest-banner__count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 16px;
+  padding: 0 5px;
+  border-radius: 8px;
+  background: var(--v3-accent-soft, oklch(0.96 0.05 230));
+  color: var(--v3-accent, oklch(0.55 0.15 230));
+  font: 600 10px var(--v3-mono);
+  margin-left: 2px;
+}
+.v5-suggest-chip__dismiss {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  padding: 0;
+  border: 1px solid var(--v3-line);
+  border-left: none;
+  border-top-right-radius: 6px;
+  border-bottom-right-radius: 6px;
+  background: var(--v3-surface);
+  color: var(--v3-ink-4);
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s;
+}
+.v5-suggest-chip__dismiss:hover {
+  background: oklch(from var(--v3-warn, oklch(0.7 0.16 60)) l c h / 0.15);
+  color: var(--v3-warn, oklch(0.55 0.18 60));
+}
+/* 既有 zap (审查) 按钮在中间, 取消右下圆角让 dismiss 接圆 */
+.v5-suggest-chip-wrap .v5-suggest-chip__zap {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
 }
 .v3-alias-chip__name {
   font: 500 11px var(--v3-mono);
