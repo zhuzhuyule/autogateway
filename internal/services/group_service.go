@@ -442,12 +442,23 @@ func (s *GroupService) RefreshAvailableModels(ctx context.Context, groupID uint)
 	if err != nil {
 		return nil, fmt.Errorf("marshal models list: %w", err)
 	}
+
+	// 同步计算 free_models 子集 (Registry × upstream, provider-aware 归一化求交).
+	// 跟 available_models 同一刷新时机固化, 让前端零本地算法直接判 Free badge,
+	// 也让 backup / proxy routing 用同一个 truth source.
+	freeIDs := computeFreeModelIDs(&group, modelIDs, s.freeModelsRegistry)
+	freeData, err := json.Marshal(freeIDs)
+	if err != nil {
+		return nil, fmt.Errorf("marshal free models list: %w", err)
+	}
+
 	now := time.Now()
 	if err := s.db.WithContext(ctx).Model(&models.Group{}).
 		Where("id = ?", group.ID).
 		Updates(map[string]any{
-			"available_models":     datatypes.JSON(data),
-			"models_refreshed_at":  &now,
+			"available_models":    datatypes.JSON(data),
+			"free_models":         datatypes.JSON(freeData),
+			"models_refreshed_at": &now,
 		}).Error; err != nil {
 		return nil, app_errors.ParseDBError(err)
 	}
@@ -455,7 +466,73 @@ func (s *GroupService) RefreshAvailableModels(ctx context.Context, groupID uint)
 	if err := s.groupManager.Invalidate(); err != nil {
 		logrus.WithContext(ctx).WithError(err).Warn("invalidate group cache after refresh-models failed")
 	}
+	logrus.WithFields(logrus.Fields{
+		"group_id":      group.ID,
+		"available":     len(modelIDs),
+		"free":          len(freeIDs),
+	}).Info("refresh-models: persisted available + free subset")
 	return modelIDs, nil
+}
+
+// computeFreeModelIDs 按 "Registry × upstream" 契约算出免费子集:
+//   1. 从 Registry 拿该 provider 下 is_free=true 的 entry, 剥前缀得 bare ID 集
+//   2. 对每个上游 ID 做 provider-aware 归一化 (OpenRouter 剥 ":free" 后缀;
+//      其他 provider 不变), 在 bare 集合里查
+//   3. 命中 → 该上游 ID (保留原样, 不剥后缀) 进 freeIDs
+// 不靠 ":free" 字面后缀判 free; 不依赖跨 provider fallback.
+func computeFreeModelIDs(group *models.Group, upstreamIDs []string, registry *FreeModelsRegistry) []string {
+	if registry == nil || len(upstreamIDs) == 0 {
+		return []string{}
+	}
+	// 反查 providerId: 优先 upstream host 反查 (准), fallback group.Name (常重叠)
+	providerID := ""
+	if baseURL, err := firstUpstreamURL(group); err == nil {
+		if host := extractHost(baseURL); host != "" {
+			if id, _, ok := registry.LookupProviderByHost(host); ok {
+				providerID = id
+			}
+		}
+	}
+	if providerID == "" {
+		providerID = group.Name
+	}
+
+	// Registry 下该 provider 的 free bare ID 集合 (entry.id 已剥 provider 前缀)
+	bareSet := make(map[string]struct{}, 32)
+	regList := registry.ListModelIDsByProvider(providerID)
+	for _, bareID := range regList {
+		bareSet[strings.ToLower(bareID)] = struct{}{}
+	}
+	sampleReg := regList
+	if len(sampleReg) > 5 {
+		sampleReg = sampleReg[:5]
+	}
+	sampleUp := upstreamIDs
+	if len(sampleUp) > 5 {
+		sampleUp = sampleUp[:5]
+	}
+	logrus.WithFields(logrus.Fields{
+		"group":            group.Name,
+		"provider_id":      providerID,
+		"registry_n":       len(regList),
+		"upstream_n":       len(upstreamIDs),
+		"registry_sample":  sampleReg,
+		"upstream_sample":  sampleUp,
+	}).Info("computeFreeModelIDs: starting match")
+	if len(bareSet) == 0 {
+		return []string{}
+	}
+
+	// 直接 string 严格匹配, 不做任何 ID patch (剥前缀/剥后缀都不要).
+	// Registry 数据本身已经维护了正确的 model id 形态 (含 ":free" 等真实
+	// 后缀, 跟上游 /v1/models 返回完全一致). 任何归一化都会引入数据错位.
+	out := make([]string, 0, len(bareSet))
+	for _, id := range upstreamIDs {
+		if _, ok := bareSet[strings.ToLower(id)]; ok {
+			out = append(out, id) // 原样保留
+		}
+	}
+	return out
 }
 
 // fallbackModelsFromRegistry 仅当 fetchErr 表明上游 /v1/models 端点不存在

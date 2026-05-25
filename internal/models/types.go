@@ -125,6 +125,10 @@ type Group struct {
 	SubGroups           []GroupSubGroup      `gorm:"-" json:"sub_groups,omitempty"`
 	LastValidatedAt     *time.Time           `json:"last_validated_at"`
 	AvailableModels     datatypes.JSON       `gorm:"type:json" json:"available_models"` // 由上游 /v1/models 缓存的真实模型列表
+	// FreeModels 是 AvailableModels 中通过 FreeModelsRegistry 严格匹配出的免费子集.
+	// 跟 AvailableModels 同一刷新时机产生: provider-aware ID 归一化后跟 Registry 求交.
+	// 保留原样 ID (含 ":free" 等后缀); 前端读它直接判 Free badge, 零本地算法.
+	FreeModels          datatypes.JSON       `gorm:"type:json" json:"free_models"`
 	ModelsRefreshedAt   *time.Time           `json:"models_refreshed_at"`
 	// ModelRoutingMode controls model routing strictness:
 	//   "passthrough" — 所有上游模型直通 (默认, 兼容老分组)

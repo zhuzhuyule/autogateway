@@ -4,7 +4,6 @@ package handler
 import (
 	"crypto/subtle"
 	"net/http"
-	"strings"
 	"time"
 
 	"autogateway/internal/config"
@@ -97,31 +96,17 @@ type EnrichedModel struct {
 	ContextLabel string `json:"context_label,omitempty"`
 }
 
-// enrichModels runs each id through the FreeModels Registry. providerHint
-// (provider id, ideally from resolveFreeProviderHint) 严格只在 byProvMod 命中,
-// miss 不再 fallback (避免跨 provider 借免费标签). 平台命名契约 (e.g. OpenRouter
-// 的 :free 后缀) 由 isFreeByNamingConvention 兜底标记, 跟 model_catalog_handler
-// 保持两条路径的 is_free 判定一致.
+// enrichModels 严格按 FreeModels Registry 富集 (跟前端 isFree 契约一致):
+// is_free 唯一来源 = Registry (provider, modelId) 精确命中. 不再用 :free
+// 后缀启发式 — 想让某 model 标 free 去 ofind/FreeModels 提 PR.
 func (s *Server) enrichModels(ids []string, providerHint string) []EnrichedModel {
 	out := make([]EnrichedModel, 0, len(ids))
 	for _, id := range ids {
 		em := EnrichedModel{ID: id}
-
-		// 1. 命名约定兜底: OpenRouter 等 provider 用 ":free" 后缀公开声明免费 tier.
-		if isFreeByNamingConvention(id) {
-			em.IsFree = true
-			em.FreeTier = "full"
-		}
-
-		// 2. FreeModelsRegistry 富集 (IsFree 取并集, 其他字段首次非空胜出)
 		if s.FreeModelsRegistry != nil {
 			if meta := s.FreeModelsRegistry.Lookup(providerHint, id); meta != nil {
-				if meta.IsFree {
-					em.IsFree = true
-				}
-				if em.FreeTier == "" {
-					em.FreeTier = meta.FreeTier
-				}
+				em.IsFree = meta.IsFree
+				em.FreeTier = meta.FreeTier
 				em.Tier = meta.Tier
 				em.Speed = meta.Speed
 				em.IsReasoning = meta.IsReasoning
@@ -133,12 +118,6 @@ func (s *Server) enrichModels(ids []string, providerHint string) []EnrichedModel
 		out = append(out, em)
 	}
 	return out
-}
-
-// isFreeByNamingConvention 检查 modelID 是否符合 provider 平台的免费命名契约.
-// 目前: ":free" 后缀 (OpenRouter, 也被某些其他 provider 沿用).
-func isFreeByNamingConvention(modelID string) bool {
-	return strings.HasSuffix(strings.ToLower(modelID), ":free")
 }
 
 // LoginRequest represents the login request payload

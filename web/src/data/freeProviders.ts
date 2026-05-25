@@ -1125,19 +1125,11 @@ export function isFree(
   if (!modelId) {
     return null;
   }
-
-  // 1. FreeModels Registry
-  const r0 = isFreeFromRegistry(providerId, modelId);
-  if (r0 === true) {
-    return true;
-  }
-
-  // 2. 平台命名约定 (OpenRouter :free 等)
-  if (modelId.toLowerCase().endsWith(":free")) {
-    return true;
-  }
-
-  return r0; // null 或 false from registry
+  // 唯一可信源: FreeModels Registry. modelId 不在 Registry 收录 → null (前端
+  // 按"不免费"渲染). 想让某 model 显示 Free → 去 ofind/FreeModels 仓库提 PR.
+  // 不再用 :free 后缀启发式 / pricing=0 推断 / 静态表 — 全部移除以符合
+  // 用户契约: "Free 标志的判定完全取决于该模型是否出现在我们的 free models 列表中".
+  return isFreeFromRegistry(providerId, modelId);
 }
 
 /**

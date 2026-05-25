@@ -368,14 +368,27 @@ func parseUpstream(body []byte) (freeModelsEnvelope, error) {
 func (r *FreeModelsRegistry) replaceIndex(env freeModelsEnvelope) {
 	// freeTier / isFree / freeKind normalize 已在 parseUpstream 完成,
 	// 这里只负责建索引.
-	byProvMod := make(map[string]*FreeModelMeta, len(env.Models))
+	byProvMod := make(map[string]*FreeModelMeta, len(env.Models)*2)
 	byModelOnly := make(map[string][]*FreeModelMeta)
 	for i := range env.Models {
 		m := &env.Models[i]
-		key := provModKey(m.Provider, m.ModelID)
-		byProvMod[key] = m
-		bare := strings.ToLower(m.ModelID)
-		byModelOnly[bare] = append(byModelOnly[bare], m)
+		// 原样索引: provider + 完整 modelID (上游 ofind/FreeModels 的命名约定
+		// 经常是 "<provider>/<bare_id>", 例如 "openrouter/deepseek/deepseek-v4-flash")
+		byProvMod[provModKey(m.Provider, m.ModelID)] = m
+		// 双索引: 如果 modelID 带了 "<provider>/" 前缀, 剥掉前缀再存一份.
+		// 因为调用方 (handler/proxy) 收到的是上游 /v1/models 返回的 bare id
+		// (e.g. "deepseek/deepseek-v4-flash"), 不带 "openrouter/" 前缀.
+		// 不剥前缀会导致 Lookup 永远 miss → Registry 对 OpenRouter 等多层
+		// 命名的 provider 全失效.
+		lowerProv := strings.ToLower(m.Provider)
+		lowerID := strings.ToLower(m.ModelID)
+		prefix := lowerProv + "/"
+		if strings.HasPrefix(lowerID, prefix) {
+			bareID := m.ModelID[len(prefix):]
+			byProvMod[provModKey(m.Provider, bareID)] = m
+			byModelOnly[strings.ToLower(bareID)] = append(byModelOnly[strings.ToLower(bareID)], m)
+		}
+		byModelOnly[lowerID] = append(byModelOnly[lowerID], m)
 	}
 	// 从 providerMeta.apiBaseUrl 派生 host → providerId 索引, 让前端反查
 	// 用户分组 upstream URL 时能在 O(1) 命中. 缺 apiBaseUrl 的 provider
@@ -494,6 +507,9 @@ func (r *FreeModelsRegistry) Lookup(provider, modelID string) *FreeModelMeta {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	if provider != "" {
+		// 严格 (provider, modelID) 精确匹配, 不做任何 ID patch.
+		// Registry 数据维护方负责保证 modelID 形态跟上游 /v1/models
+		// 完全一致 (含 ":free" 等真实后缀).
 		if m, ok := r.byProvMod[provModKey(provider, modelID)]; ok {
 			return m
 		}

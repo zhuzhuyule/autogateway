@@ -109,16 +109,6 @@ func (h *ModelCatalogHandler) ListModels(c *gin.Context) {
 		}
 		entry.Groups = appendUnique(entry.Groups, groupName)
 
-		// 命名约定兜底 (OpenRouter :free 等). 复用 enrichModels 同一 helper
-		// 保证两条 API 路径 (/api/models 与 /api/groups/:id/refresh-models)
-		// is_free 判定完全一致.
-		if isFreeByNamingConvention(modelID) {
-			entry.IsFree = true
-			if entry.FreeTier == "" {
-				entry.FreeTier = "full"
-			}
-		}
-
 		// Free-models enrichment: 同一 modelID 跨 provider 出现时取并集 —
 		// IsFree=true 优先 (任意 provider 免费即标免费); 其他字段首个非空值胜出.
 		if h.freeRegistry != nil {

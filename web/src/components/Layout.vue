@@ -78,7 +78,9 @@ async function copyEndpoint() {
   }
 }
 
-const versionLabel = "v0.4";
+// 从 vite VITE_VERSION env (build 时由 git describe 注入) 读;
+// dev 模式没设就显示 "dev" 而不是错的 v0.4.
+const versionLabel = (import.meta.env.VITE_VERSION as string | undefined) || "dev";
 </script>
 
 <template>

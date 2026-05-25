@@ -1326,6 +1326,66 @@ const filterCounts = computed(() => ({
   valid: stats.value?.key_stats.active_keys ?? 0,
   invalid: stats.value?.key_stats.invalid_keys ?? 0,
 }));
+
+// === DEBUG: 每次 group / 模型列表变化时, 把完整对比 dump 到 console + window.__orDebug ===
+//
+// 当前只为 OpenRouter group 打印, 避免噪音. 浏览器 console:
+//   window.__orDebug.summary   // 概览数
+//   window.__orDebug.matched   // Registry 命中的 model id (会标 free)
+//   window.__orDebug.upstreamOnly  // 上游有但 Registry 没收录
+//   window.__orDebug.registryOnly  // Registry 有但上游本次没拉到
+//   window.__orDebug.suffixOnly    // 带 :free 后缀但 Registry 没收录 (按用户契约不再标 free)
+//   window.__orDebug.everyModel    // 每个 model 的逐项判定 [{id, isFree, registry, suffix}]
+watch(
+  [() => props.group, groupModels],
+  () => {
+    const g = props.group;
+    if (!g || g.name !== "openrouter") {
+      return;
+    }
+    const provider = matchedProvider.value?.id || g.name;
+    const everyModel = groupModels.value.map(id => {
+      const reg = lookupRegistry(provider, id);
+      return {
+        id,
+        registry: reg ? { isFree: reg.isFree, freeTier: reg.freeTier } : null,
+        suffix: id.toLowerCase().endsWith(":free"),
+        isFree: isFreeModel(id),
+      };
+    });
+    const matched = everyModel.filter(x => x.registry !== null);
+    const suffixOnly = everyModel.filter(x => x.suffix && !x.registry);
+    const upstreamOnly = everyModel.filter(x => !x.registry);
+    const summary = {
+      upstreamTotal: groupModels.value.length,
+      matchedRegistry: matched.length,
+      suffixOnly: suffixOnly.length,
+      upstreamOnly: upstreamOnly.length,
+      uiFree: everyModel.filter(x => x.isFree).length,
+      providerHint: provider,
+    };
+    /* eslint-disable no-console */
+    console.group(`%c[orDebug] OpenRouter 模型对比`, "color:#06c;font-weight:bold");
+    console.log("summary:", summary);
+    console.log("matched (Registry 命中):", matched.map(x => x.id));
+    console.log("suffixOnly (带 :free 后缀但 Registry 没收录, 不再标 free):",
+      suffixOnly.map(x => x.id));
+    console.log("upstreamOnly (Registry 没收录, 当前不标 free):",
+      upstreamOnly.length, "个 (前 20):", upstreamOnly.slice(0, 20).map(x => x.id));
+    console.log("everyModel (完整逐项判定):", everyModel);
+    console.groupEnd();
+    /* eslint-enable no-console */
+
+    ((window as unknown) as { __orDebug?: unknown }).__orDebug = {
+      summary,
+      matched,
+      suffixOnly,
+      upstreamOnly,
+      everyModel,
+    };
+  },
+  { immediate: true, deep: false }
+);
 </script>
 
 <template>

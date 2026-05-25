@@ -1,0 +1,17 @@
+root = "."
+tmp_dir = "tmp"
+
+[build]
+  cmd = "go build -race -o ./tmp/main ."
+  bin = "./tmp/main"
+  include_ext = ["go"]
+  exclude_dir = ["tmp", "web/node_modules", "data", "docs", "scripts", ".git"]
+  delay = 500
+  kill_delay = "2s"
+  stop_on_error = true
+
+[log]
+  time = true
+
+[misc]
+  clean_on_exit = true

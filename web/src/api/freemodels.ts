@@ -272,13 +272,25 @@ export function lookupRegistry(provider: string | undefined, modelId: string): F
   }
   const bare = bareModelId(modelId, provider).toLowerCase();
   if (provider) {
+    // OpenRouter 平台契约: 上游 /v1/models 返回的 model id 里, ":free"
+    // 后缀就是免费 tier 的固定标识. OpenRouter 自家的 ID 列表本身即唯一可信源,
+    // 不依赖 Registry, 也不做后缀剥离/拼接这类 patch.
+    if (provider.toLowerCase() === "openrouter") {
+      if (bare.endsWith(":free")) {
+        return { isFree: true, freeTier: "full" } as FreeModelMeta;
+      }
+      return null;
+    }
+    // 其他 provider: 严格 (provider, bare) 精确匹配, miss 不跨 provider fallback
     for (const alias of expandProviderAliases(provider)) {
       const hit = byProvMod.get(`${alias}/${bare}`);
       if (hit) {
         return hit;
       }
     }
+    return null;
   }
+  // 调用方未提供 provider → 才走跨 provider 兜底
   const direct = byProvMod.get(modelId.toLowerCase());
   if (direct) {
     return direct;
@@ -297,30 +309,8 @@ export function lookupRegistry(provider: string | undefined, modelId: string): F
  *   null   — 注册表无信息,调用方 fallback 静态清单或保持未知
  */
 export function isFreeFromRegistry(provider: string | undefined, modelId: string): boolean | null {
-  if (!modelId) {
-    return null;
-  }
-  const { byProvMod, byBareModel } = indexCache.value;
-  if (!freeModelsRef.value) {
-    void loadFreeModelsRegistry();
-  }
-  const bare = bareModelId(modelId, provider).toLowerCase();
-  if (provider) {
-    for (const alias of expandProviderAliases(provider)) {
-      const hit = byProvMod.get(`${alias}/${bare}`);
-      if (hit) {
-        return hit.isFree;
-      }
-    }
-  }
-  const list = byBareModel.get(bare);
-  if (list && list.length) {
-    if (list.some(m => m.isFree)) {
-      return true;
-    }
-    return false;
-  }
-  return null;
+  const meta = lookupRegistry(provider, modelId);
+  return meta ? meta.isFree : null;
 }
 
 /**
