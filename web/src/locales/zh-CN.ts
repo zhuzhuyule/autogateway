@@ -1070,6 +1070,12 @@ export default {
     weightLabel: "权重",
     priorityLabel: "优先级",
     enabledLabel: "是否启用",
+    // P8.x: alias 失效跳转 + model 复制 — 代码用 t('v3.xxx') 前缀, 必须在 v3 namespace.
+    aliasUnexposedFixTip: "跳转到对应分组的密钥页, 高亮该模型 (右上角 +加入 立即生效)",
+    aliasJumpToModel: "跳转到此 →",
+    aliasJumpToModelTip: "跳转到该模型的密钥页, 高亮显示",
+    modelClickToCopy: "点击复制 model ID",
+    modelCopied: "已复制",
   },
   v5: {
     // Aliases 视图 — 未识别模型建议横幅
@@ -1082,11 +1088,6 @@ export default {
     suggestFamilyQuickAdopt: "一键采纳（跳过预览，直接批量创建）",
     suggestFamilyReview: "审查 / 编辑候选后再创建",
     suggestFamilyReviewBtn: "审查",
-    aliasUnexposedFixTip: "跳转到对应分组的密钥页, 高亮该模型 (右上角 +加入 立即生效)",
-    aliasJumpToModel: "跳转到此 →",
-    aliasJumpToModelTip: "跳转到该模型的密钥页, 高亮显示",
-    modelClickToCopy: "点击复制 model ID",
-    modelCopied: "已复制",
     suggestionsExpand: "展开建议列表",
     suggestionsCollapse: "折叠建议列表",
     suggestionsDismissOne: "隐藏这个建议",

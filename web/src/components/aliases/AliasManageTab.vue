@@ -1492,9 +1492,28 @@ function saveSettingsThrottled() {
       <div v-if="editDraft" style="padding-top: 16px">
         <n-form label-placement="left" label-width="100" size="small">
           <n-form-item :label="t('v3.realModelLabel')">
-            <n-input v-model:value="editDraft.real_model" readonly />
-            <div style="font-size: 11px; color: var(--v3-ink-3); margin-top: 4px">
-              {{ groupNameById[editDraft.group_id] }}
+            <!-- P8.15: 双行预览 — 跟 alias chip 保持一致, 长 id 完整折行展示 -->
+            <div class="v3-alias-edit-preview">
+              <div class="v3-alias-edit-preview__head">
+                <ProviderLogo
+                  v-if="hasProviderLogo(aliasLogoHint(editDraft))"
+                  :hint="aliasLogoHint(editDraft)"
+                  :size="14"
+                  style="border-radius: 3px; flex-shrink: 0"
+                />
+                <span
+                  v-else
+                  :class="pavClass(inferProvider(editDraft))"
+                  style="width: 14px; height: 14px; border-radius: 3px; font-size: 7px; flex-shrink: 0"
+                >
+                  {{
+                    V3_PROVIDER_DIR[inferProvider(editDraft)]?.short ||
+                      inferProvider(editDraft).slice(0, 2).toUpperCase()
+                  }}
+                </span>
+                <span class="v3-alias-edit-preview__provider">{{ groupNameById[editDraft.group_id] || inferProvider(editDraft) }}</span>
+              </div>
+              <code class="v3-alias-edit-preview__name">{{ editDraft.real_model }}</code>
             </div>
           </n-form-item>
           <n-form-item :label="t('v3.weightLabel')">
@@ -1921,6 +1940,36 @@ function saveSettingsThrottled() {
   font: 500 11px/1.35 var(--v3-mono);
   color: var(--v3-ink-2);
   /* P8.13: 长 model id 完整展示, 允许任意位置换行 (含 / : -). */
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  white-space: normal;
+  user-select: text;
+}
+/* P8.15: alias 编辑 modal 内的预览块, 跟 chip 双行布局保持视觉一致 */
+.v3-alias-edit-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  border: 1px solid var(--v3-line);
+  border-radius: 6px;
+  background: var(--v3-surface-2);
+  width: 100%;
+}
+.v3-alias-edit-preview__head {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.v3-alias-edit-preview__provider {
+  font: 500 10px var(--v3-mono);
+  color: var(--v3-ink-4);
+  text-transform: lowercase;
+  letter-spacing: 0.02em;
+}
+.v3-alias-edit-preview__name {
+  font: 500 12px/1.4 var(--v3-mono);
+  color: var(--v3-ink);
   overflow-wrap: anywhere;
   word-break: break-word;
   white-space: normal;

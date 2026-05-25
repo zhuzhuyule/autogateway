@@ -1051,6 +1051,11 @@ export default {
     aliasNoMembers: "候補がまだありません — メンバーを追加してください。",
     aliasDeleteTitle: "別名マッピング削除",
     aliasDeleteConfirm: "別名プールから {alias} → {model} を削除しますか?",
+    aliasUnexposedFixTip: "対応するグループの鍵ページへジャンプし、該当モデルをハイライト（右上の +追加 ボタンで修復）",
+    aliasJumpToModel: "ここへジャンプ →",
+    aliasJumpToModelTip: "このモデルの鍵ページへジャンプしてハイライト",
+    modelClickToCopy: "クリックして model ID をコピー",
+    modelCopied: "コピー完了",
   },
   v5: {
     // Aliases ビュー — 未識別モデル提案バナー
@@ -1063,11 +1068,6 @@ export default {
     suggestFamilyQuickAdopt: "ワンタッチ採用（プレビュー不要、一括作成）",
     suggestFamilyReview: "候補をレビュー / 編集してから作成",
     suggestFamilyReviewBtn: "確認",
-    aliasUnexposedFixTip: "対応するグループの鍵ページへジャンプし、該当モデルをハイライト（右上の +追加 ボタンで修復）",
-    aliasJumpToModel: "ここへジャンプ →",
-    aliasJumpToModelTip: "このモデルの鍵ページへジャンプしてハイライト",
-    modelClickToCopy: "クリックして model ID をコピー",
-    modelCopied: "コピー完了",
     suggestionsExpand: "提案リストを展開",
     suggestionsCollapse: "提案リストを折りたたみ",
     suggestionsDismissOne: "この提案を隠す",

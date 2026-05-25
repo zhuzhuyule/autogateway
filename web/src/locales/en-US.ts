@@ -1094,6 +1094,11 @@ export default {
     weightLabel: "Weight",
     priorityLabel: "Priority",
     enabledLabel: "Enabled",
+    aliasUnexposedFixTip: "Jump to target group's keys page, highlight this model (use top-right '+ Add' to fix)",
+    aliasJumpToModel: "Jump to model →",
+    aliasJumpToModelTip: "Jump to this model's keys page with highlight",
+    modelClickToCopy: "Click to copy model ID",
+    modelCopied: "Copied",
   },
   v5: {
     // Aliases view — unrecognized-model suggestion banner
@@ -1106,11 +1111,6 @@ export default {
     suggestFamilyQuickAdopt: "Quick adopt (skip preview, batch create)",
     suggestFamilyReview: "Review & edit candidates before creating",
     suggestFamilyReviewBtn: "Review",
-    aliasUnexposedFixTip: "Jump to target group's keys page, highlight this model (use top-right '+ Add' to fix)",
-    aliasJumpToModel: "Jump to model →",
-    aliasJumpToModelTip: "Jump to this model's keys page with highlight",
-    modelClickToCopy: "Click to copy model ID",
-    modelCopied: "Copied",
     suggestionsExpand: "Expand suggestions",
     suggestionsCollapse: "Collapse suggestions",
     suggestionsDismissOne: "Hide this suggestion",
