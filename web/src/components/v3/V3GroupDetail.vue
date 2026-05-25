@@ -78,27 +78,34 @@ async function copyModelId(modelId: string) {
   }
 }
 
-// P8.6 修复跳转失效:
-// 之前 setTimeout(400) 单次找 DOM, Keys.vue 异步 loadGroups + 我们的 group
-// switch + groupModels computed + v-for 渲染整链路可能超 400ms, querySelector
-// 找不到就静默退出. 改为 retry 机制 (最多 10 次, 间隔 200ms = 2 秒上限) 直到
-// DOM 出现或超时.
-function highlightModelOnRoute(retriesLeft = 10) {
+// P8.6 修跳转失效 + P8.8 修 retry 重设 tab:
+// 之前 retry 每 200ms 都重新 set tab.value="keys", 用户手动切 tab 立刻
+// 被拉回, UI 看起来"切不动". 改为仅 isFirstAttempt 时设 tab/filter,
+// retry 只查 DOM 不动 UI 状态.
+let highlightRetryTimer: ReturnType<typeof setTimeout> | null = null;
+function highlightModelOnRoute(retriesLeft = 10, isFirstAttempt = true) {
   const target = route.query.highlight;
   if (!target || typeof target !== "string") return;
-  // 切到 keys tab + 清 search filter 避免 model 被过滤掉
-  tab.value = "keys";
-  modelSearch.value = "";
-  // 清掉 dismiss filter (若选了 trial/paid 也可能让 model 不显示)
-  if (availFilter.value !== "all") {
-    availFilter.value = "all";
+  // 只在 first attempt 时改 UI 状态. 否则 retry 会反复覆盖用户的 tab 切换.
+  if (isFirstAttempt) {
+    if (highlightRetryTimer) {
+      clearTimeout(highlightRetryTimer);
+      highlightRetryTimer = null;
+    }
+    tab.value = "keys";
+    modelSearch.value = "";
+    if (availFilter.value !== "all") {
+      availFilter.value = "all";
+    }
   }
   const el = document.querySelector(`[data-model-id="${CSS.escape(target)}"]`);
   if (!el) {
     if (retriesLeft > 0) {
-      setTimeout(() => highlightModelOnRoute(retriesLeft - 1), 200);
+      highlightRetryTimer = setTimeout(
+        () => highlightModelOnRoute(retriesLeft - 1, false),
+        200
+      );
     } else {
-      // 超时仍找不到, 可能 model 真的不在 group 里. message 提示用户.
       logrus_warn(`highlight model "${target}" not found in current group`);
     }
     return;
@@ -106,11 +113,10 @@ function highlightModelOnRoute(retriesLeft = 10) {
   el.scrollIntoView({ behavior: "smooth", block: "center" });
   el.classList.add("v5-modelcard--highlight");
   setTimeout(() => (el as HTMLElement).classList.remove("v5-modelcard--highlight"), 2400);
-  // 清 highlight query 避免下次切 tab 又 trigger, 保留 groupId + tab
-  // (P8.5: tab 要持久化让刷新页面能回到正确 tab)
+  // 清 highlight query 避免下次切 tab 又 trigger, 保留 groupId
   router.replace({
     name: "keys",
-    query: { groupId: props.group?.id || "", tab: tab.value },
+    query: { groupId: props.group?.id || "" },
   });
 }
 
