@@ -477,8 +477,48 @@ const suggestions = ref<AliasSuggestion[]>([]);
 const suggestionsDismissed = ref(false);
 async function loadSuggestions() {
   try {
-    const r = await aliasesApi.suggestions();
-    suggestions.value = (r as unknown as { data: AliasSuggestion[] | null }).data || [];
+    // 同时拉两个数据源: 现有 logs-driven (reactive) + P4.2 registry-driven
+    // (proactive 主动建议跨 sub-group family). 所有 aggregate group 都查一遍,
+    // 合并去重 (按 family 名).
+    const [logsRes, aggResp] = await Promise.all([
+      aliasesApi.suggestions().catch(() => ({ data: [] })),
+      // 拿所有 group, 过滤 aggregate, 并行问每个 P4.2 registry-driven 建议
+      (async () => {
+        try {
+          const http = (await import("@/utils/http")).default;
+          const resp = await http.get<Array<{ id: number; group_type?: string }>>("/groups");
+          const grps = (resp as unknown as { data: Array<{ id: number; group_type?: string }> | null }).data || [];
+          const aggregates = grps.filter(g => g.group_type === "aggregate");
+          const calls = aggregates.map(g =>
+            aliasesApi.suggestionsFromRegistry(g.id).catch(() => ({ data: [] }))
+          );
+          const results = await Promise.all(calls);
+          const merged: AliasSuggestion[] = [];
+          for (const r of results) {
+            const arr = (r as unknown as { data: AliasSuggestion[] | null }).data || [];
+            merged.push(...arr);
+          }
+          return { data: merged };
+        } catch {
+          return { data: [] };
+        }
+      })(),
+    ]);
+    const logsArr = (logsRes as unknown as { data: AliasSuggestion[] | null }).data || [];
+    const aggArr = (aggResp as unknown as { data: AliasSuggestion[] | null }).data || [];
+    // 按 family 名 dedupe (logs-driven 优先, 因为有 last_seen / count 信息更丰富)
+    const seenFamilies = new Set<string>();
+    for (const s of logsArr) {
+      if (s.kind === "family" && s.family) seenFamilies.add(s.family.toLowerCase());
+    }
+    const out = [...logsArr];
+    for (const s of aggArr) {
+      if (s.kind === "family" && s.family && !seenFamilies.has(s.family.toLowerCase())) {
+        out.push(s);
+        seenFamilies.add(s.family.toLowerCase());
+      }
+    }
+    suggestions.value = out;
   } catch {
     suggestions.value = [];
   }

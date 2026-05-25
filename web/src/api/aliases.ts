@@ -80,6 +80,10 @@ export const aliasesApi = {
     http.put<ModelAliasRow>(`/aliases/${id}`, payload),
   remove: (id: number) => http.delete(`/aliases/${id}`),
   suggestions: () => http.get<AliasSuggestion[]>("/aliases/suggestions"),
+  // P4.2 registry-driven 建议: 给定 aggregate group id, 返回该聚合下
+  // 跨 sub-group 共享同一 family 但还没建 alias 的候选清单.
+  suggestionsFromRegistry: (groupId: number) =>
+    http.get<AliasSuggestion[]>(`/aliases/suggestions/registry/${groupId}`),
 };
 
 export const routingSettingsApi = {
