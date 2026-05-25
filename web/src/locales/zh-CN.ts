@@ -1083,6 +1083,8 @@ export default {
     suggestFamilyReview: "审查 / 编辑候选后再创建",
     suggestFamilyReviewBtn: "审查",
     aliasUnexposedFixTip: "跳转到对应分组的密钥页, 高亮该模型 (右上角 +加入 立即生效)",
+    modelClickToCopy: "点击复制 model ID",
+    modelCopied: "已复制 model ID: {model}",
     suggestFamilyTooltipCreate: "一键创建别名 “{alias}” 并聚合下列模型",
     suggestFamilyTooltipAppend: "一键追加到现有别名 “{alias}”",
     suggestFamilyInGroups: "{n} 个分组",

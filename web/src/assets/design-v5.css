@@ -570,9 +570,17 @@
   color: var(--v3-ink);
   flex: 1;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  /* 长 model id 完整展示, 不允许省略号. 允许任意字符位置换行 (含 / : - 等),
+     用户能完整看到 id 全文便于复制 / 识别. */
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  /* 让 user 可以 double-click 选中 / 拖选复制 (V5 卡片整体 click 是 toggle 选中,
+     name 用 cursor: copy 暗示可单击复制) */
+  user-select: text;
+  cursor: copy;
+}
+.v5-modelcard__name:hover {
+  color: var(--v3-accent);
 }
 
 /* Aliases bar inside ModelCard */

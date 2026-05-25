@@ -1064,6 +1064,8 @@ export default {
     suggestFamilyReview: "候補をレビュー / 編集してから作成",
     suggestFamilyReviewBtn: "確認",
     aliasUnexposedFixTip: "対応するグループの鍵ページへジャンプし、該当モデルをハイライト（右上の +追加 ボタンで修復）",
+    modelClickToCopy: "クリックして model ID をコピー",
+    modelCopied: "コピー完了: {model}",
     suggestFamilyTooltipCreate: "エイリアス「{alias}」を作成し、以下のモデルを一括登録",
     suggestFamilyTooltipAppend: "既存エイリアス「{alias}」へ一括追加",
     suggestFamilyInGroups: "{n} グループ",

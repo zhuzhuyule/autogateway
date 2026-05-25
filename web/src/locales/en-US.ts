@@ -1107,6 +1107,8 @@ export default {
     suggestFamilyReview: "Review & edit candidates before creating",
     suggestFamilyReviewBtn: "Review",
     aliasUnexposedFixTip: "Jump to target group's keys page, highlight this model (use top-right '+ Add' to fix)",
+    modelClickToCopy: "Click to copy model ID",
+    modelCopied: "Copied: {model}",
     suggestFamilyTooltipCreate: "One-click: create alias \"{alias}\" with the models below",
     suggestFamilyTooltipAppend: "One-click: append to existing alias \"{alias}\"",
     suggestFamilyInGroups: "{n} group(s)",

@@ -68,6 +68,16 @@ const route = useRoute();
 // P8.2: alias 失效项跳来 (?highlight=MODEL) → scroll 到 model card + 高亮 1.5s.
 // 用 nextTick + setTimeout(0) 等 v-for 渲染 + filter 应用完, 才能 querySelector
 // 到. DOM selector 用 data-model-id 属性 (template 给所有 model card 加).
+// P8.3: 单击 model name 复制 ID 到剪贴板, 弹 toast 提示.
+async function copyModelId(modelId: string) {
+  try {
+    await copyToClipboard(modelId);
+    message.success(t("v3.modelCopied", { model: modelId }) || `已复制: ${modelId}`);
+  } catch {
+    message.error(t("common.copyFailed") || "复制失败");
+  }
+}
+
 function highlightModelOnRoute() {
   const target = route.query.highlight;
   if (!target || typeof target !== "string") return;
@@ -2055,8 +2065,16 @@ const filterCounts = computed(() => ({
               @dragover.prevent
               @drop="onExposedDrop(exposedModels.indexOf(modelId))"
             >
-              <div class="v5-modelcard__row" style="align-items: center; gap: 6px">
-                <code class="v5-modelcard__name" style="flex: 1; min-width: 0">{{ modelId }} <FreeBadge v-if="isFreeModel(modelId)" /></code>
+              <div class="v5-modelcard__row" style="align-items: flex-start; gap: 6px">
+                <code
+                  class="v5-modelcard__name"
+                  style="flex: 1; min-width: 0"
+                  :title="t('v3.modelClickToCopy') || '点击复制 model ID'"
+                  @click.stop="copyModelId(modelId)"
+                >{{ modelId }} <FreeBadge v-if="isFreeModel(modelId)" /></code>
+              </div>
+              <div class="v5-modelcard__row" style="margin-top: 6px; align-items: center; gap: 6px">
+                <!-- P8.3: 测试按钮挪到 row 2 第一位, 默认位置可见可点 -->
                 <n-tooltip trigger="hover" placement="top">
                   <template #trigger>
                     <button
@@ -2081,8 +2099,6 @@ const filterCounts = computed(() => ({
                   </template>
                   <template v-else>{{ t("v3.testModel") }}</template>
                 </n-tooltip>
-              </div>
-              <div class="v5-modelcard__row" style="margin-top: 6px; align-items: center; gap: 6px">
                 <n-tooltip trigger="hover" placement="top">
                   <template #trigger>
                     <SpeedBadge :speed="speedForModel(modelId)" :size="11" />
@@ -2134,8 +2150,16 @@ const filterCounts = computed(() => ({
               }"
               @click="toggleSelected(modelId)"
             >
-              <div class="v5-modelcard__row" style="align-items: center; gap: 6px">
-                <code class="v5-modelcard__name" style="flex: 1; min-width: 0">{{ modelId }} <FreeBadge v-if="isFreeModel(modelId)" /></code>
+              <div class="v5-modelcard__row" style="align-items: flex-start; gap: 6px">
+                <code
+                  class="v5-modelcard__name"
+                  style="flex: 1; min-width: 0"
+                  :title="t('v3.modelClickToCopy') || '点击复制 model ID'"
+                  @click.stop="copyModelId(modelId)"
+                >{{ modelId }} <FreeBadge v-if="isFreeModel(modelId)" /></code>
+              </div>
+              <div class="v5-modelcard__row" style="margin-top: 6px; align-items: center; gap: 6px">
+                <!-- P8.3: 测试按钮挪到 row 2 第一位, 默认位置可见可点 -->
                 <n-tooltip trigger="hover" placement="top">
                   <template #trigger>
                     <button
@@ -2160,8 +2184,6 @@ const filterCounts = computed(() => ({
                   </template>
                   <template v-else>{{ t("v3.testModel") }}</template>
                 </n-tooltip>
-              </div>
-              <div class="v5-modelcard__row" style="margin-top: 6px; align-items: center; gap: 6px">
                 <n-tooltip trigger="hover" placement="top">
                   <template #trigger>
                     <SpeedBadge :speed="speedForModel(modelId)" :size="11" />
@@ -2203,8 +2225,16 @@ const filterCounts = computed(() => ({
               }"
               @click="toggleSelected(modelId)"
             >
-              <div class="v5-modelcard__row" style="align-items: center; gap: 6px">
-                <code class="v5-modelcard__name" style="flex: 1; min-width: 0">{{ modelId }} <FreeBadge v-if="isFreeModel(modelId)" /></code>
+              <div class="v5-modelcard__row" style="align-items: flex-start; gap: 6px">
+                <code
+                  class="v5-modelcard__name"
+                  style="flex: 1; min-width: 0"
+                  :title="t('v3.modelClickToCopy') || '点击复制 model ID'"
+                  @click.stop="copyModelId(modelId)"
+                >{{ modelId }} <FreeBadge v-if="isFreeModel(modelId)" /></code>
+              </div>
+              <div class="v5-modelcard__row" style="margin-top: 6px; align-items: center; gap: 6px">
+                <!-- P8.3: 测试按钮挪到 row 2 第一位, 默认位置可见可点 -->
                 <n-tooltip trigger="hover" placement="top">
                   <template #trigger>
                     <button
@@ -2229,8 +2259,6 @@ const filterCounts = computed(() => ({
                   </template>
                   <template v-else>{{ t("v3.testModel") }}</template>
                 </n-tooltip>
-              </div>
-              <div class="v5-modelcard__row" style="margin-top: 6px; align-items: center; gap: 6px">
                 <n-tooltip trigger="hover" placement="top">
                   <template #trigger>
                     <SpeedBadge :speed="speedForModel(modelId)" :size="11" />
