@@ -24,7 +24,7 @@ class VersionService {
   private currentVersion: string;
 
   constructor() {
-    this.currentVersion = import.meta.env.VITE_VERSION || "1.0.0";
+    this.currentVersion = import.meta.env.VITE_VERSION || "v2.4.8";
   }
 
   /**
@@ -98,7 +98,7 @@ class VersionService {
   private async fetchLatestVersion(): Promise<GitHubRelease | null> {
     try {
       const response = await axios.get(
-        "https://api.github.com/repos/tbphp/gpt-load/releases/latest",
+        "https://api.github.com/repos/zhuzhuyule/autogateway/releases/latest",
         {
           timeout: 10000,
           headers: {

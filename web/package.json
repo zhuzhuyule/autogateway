@@ -1,7 +1,7 @@
 {
   "name": "autogateway-frontend",
   "private": true,
-  "version": "0.1.0",
+  "version": "2.4.8",
   "description": "AutoGateway frontend — Smart AI API gateway with auto routing, free provider aggregation and unified entry. Built on Vue 3 + Naive UI.",
   "type": "module",
   "keywords": [
@@ -18,13 +18,13 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/tbphp/gpt-load.git",
+    "url": "https://github.com/zhuzhuyule/autogateway.git",
     "directory": "web"
   },
   "bugs": {
-    "url": "https://github.com/tbphp/gpt-load/issues"
+    "url": "https://github.com/zhuzhuyule/autogateway/issues"
   },
-  "homepage": "https://github.com/tbphp/gpt-load#readme",
+  "homepage": "https://github.com/zhuzhuyule/autogateway#readme",
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc -b && vite build",
