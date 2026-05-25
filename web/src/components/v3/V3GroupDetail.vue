@@ -151,10 +151,12 @@ const TAB_STORAGE_KEY = "v3-group-detail-tab";
 function isValidTab(v: unknown): v is GroupDetailTab {
   return v === "keys" || v === "models" || v === "settings";
 }
-// P8.5: tab 优先级 URL query.tab > localStorage > "keys".
-// URL query 优先让 alias 失效跳转 (?tab=keys&highlight=MODEL) 强制激活,
-// 不受用户之前 localStorage 上次切到 settings 的影响.
-function readInitialTab(): GroupDetailTab {
+// P8.10: tab 改为 URL-driven computed. URL.query.tab 是 single source of truth,
+// 切 tab → setter 写 router.replace + localStorage, URL 改变自动反向更新 tab.value
+// (computed get reactive 依赖 route.query.tab). 切 provider (sidebar) 只改 groupId,
+// tab 保留. alias 跳转 ?tab=keys&highlight=MODEL 强制激活 keys.
+// 优先级: URL.query.tab > localStorage > 'keys'.
+function resolveTabFromRoute(): GroupDetailTab {
   const q = (route.query.tab as string | undefined) || "";
   if (isValidTab(q)) return q;
   try {
@@ -165,16 +167,25 @@ function readInitialTab(): GroupDetailTab {
   }
   return "keys";
 }
-const tab = ref<GroupDetailTab>(readInitialTab());
-watch(tab, v => {
-  try {
-    localStorage.setItem(TAB_STORAGE_KEY, v);
-  } catch {
-    /* ignore */
-  }
-  // P8.6 紧急回滚: tab → router.replace 同步段疑似让 click 卡死, 暂时移除.
-  // tab URL 激活功能 (alias 跳转 ?tab=keys 强制激活) 通过 readInitialTab 仍生效.
-  // 刷新页恢复 tab 用 localStorage 兜底 (跳转场景的 ?tab= 走 readInitialTab 优先级).
+const tab = computed<GroupDetailTab>({
+  get() {
+    return resolveTabFromRoute();
+  },
+  set(v: GroupDetailTab) {
+    if (!isValidTab(v)) return;
+    try {
+      localStorage.setItem(TAB_STORAGE_KEY, v);
+    } catch {
+      /* ignore */
+    }
+    // 保留其他 query (groupId / highlight / ...), 只覆盖 tab.
+    // 当前已经是 v 就不 replace, 避免 router 重复 navigation 报警告.
+    if (route.query.tab === v) return;
+    router.replace({
+      name: "keys",
+      query: { ...route.query, tab: v },
+    });
+  },
 });
 const faviconFailed = ref(false);
 
