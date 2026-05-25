@@ -140,6 +140,8 @@ func registerProtectedAPIRoutes(
 	{
 		aliases.GET("", aliasHandler.List)
 		aliases.GET("/suggestions", aliasSuggestionHandler.Suggest)
+		// P4.2: registry-driven 建议, 给定 aggregate group id 返回 family 候选
+		aliases.GET("/suggestions/registry/:id", aliasSuggestionHandler.SuggestFromRegistry)
 		aliases.GET("/:alias", aliasHandler.GetByAlias)
 		aliases.POST("", aliasHandler.Create)
 		aliases.PUT("/:id", aliasHandler.Update)

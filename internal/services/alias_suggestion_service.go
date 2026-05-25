@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"encoding/json"
+	"net/url"
 	"regexp"
 	"sort"
 	"strings"
@@ -50,11 +51,139 @@ type FamilyModel struct {
 // `model_family` field is too granular — `gemini-2.5-flash-lite` and
 // `gemini-2.5-pro` get distinct families upstream, defeating aggregation).
 type AliasSuggestionService struct {
-	db *gorm.DB
+	db       *gorm.DB
+	freeReg  *FreeModelsRegistry
+	groupMgr *GroupManager
 }
 
-func NewAliasSuggestionService(db *gorm.DB) *AliasSuggestionService {
-	return &AliasSuggestionService{db: db}
+func NewAliasSuggestionService(db *gorm.DB, freeReg *FreeModelsRegistry, groupMgr *GroupManager) *AliasSuggestionService {
+	return &AliasSuggestionService{db: db, freeReg: freeReg, groupMgr: groupMgr}
+}
+
+// SuggestFromRegistry 是 P4.2 registry-driven 建议 -- 不依赖 request_logs.
+// 遍历 aggregate 下 sub-group 的 available_models, 用 FreeModels family 字段
+// 聚合出"跨 provider 等价类", 让 admin 一键采纳为 alias.
+//
+// 输出 shape 跟 Suggest 一致 (kind="family"), 前端复用. ExistingAlias 字段
+// 标记已有同名 alias 的 family (供 UI 灰显).
+func (s *AliasSuggestionService) SuggestFromRegistry(ctx context.Context, aggregateGroupID uint) ([]AliasSuggestion, error) {
+	if s.freeReg == nil || s.groupMgr == nil {
+		return nil, nil
+	}
+	name, ok := s.groupMgr.GetGroupNameByID(aggregateGroupID)
+	if !ok || name == "" {
+		return nil, nil
+	}
+	aggregate, err := s.groupMgr.GetGroupByName(name)
+	if err != nil || aggregate == nil || aggregate.GroupType != "aggregate" {
+		return nil, nil
+	}
+
+	// 收集 aggregate 下所有 sub-group 的 available_models, 按 family 聚合
+	type famEntry struct {
+		modelID   string
+		subGroup  string
+		groupID   uint
+	}
+	byFamily := map[string][]famEntry{}
+	for _, sg := range aggregate.SubGroups {
+		sub, gerr := s.groupMgr.GetGroupByName(sg.SubGroupName)
+		if gerr != nil || sub == nil {
+			continue
+		}
+		// resolveProviderID 逻辑跟 model_resolver 一致 (host 反查 fallback name)
+		providerID := s.resolveProviderID(sub)
+		if providerID == "" {
+			continue
+		}
+		// available_models JSON unmarshal
+		var availIDs []string
+		if len(sub.AvailableModels) > 0 {
+			_ = json.Unmarshal(sub.AvailableModels, &availIDs)
+		}
+		for _, mid := range availIDs {
+			meta := s.freeReg.Lookup(providerID, mid)
+			if meta == nil || meta.ModelFamily == "" {
+				continue
+			}
+			byFamily[meta.ModelFamily] = append(byFamily[meta.ModelFamily], famEntry{
+				modelID:  mid,
+				subGroup: sub.Name,
+				groupID:  sub.ID,
+			})
+		}
+	}
+
+	// 过滤: 候选 < 2 不报 (单候选无聚合价值)
+	candidateFamilies := make([]string, 0, len(byFamily))
+	for fam, entries := range byFamily {
+		if len(entries) >= minFamilyMembers {
+			candidateFamilies = append(candidateFamilies, fam)
+		}
+	}
+	if len(candidateFamilies) == 0 {
+		return nil, nil
+	}
+
+	// 查现有 alias 标记 ExistingAlias
+	var existing []models.ModelAlias
+	if err := s.db.WithContext(ctx).
+		Where("alias IN ? AND enabled = ?", candidateFamilies, true).
+		Find(&existing).Error; err != nil {
+		return nil, err
+	}
+	existingByName := map[string]bool{}
+	for _, e := range existing {
+		existingByName[e.Alias] = true
+	}
+
+	out := make([]AliasSuggestion, 0, len(candidateFamilies))
+	for _, fam := range candidateFamilies {
+		entries := byFamily[fam]
+		fms := make([]FamilyModel, 0, len(entries))
+		groupIDs := map[uint]struct{}{}
+		for _, e := range entries {
+			groupIDs[e.groupID] = struct{}{}
+		}
+		// 同一个 family 下每个 sub-group 出 (real_model) 一行 FamilyModel
+		for _, e := range entries {
+			fms = append(fms, FamilyModel{
+				Name:       e.modelID,
+				FromLogs:   false,
+				InGroupIDs: []uint{e.groupID},
+			})
+		}
+		sug := AliasSuggestion{
+			Kind:   "family",
+			Family: fam,
+			Models: fms,
+		}
+		if existingByName[fam] {
+			sug.ExistingAlias = fam
+		}
+		out = append(out, sug)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return len(out[i].Models) > len(out[j].Models)
+	})
+	return out, nil
+}
+
+// resolveProviderID 跟 model_resolver 一致 (避免循环依赖, 复制一份)
+func (s *AliasSuggestionService) resolveProviderID(g *models.Group) string {
+	if s.freeReg != nil && len(g.Upstreams) > 0 {
+		var defs []struct {
+			URL string `json:"url"`
+		}
+		if err := json.Unmarshal(g.Upstreams, &defs); err == nil && len(defs) > 0 {
+			if u, perr := url.Parse(defs[0].URL); perr == nil && u.Hostname() != "" {
+				if id, _, ok := s.freeReg.LookupProviderByHost(u.Hostname()); ok {
+					return id
+				}
+			}
+		}
+	}
+	return g.Name
 }
 
 // minFamilyMembers — the family must hold at least this many distinct model
