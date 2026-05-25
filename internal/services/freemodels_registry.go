@@ -521,10 +521,16 @@ func (r *FreeModelsRegistry) Lookup(provider, modelID string) *FreeModelMeta {
 	return nil
 }
 
-// ListModelIDsByProvider 返回该 provider 在 registry 中的所有 bare modelId
-// (剥掉 "<provider>/" 前缀). 用于上游无 /v1/models 端点的 provider
-// (e.g. iFlytek Spark) 的回退兜底. providerId 大小写不敏感.
-func (r *FreeModelsRegistry) ListModelIDsByProvider(providerID string) []string {
+// ListModelIDsByProvider 返回该 provider 在 registry 中的 bare modelId 列表
+// (剥掉 "<provider>/" 前缀). providerId 大小写不敏感.
+//
+// freeOnly=true: 只返回 is_free=true 的子集. 用于 group.free_models 计算 —
+// 当前 ofind/FreeModels CDN 同时收录 free 和 paid model (673 条里 310 free,
+// 363 paid), 不过滤会把付费 model 污染进 free_models.
+//
+// freeOnly=false: 返回该 provider 全部. 用于上游无 /v1/models 端点的 provider
+// (e.g. iFlytek Spark) 的回退兜底, 要 best-effort 拿全清单, 不只 free.
+func (r *FreeModelsRegistry) ListModelIDsByProvider(providerID string, freeOnly bool) []string {
 	if providerID == "" {
 		return nil
 	}
@@ -535,6 +541,9 @@ func (r *FreeModelsRegistry) ListModelIDsByProvider(providerID string) []string 
 	prefix := target + "/"
 	for _, m := range r.envelope.Models {
 		if strings.ToLower(m.Provider) != target {
+			continue
+		}
+		if freeOnly && !m.IsFree {
 			continue
 		}
 		id := m.ModelID

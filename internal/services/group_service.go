@@ -497,9 +497,11 @@ func computeFreeModelIDs(group *models.Group, upstreamIDs []string, registry *Fr
 		providerID = group.Name
 	}
 
-	// Registry 下该 provider 的 free bare ID 集合 (entry.id 已剥 provider 前缀)
+	// Registry 下该 provider 的 free bare ID 集合 (entry.id 已剥 provider 前缀).
+	// freeOnly=true: CDN 同时收录 free 和 paid, 不过滤会让 free_models 被
+	// paid 污染.
 	bareSet := make(map[string]struct{}, 32)
-	regList := registry.ListModelIDsByProvider(providerID)
+	regList := registry.ListModelIDsByProvider(providerID, true)
 	for _, bareID := range regList {
 		bareSet[strings.ToLower(bareID)] = struct{}{}
 	}
@@ -561,7 +563,9 @@ func (s *GroupService) fallbackModelsFromRegistry(group *models.Group, fetchErr 
 	if !ok {
 		return nil
 	}
-	ids := s.freeModelsRegistry.ListModelIDsByProvider(providerID)
+	// freeOnly=false: 上游 /v1/models 404 fallback 要拿全清单,
+	// 不只 free (否则 group.AvailableModels 不完整).
+	ids := s.freeModelsRegistry.ListModelIDsByProvider(providerID, false)
 	if len(ids) == 0 {
 		return nil
 	}
