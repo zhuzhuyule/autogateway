@@ -218,85 +218,132 @@ func (s *SyncService) ProcessPayload(ctx context.Context, payload *SyncPayload) 
 			}
 		}
 
-		// 2. 合并分组 (Groups)
+		// 2. 合并分组 (Groups) — 按 name 匹配, 不按 autoincrement id.
+		//
+		// 根本原因: id 是各端独立 autoincrement, 跨端没有意义. 本机 id=1 可能是
+		// "openai", 对端 id=1 可能是 "anthropic". 按 id 匹配 LWW 会把对端的
+		// "anthropic" 整行字段覆盖成 "openai", 或撞 name UNIQUE 冲突.
+		// 修复: 按 name (UNIQUE) 匹配, 同时建立 incoming.ID -> existing.ID 映射,
+		// 后续 SubGroup/Alias/APIKey 引用 group_id 时需要重写.
+		groupIDMap := make(map[uint]uint)
 		for _, incoming := range payload.Groups {
 			var existing models.Group
-			err := tx.Unscoped().Where("id = ?", incoming.ID).First(&existing).Error
+			err := tx.Unscoped().Where("name = ?", incoming.Name).First(&existing).Error
 			if err != nil {
 				if errors.Is(err, gorm.ErrRecordNotFound) {
+					oldID := incoming.ID
+					incoming.ID = 0 // 让本端自增分配新 id
 					if err := tx.Create(&incoming).Error; err != nil {
-						return fmt.Errorf("failed to create group %d: %w", incoming.ID, err)
+						return fmt.Errorf("failed to create group %s: %w", incoming.Name, err)
 					}
+					groupIDMap[oldID] = incoming.ID
 				} else {
 					return err
 				}
 			} else {
+				groupIDMap[incoming.ID] = existing.ID
 				if incoming.UpdatedAt.After(existing.UpdatedAt) {
-					if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Save(&incoming).Error; err != nil {
-						return fmt.Errorf("failed to update group %d: %w", incoming.ID, err)
+					incoming.ID = existing.ID // 保留本端 id, 不要让 Save 改主键
+					if err := tx.Save(&incoming).Error; err != nil {
+						return fmt.Errorf("failed to update group %s: %w", incoming.Name, err)
 					}
 				}
 			}
 		}
 
-		// 3. 合并子分组关联 (GroupSubGroups)
+		// remapGroupID 把对端的 group_id 换成本端的对应 id (没映射就保留原值,
+		// 假定两端 id 凑巧一致, 这是 fallback).
+		remapGroupID := func(id uint) uint {
+			if v, ok := groupIDMap[id]; ok {
+				return v
+			}
+			return id
+		}
+
+		// 3. 合并子分组关联 (GroupSubGroups) — 按 (group_id, sub_group_id) 匹配
 		for _, incoming := range payload.SubGroups {
+			incoming.GroupID = remapGroupID(incoming.GroupID)
+			incoming.SubGroupID = remapGroupID(incoming.SubGroupID)
 			var existing models.GroupSubGroup
-			err := tx.Unscoped().Where("id = ?", incoming.ID).First(&existing).Error
+			err := tx.Unscoped().
+				Where("group_id = ? AND sub_group_id = ?", incoming.GroupID, incoming.SubGroupID).
+				First(&existing).Error
 			if err != nil {
 				if errors.Is(err, gorm.ErrRecordNotFound) {
+					incoming.ID = 0
 					if err := tx.Create(&incoming).Error; err != nil {
-						return fmt.Errorf("failed to create subgroup association %d: %w", incoming.ID, err)
+						return fmt.Errorf("failed to create subgroup assoc (g=%d sub=%d): %w",
+							incoming.GroupID, incoming.SubGroupID, err)
 					}
 				} else {
 					return err
 				}
 			} else {
 				if incoming.UpdatedAt.After(existing.UpdatedAt) {
-					if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Save(&incoming).Error; err != nil {
-						return fmt.Errorf("failed to update subgroup association %d: %w", incoming.ID, err)
+					incoming.ID = existing.ID
+					if err := tx.Save(&incoming).Error; err != nil {
+						return fmt.Errorf("failed to update subgroup assoc (g=%d sub=%d): %w",
+							incoming.GroupID, incoming.SubGroupID, err)
 					}
 				}
 			}
 		}
 
-		// 4. 合并路由别名 (ModelAliases)
+		// 4. 合并路由别名 (ModelAliases) — 按 (alias, group_id, real_model) 匹配
 		for _, incoming := range payload.ModelAliases {
+			incoming.GroupID = remapGroupID(incoming.GroupID)
 			var existing models.ModelAlias
-			err := tx.Unscoped().Where("id = ?", incoming.ID).First(&existing).Error
+			err := tx.Unscoped().
+				Where("alias = ? AND group_id = ? AND real_model = ?",
+					incoming.Alias, incoming.GroupID, incoming.RealModel).
+				First(&existing).Error
 			if err != nil {
 				if errors.Is(err, gorm.ErrRecordNotFound) {
+					incoming.ID = 0
 					if err := tx.Create(&incoming).Error; err != nil {
-						return fmt.Errorf("failed to create model alias %d: %w", incoming.ID, err)
+						return fmt.Errorf("failed to create alias %s/%d/%s: %w",
+							incoming.Alias, incoming.GroupID, incoming.RealModel, err)
 					}
 				} else {
 					return err
 				}
 			} else {
 				if incoming.UpdatedAt.After(existing.UpdatedAt) {
-					if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Save(&incoming).Error; err != nil {
-						return fmt.Errorf("failed to update model alias %d: %w", incoming.ID, err)
+					incoming.ID = existing.ID
+					if err := tx.Save(&incoming).Error; err != nil {
+						return fmt.Errorf("failed to update alias %s/%d/%s: %w",
+							incoming.Alias, incoming.GroupID, incoming.RealModel, err)
 					}
 				}
 			}
 		}
 
-		// 5. 合并 API 密钥 (APIKeys)
+		// 5. 合并 API 密钥 (APIKeys) — 按 (group_id, key_hash) 或 (group_id, key_value) 匹配.
+		// key_hash 一致时优先用 (索引更高效), 否则 fallback 到 key_value 全文比对.
 		for _, incoming := range payload.APIKeys {
+			incoming.GroupID = remapGroupID(incoming.GroupID)
 			var existing models.APIKey
-			err := tx.Unscoped().Where("id = ?", incoming.ID).First(&existing).Error
+			q := tx.Unscoped().Where("group_id = ?", incoming.GroupID)
+			if incoming.KeyHash != "" {
+				q = q.Where("key_hash = ?", incoming.KeyHash)
+			} else {
+				q = q.Where("key_value = ?", incoming.KeyValue)
+			}
+			err := q.First(&existing).Error
 			if err != nil {
 				if errors.Is(err, gorm.ErrRecordNotFound) {
+					incoming.ID = 0
 					if err := tx.Create(&incoming).Error; err != nil {
-						return fmt.Errorf("failed to create api key %d: %w", incoming.ID, err)
+						return fmt.Errorf("failed to create api key (group=%d): %w", incoming.GroupID, err)
 					}
 				} else {
 					return err
 				}
 			} else {
 				if incoming.UpdatedAt.After(existing.UpdatedAt) {
-					if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Save(&incoming).Error; err != nil {
-						return fmt.Errorf("failed to update api key %d: %w", incoming.ID, err)
+					incoming.ID = existing.ID
+					if err := tx.Save(&incoming).Error; err != nil {
+						return fmt.Errorf("failed to update api key %d: %w", existing.ID, err)
 					}
 				}
 			}

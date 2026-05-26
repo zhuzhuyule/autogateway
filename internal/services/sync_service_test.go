@@ -173,22 +173,22 @@ func TestSyncService_ProcessPayload_LWW_And_Tombstone(t *testing.T) {
 		t.Fatalf("ProcessPayload failed: %v", err)
 	}
 
-	// 验证已存在的 ID=10 记录是否被成功更新
-	var g10 models.Group
-	if err := db.First(&g10, 10).Error; err != nil {
-		t.Fatalf("failed to find group 10: %v", err)
+	// 验证已存在的 group-a 记录是否被成功更新 (LWW per name, 不按 id)
+	var gA models.Group
+	if err := db.Where("name = ?", "group-a").First(&gA).Error; err != nil {
+		t.Fatalf("failed to find group-a: %v", err)
 	}
-	if g10.DisplayName != "对端新名称" {
-		t.Errorf("expected LWW update, got DisplayName = %s", g10.DisplayName)
+	if gA.DisplayName != "对端新名称" {
+		t.Errorf("expected LWW update, got DisplayName = %s", gA.DisplayName)
 	}
 
-	// 验证新增的 ID=20 记录是否已保存
-	var g20 models.Group
-	if err := db.First(&g20, 20).Error; err != nil {
-		t.Fatalf("failed to find group 20: %v", err)
+	// 验证新增的 group-b 记录是否已保存 (本端自增分配 id, 不沿用对端 id)
+	var gB models.Group
+	if err := db.Where("name = ?", "group-b").First(&gB).Error; err != nil {
+		t.Fatalf("failed to find group-b: %v", err)
 	}
-	if g20.Name != "group-b" {
-		t.Errorf("expected newly created group, got Name = %s", g20.Name)
+	if gB.Name != "group-b" {
+		t.Errorf("expected newly created group, got Name = %s", gB.Name)
 	}
 
 	// 场景 B：传入一条较旧的记录，应该被忽略（LWW）
@@ -214,11 +214,11 @@ func TestSyncService_ProcessPayload_LWW_And_Tombstone(t *testing.T) {
 		t.Fatalf("ProcessPayload failed: %v", err)
 	}
 
-	if err := db.First(&g10, 10).Error; err != nil {
-		t.Fatalf("failed to find group 10: %v", err)
+	if err := db.Where("name = ?", "group-a").First(&gA).Error; err != nil {
+		t.Fatalf("failed to find group-a: %v", err)
 	}
-	if g10.DisplayName != "对端新名称" {
-		t.Errorf("older payload should have been ignored, got DisplayName = %s", g10.DisplayName)
+	if gA.DisplayName != "对端新名称" {
+		t.Errorf("older payload should have been ignored, got DisplayName = %s", gA.DisplayName)
 	}
 
 	// 场景 C：软删除墓碑同步 (Tombstones)
