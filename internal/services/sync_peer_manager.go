@@ -118,11 +118,13 @@ func (m *SyncPeerManager) ensureConnection(peer models.SyncPeer) {
 		return
 	}
 
-	// Try to connect
+	// Try to connect with per-peer X-Sync-Key header for WS handshake auth (Gap 2/6).
 	wsURL := convertToWSUrl(peer.URL) + "/api/sync/ws"
-	
+
 	dialer := websocket.Dialer{HandshakeTimeout: 5 * time.Second}
-	conn, _, err := dialer.Dial(wsURL, nil)
+	headers := http.Header{}
+	headers.Set("X-Sync-Key", peer.SyncKey)
+	conn, _, err := dialer.Dial(wsURL, headers)
 	if err != nil {
 		logrus.Debugf("failed to connect to peer %s at %s: %v", peer.Name, wsURL, err)
 		return

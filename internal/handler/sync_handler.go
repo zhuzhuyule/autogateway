@@ -19,8 +19,9 @@ import (
 )
 
 var upgrader = websocket.Upgrader{
+	// Origin 校验交给业务层 (peer.SyncKey + settings.SyncKey 二段校验), WS 协议层放行.
 	CheckOrigin: func(r *http.Request) bool {
-		return true // Allow all origins for the sync mesh
+		return true
 	},
 }
 
@@ -60,7 +61,12 @@ func (h *SyncHandler) writeLog(peerID, action, status, errMsg, details string) {
 	}
 }
 
-// WsEndpoint is the WebSocket server endpoint for incoming peer connections
+// WsEndpoint is the WebSocket server endpoint for incoming peer connections.
+//
+// 鉴权策略 (P9.0 Gap 2/6):
+//   - X-Sync-Key header 必须匹配某个 SyncPeer.SyncKey (per-peer 入门 token)
+//   - settings.SyncKey 是全局对称加密密钥 (AES-GCM payload), 不参与握手鉴权
+//   - 没配置任何 peer 时拒绝任何 WS 连接, 防"开启 sync 但忘配 peer"敞口
 func (h *SyncHandler) WsEndpoint(c *gin.Context) {
 	settings := h.settingsManager.GetSettings()
 	if !settings.SyncEnabled {
@@ -68,7 +74,24 @@ func (h *SyncHandler) WsEndpoint(c *gin.Context) {
 		return
 	}
 	if settings.SyncKey == "" {
-		c.JSON(http.StatusForbidden, gin.H{"error": "SyncKey is not configured"})
+		c.JSON(http.StatusForbidden, gin.H{"error": "SyncKey (global encryption key) is not configured"})
+		return
+	}
+
+	// Per-peer 鉴权: 找一个 SyncKey 匹配的 peer
+	reqKey := c.GetHeader("X-Sync-Key")
+	if reqKey == "" {
+		// 兼容某些 WS 客户端不发 header 的情况, 也接受 query 参数
+		reqKey = c.Query("sync_key")
+	}
+	if reqKey == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Missing X-Sync-Key"})
+		return
+	}
+	var peer models.SyncPeer
+	if err := h.db.Where("sync_key = ?", reqKey).First(&peer).Error; err != nil {
+		h.writeLog("", "push", "error", "ws auth failed: unknown sync_key", "ws")
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid X-Sync-Key"})
 		return
 	}
 
@@ -89,7 +112,7 @@ func (h *SyncHandler) WsEndpoint(c *gin.Context) {
 		h.clientsMu.Unlock()
 	}()
 
-	logrus.Infof("peer connected to WS sync endpoint: %s", ws.RemoteAddr())
+	logrus.Infof("peer %s connected to WS sync endpoint: %s", peer.Name, ws.RemoteAddr())
 
 	for {
 		messageType, msg, err := ws.ReadMessage()
