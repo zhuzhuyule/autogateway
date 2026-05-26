@@ -79,6 +79,7 @@ export default {
     autoRouting: "スマートルート",
     aliases: "モデル別名",
     modelCatalog: "モデルカタログ",
+    sync: "マルチノード同期",
     settings: "システム設定",
     logout: "ログアウト",
   },

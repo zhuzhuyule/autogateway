@@ -28,6 +28,11 @@ const routes: Array<RouteRecordRaw> = [
         component: () => import("@/views/Settings.vue"),
       },
       {
+        path: "sync",
+        name: "sync",
+        component: () => import("@/views/Sync.vue"),
+      },
+      {
         path: "aliases",
         name: "aliases",
         component: () => import("@/views/Aliases.vue"),

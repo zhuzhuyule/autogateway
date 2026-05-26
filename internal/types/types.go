@@ -30,7 +30,7 @@ type SystemSettings struct {
 	// 请求设置
 	RequestTimeout        int    `json:"request_timeout" default:"600" name:"config.request_timeout" category:"config.category.request" desc:"config.request_timeout_desc" validate:"required,min=1"`
 	ConnectTimeout        int    `json:"connect_timeout" default:"15" name:"config.connect_timeout" category:"config.category.request" desc:"config.connect_timeout_desc" validate:"required,min=1"`
-	IdleConnTimeout       int    `json:"idle_conn_timeout" default:"120" name:"config.idle_conn_timeout" category:"config.category.idle_conn_timeout" desc:"config.idle_conn_timeout_desc" validate:"required,min=1"`
+	IdleConnTimeout       int    `json:"idle_conn_timeout" default:"120" name:"config.idle_conn_timeout" category:"config.category.request" desc:"config.idle_conn_timeout_desc" validate:"required,min=1"`
 	ResponseHeaderTimeout int    `json:"response_header_timeout" default:"600" name:"config.response_header_timeout" category:"config.category.request" desc:"config.response_header_timeout_desc" validate:"required,min=1"`
 	MaxIdleConns          int    `json:"max_idle_conns" default:"100" name:"config.max_idle_conns" category:"config.category.request" desc:"config.max_idle_conns_desc" validate:"required,min=1"`
 	MaxIdleConnsPerHost   int    `json:"max_idle_conns_per_host" default:"50" name:"config.max_idle_conns_per_host" category:"config.category.request" desc:"config.max_idle_conns_per_host_desc" validate:"required,min=1"`

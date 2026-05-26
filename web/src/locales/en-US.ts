@@ -79,6 +79,7 @@ export default {
     autoRouting: "Auto Routing",
     aliases: "Model Aliases",
     modelCatalog: "Model Catalog",
+    sync: "Peer Sync",
     settings: "Settings",
     logout: "Logout",
   },

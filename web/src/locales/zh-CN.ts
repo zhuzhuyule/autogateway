@@ -79,6 +79,7 @@ export default {
     autoRouting: "智能路由",
     aliases: "模型别名",
     modelCatalog: "模型目录",
+    sync: "多端同步",
     settings: "系统设置",
     logout: "退出登录",
   },
