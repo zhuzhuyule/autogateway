@@ -392,6 +392,7 @@ type syncConfigBody struct {
 // GetConfig 返回当前节点的同步开关 + Sync Secret.
 func (h *SyncHandler) GetConfig(c *gin.Context) {
 	s := h.settingsManager.GetSettings()
+	logrus.Debugf("GetConfig: sync_enabled=%v sync_key_set=%v", s.SyncEnabled, s.SyncKey != "")
 	c.JSON(http.StatusOK, syncConfigBody{
 		SyncEnabled: s.SyncEnabled,
 		SyncKey:     s.SyncKey,
@@ -405,14 +406,19 @@ func (h *SyncHandler) UpdateConfig(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body: " + err.Error()})
 		return
 	}
+	logrus.Infof("UpdateConfig: sync_enabled=%v sync_key_len=%d", body.SyncEnabled, len(body.SyncKey))
 	if err := h.settingsManager.UpdateSettings(map[string]any{
 		"sync_enabled": body.SyncEnabled,
 		"sync_key":     body.SyncKey,
 	}); err != nil {
+		logrus.Errorf("UpdateConfig failed: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update: " + err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"message": "ok"})
+	// 立即验证读回, 防 syncer 异步 reload 没追上
+	post := h.settingsManager.GetSettings()
+	logrus.Infof("UpdateConfig OK, readback: sync_enabled=%v sync_key_len=%d", post.SyncEnabled, len(post.SyncKey))
+	c.JSON(http.StatusOK, gin.H{"message": "ok", "sync_enabled": post.SyncEnabled})
 }
 
 // ListPeers returns all configured sync peers
@@ -429,11 +435,16 @@ func (h *SyncHandler) ListPeers(c *gin.Context) {
 func (h *SyncHandler) CreatePeer(c *gin.Context) {
 	var peer models.SyncPeer
 	if err := c.ShouldBindJSON(&peer); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid payload"})
+		logrus.Warnf("CreatePeer bind failed: %v", err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid payload: " + err.Error()})
 		return
 	}
+	logrus.Infof("CreatePeer: id=%s name=%s url=%s key_set=%v pinned_fp=%s",
+		peer.ID, peer.Name, peer.URL, peer.SyncKey != "", peer.PinnedFingerprint)
 	if err := h.db.Create(&peer).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create peer"})
+		// 把实际 DB 错误返给前端 — 之前都吞掉了
+		logrus.Errorf("CreatePeer DB error: %v (peer=%+v)", err, peer)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "DB create failed: " + err.Error()})
 		return
 	}
 	c.JSON(http.StatusOK, peer)

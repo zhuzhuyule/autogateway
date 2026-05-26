@@ -309,9 +309,15 @@ async function loadConfig() {
 }
 
 async function saveConfig() {
+  if (config.value.sync_enabled && !config.value.sync_key.trim()) {
+    message.warning(t("sync.syncSecretRequiredWhenEnabled"));
+    return;
+  }
   configSaving.value = true;
   try {
     await syncApi.updateConfig(config.value);
+    // 立刻 reload 一次 — 防止本地 config 跟后端持久化结果不一致
+    await loadConfig();
     message.success(t("sync.configSaved"));
   } catch (err: any) {
     message.error(err.response?.data?.error || t("common.saveFailed"));
@@ -339,10 +345,17 @@ async function loadVersion() {
   }
 }
 
-async function copyFingerprint() {
-  if (!myVersion.value) return;
+// 本机对外可达 URL — 取浏览器当前 origin (用户用什么访问就显示什么).
+// 多机连调时, 用户复制这个 URL 给对端管理员; 对端添加本节点为 peer 时直接粘贴.
+const myUrl = computed(() => {
+  if (typeof window === "undefined") return "";
+  return window.location.origin;
+});
+
+async function copyText(text: string, _what: string) {
+  if (!text) return;
   try {
-    await navigator.clipboard.writeText(myVersion.value.fingerprint);
+    await navigator.clipboard.writeText(text);
     message.success(t("common.copySuccess"));
   } catch {
     message.error(t("common.copyFailed") || "Copy failed");
@@ -431,15 +444,34 @@ async function handleSave() {
       </span>
     </template>
 
-    <!-- 本机身份指纹 — 用户复制给对端用 -->
+    <!-- 本机身份卡片 — 对端添加本节点为 peer 时需要的全部信息一处展示 -->
     <div v-if="myVersion" class="v3-sync-identity">
-      <div class="v3-sync-identity__label">{{ t("sync.myIdentity") }}</div>
-      <div class="v3-sync-identity__fp" :title="myVersion.public_key">
-        <code>{{ myVersion.fingerprint }}</code>
-        <n-button size="tiny" tertiary @click="copyFingerprint">
-          {{ t("common.copy") }}
-        </n-button>
+      <div class="v3-sync-identity__title">{{ t("sync.shareWithPeer") }}</div>
+
+      <div class="v3-sync-identity__row">
+        <div class="v3-sync-identity__label">{{ t("sync.myUrl") }}</div>
+        <div class="v3-sync-identity__value">
+          <code>{{ myUrl }}</code>
+          <n-button size="tiny" tertiary @click="copyText(myUrl, 'url')">
+            {{ t("common.copy") }}
+          </n-button>
+        </div>
       </div>
+
+      <div class="v3-sync-identity__row">
+        <div class="v3-sync-identity__label">{{ t("sync.myIdentity") }}</div>
+        <div class="v3-sync-identity__value" :title="myVersion.public_key">
+          <code>{{ myVersion.fingerprint }}</code>
+          <n-button
+            size="tiny"
+            tertiary
+            @click="copyText(myVersion.fingerprint, 'fp')"
+          >
+            {{ t("common.copy") }}
+          </n-button>
+        </div>
+      </div>
+
       <div class="v3-sync-identity__hint">{{ t("sync.identityHint") }}</div>
     </div>
 
@@ -640,33 +672,50 @@ async function handleSave() {
   font-size: 14px;
 }
 .v3-sync-identity {
-  padding: 12px 16px;
+  padding: 14px 16px;
   margin-bottom: 12px;
   border-radius: 8px;
   background: var(--v3-surface-2, rgba(0, 0, 0, 0.02));
   border-left: 3px solid var(--primary-color, #18a058);
 }
+.v3-sync-identity__title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-color-2);
+  margin-bottom: 10px;
+}
+.v3-sync-identity__row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 6px;
+}
 .v3-sync-identity__label {
   font-size: 12px;
   color: var(--text-color-3);
   font-weight: 500;
-  margin-bottom: 4px;
+  min-width: 88px;
+  flex-shrink: 0;
 }
-.v3-sync-identity__fp {
+.v3-sync-identity__value {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
 }
-.v3-sync-identity__fp code {
-  font: 600 14px var(--v3-mono, ui-monospace);
-  letter-spacing: 0.5px;
+.v3-sync-identity__value code {
+  font: 600 13px var(--v3-mono, ui-monospace);
+  letter-spacing: 0.3px;
   background: var(--code-color, rgba(0, 0, 0, 0.04));
-  padding: 4px 10px;
+  padding: 3px 8px;
   border-radius: 4px;
+  word-break: break-all;
 }
 .v3-sync-identity__hint {
   font-size: 11px;
   color: var(--text-color-3);
-  margin-top: 6px;
+  margin-top: 8px;
+  line-height: 1.5;
 }
 </style>
