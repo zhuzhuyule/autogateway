@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -25,10 +26,9 @@ type SyncPeerManager struct {
 	syncService     *SyncService
 	settingsManager *config.SystemSettingsManager
 
-	peersMu       sync.Mutex
-	activePeers   map[string]*websocket.Conn // key: Peer ID
-	notifyChan    chan struct{}
-	lastPushTime  time.Time
+	peersMu     sync.Mutex
+	activePeers map[string]*websocket.Conn // key: Peer ID
+	notifyChan  chan struct{}
 }
 
 func NewSyncPeerManager(db *gorm.DB, syncService *SyncService, settingsManager *config.SystemSettingsManager) *SyncPeerManager {
@@ -38,8 +38,29 @@ func NewSyncPeerManager(db *gorm.DB, syncService *SyncService, settingsManager *
 		settingsManager: settingsManager,
 		activePeers:     make(map[string]*websocket.Conn),
 		notifyChan:      make(chan struct{}, 1),
-		lastPushTime:    time.Now().Add(-24 * time.Hour), // Ensure initial push if needed
 	}
+}
+
+// computeSinceFromPeers 取所有 peer 中最小的 last_synced_at, 作为 ExportPayload 的 since.
+// 含义: 最落后那个 peer 决定了"需要回放的下限". 这样保证重启后不会丢任何变更.
+// 如果没有任何已同步过的 peer (全是 null), 返回 nil → ExportPayload 会带全量.
+func (m *SyncPeerManager) computeSinceFromPeers() *time.Time {
+	var minTime *time.Time
+	rows, err := m.db.Model(&models.SyncPeer{}).
+		Select("MIN(last_synced_at) as min_t").
+		Where("last_synced_at IS NOT NULL").
+		Rows()
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	if rows.Next() {
+		var t sql.NullTime
+		if err := rows.Scan(&t); err == nil && t.Valid {
+			minTime = &t.Time
+		}
+	}
+	return minTime
 }
 
 // Start begins the background peer connection loop and push loop
@@ -169,8 +190,9 @@ func (m *SyncPeerManager) pushLoop(ctx context.Context) {
 }
 
 func (m *SyncPeerManager) pushToPeers(ctx context.Context, settings types.SystemSettings) {
-	// We export changes since lastPushTime
-	payload, err := m.syncService.ExportPayload(ctx, &m.lastPushTime, settings.SyncAPIKeys)
+	// since = 所有 peer 中最旧的 last_synced_at, 持久化在 SyncPeer 表里, 重启不丢.
+	since := m.computeSinceFromPeers()
+	payload, err := m.syncService.ExportPayload(ctx, since, settings.SyncAPIKeys)
 	if err != nil {
 		logrus.Errorf("failed to export payload for push: %v", err)
 		m.writeLog("", "push", "error", fmt.Sprintf("export failed: %v", err), "")
@@ -214,7 +236,7 @@ func (m *SyncPeerManager) pushToPeers(ctx context.Context, settings types.System
 	}
 
 	if pushedToAny {
-		m.lastPushTime = time.Now()
+		// 每个 peer 的 last_synced_at 已在循环里更新了 (持久化), 这里不需要全局缓存.
 		logrus.Infof("successfully pushed local changes to connected peers (%s)", summary)
 	}
 }
