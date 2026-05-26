@@ -294,7 +294,15 @@ const logColumns = computed(() => [
 
 async function loadConfig() {
   try {
-    config.value = await syncApi.getConfig();
+    const c = await syncApi.getConfig();
+    // 防御: 若后端 200 但返回 "" / null / HTML fallback (vite 代理失效场景),
+    // 不要把 config.value 改成非对象, 否则 <n-switch v-model> 会炸
+    if (c && typeof c === "object") {
+      config.value = {
+        sync_enabled: !!c.sync_enabled,
+        sync_key: c.sync_key ?? "",
+      };
+    }
   } catch {
     // 拉失败时保留默认 disabled 状态
   }
