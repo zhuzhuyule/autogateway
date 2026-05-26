@@ -38,6 +38,37 @@ export interface VersionInfo {
   started_at: string;
 }
 
+export interface UpgradeRequest {
+  target_version: string;
+  requested_by?: string;
+  requested_at?: string;
+}
+
+export interface UpgradeStatus {
+  pending: boolean;
+  request?: UpgradeRequest;
+  waiting_secs?: number;
+}
+
+export const upgradeApi = {
+  /**
+   * 触发本端升级请求 (写信号文件, 待宿主机 watcher 接管).
+   * - 200/202: 成功写入
+   * - 400: target_version 非法 / 降级被拒
+   * - 409: 已有 pending 升级
+   */
+  async request(targetVersion: string, requestedBy = "self"): Promise<void> {
+    await http.post("/upgrade/request", {
+      target_version: targetVersion,
+      requested_by: requestedBy,
+    });
+  },
+  async status(): Promise<UpgradeStatus> {
+    const response = await http.get("/upgrade/status");
+    return response.data;
+  },
+};
+
 export const syncApi = {
   async getPeers(): Promise<SyncPeer[]> {
     const response = await http.get("/sync/peers");

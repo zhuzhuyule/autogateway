@@ -1304,4 +1304,22 @@ export default {
     logStatus: "Status",
     logDetails: "Details",
   },
+  upgrade: {
+    localUpgradeBtn: "Upgrade Self",
+    localUpgradeTip: "Send an upgrade request to the host watcher (to mesh-latest version)",
+    remoteUpgradeTip: "Suggest peer upgrade to {v}",
+    remoteNotYetImplemented:
+      "Cross-node upgrade triggering is planned for a follow-up — for now upgrade from the peer's own UI",
+    noTargetFound: "No peer reports a higher version than ours",
+    confirmTitle: "Confirm Upgrade",
+    confirmBody:
+      "About to write an upgrade signal: {from} → {to}. Actual upgrade is performed by an external host watcher; the container process stays unprivileged.",
+    confirmYes: "Confirm Upgrade",
+    requestSent: "Upgrade request sent, awaiting host watcher",
+    requestFailed: "Upgrade request failed",
+    pendingTitle: "Upgrade pending: {v}",
+    pendingBody: "Waiting for host watcher: {s}s elapsed",
+    watcherMaybeMissing:
+      "Wait time exceeded — host watcher may not be deployed (see examples/upgrade-watcher/)",
+  },
 };

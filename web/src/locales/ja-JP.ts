@@ -1254,4 +1254,22 @@ export default {
     logStatus: "状態",
     logDetails: "詳細",
   },
+  upgrade: {
+    localUpgradeBtn: "本ノードを更新",
+    localUpgradeTip: "ホスト watcher に更新リクエストを送信 (mesh 内最新版へ)",
+    remoteUpgradeTip: "対向ノードに {v} への更新を提案",
+    remoteNotYetImplemented:
+      "クロスノード更新トリガーは今後の対応予定です — 現状は対向ノードの UI から実行してください",
+    noTargetFound: "本ノードより新しいバージョンの対向ノードが見つかりません",
+    confirmTitle: "更新確認",
+    confirmBody:
+      "更新シグナルを書き込みます: {from} → {to}. 実際の更新は外部ホスト watcher が実行し, コンテナプロセスは特権なしのままです.",
+    confirmYes: "更新を確認",
+    requestSent: "更新リクエスト送信済み, ホスト watcher 待ち",
+    requestFailed: "更新リクエスト失敗",
+    pendingTitle: "更新 pending: {v}",
+    pendingBody: "ホスト watcher 待機中: {s}s 経過",
+    watcherMaybeMissing:
+      "待機時間が長すぎます — ホスト watcher 未デプロイの可能性 (examples/upgrade-watcher/ 参照)",
+  },
 };

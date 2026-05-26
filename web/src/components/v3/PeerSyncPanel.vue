@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { syncApi, type SyncPeer, type SyncLog, type VersionInfo } from "@/api/sync";
+import { syncApi, upgradeApi, type SyncPeer, type SyncLog, type VersionInfo, type UpgradeStatus } from "@/api/sync";
 import {
   Add,
+  ArrowUpCircle,
   CheckmarkCircle,
   CloseCircle,
   Create,
@@ -28,17 +29,23 @@ import {
   NSwitch,
   NTag,
   NTime,
+  useDialog,
   useMessage,
 } from "naive-ui";
-import { computed, h, onMounted, ref } from "vue";
+import { computed, h, onMounted, onUnmounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 
 const { t } = useI18n();
 const message = useMessage();
+const dialog = useDialog();
 
 const peers = ref<SyncPeer[]>([]);
 const loading = ref(false);
 const myVersion = ref<VersionInfo | null>(null);
+
+// P9.2 升级状态轮询
+const upgradeStatus = ref<UpgradeStatus | null>(null);
+let upgradePoller: number | null = null;
 
 const showModal = ref(false);
 const editingPeer = ref<Partial<SyncPeer> | null>(null);
@@ -147,8 +154,27 @@ const columns = computed(() => [
     title: t("common.actions"),
     key: "actions",
     render(row: SyncPeer) {
+      const canUpgrade =
+        versionBadge(row.peer_version) === "diff" &&
+        !!myVersion.value &&
+        !!row.peer_version;
       return h(NSpace, { size: 4 }, {
         default: () => [
+          canUpgrade &&
+            h(
+              NButton,
+              {
+                size: "small",
+                type: "primary",
+                tertiary: true,
+                onClick: () => confirmRemoteUpgrade(row),
+                title: t("upgrade.remoteUpgradeTip", { v: myVersion.value!.version }),
+              },
+              {
+                icon: () => h(NIcon, null, { default: () => h(ArrowUpCircle) }),
+                default: () => myVersion.value!.version,
+              }
+            ),
           h(
             NButton,
             { size: "small", tertiary: true, onClick: () => openLogs(row), title: t("sync.viewHistory") },
@@ -172,11 +198,70 @@ const columns = computed(() => [
               default: () => t("common.confirmDelete"),
             }
           ),
-        ],
+        ].filter(Boolean),
       });
     },
   },
 ]);
+
+function confirmRemoteUpgrade(_row: SyncPeer) {
+  // 远程升级 = 触发对端的 watcher. 当前后端只暴露本端升级端点
+  // (POST /api/upgrade/request), 远程触发要通过 WS protocol 扩展.
+  // 这里先给出"提示用户去对端 UI 触发"的占位提示, 完整跨节点远程升级
+  // 在后续 mini-PR 里通过 ws upgrade_request 消息完成.
+  message.info(t("upgrade.remoteNotYetImplemented"));
+}
+
+async function triggerLocalUpgrade() {
+  if (!myVersion.value) return;
+  // 找 mesh 里能用的"目标版本": 任意一个 peer 的更高版本号
+  const candidates = peers.value
+    .map(p => p.peer_version)
+    .filter((v): v is string => !!v)
+    .filter(v => versionBadgeForPeer(v) === "higher");
+  const target = candidates.sort().pop();
+  if (!target) {
+    message.info(t("upgrade.noTargetFound"));
+    return;
+  }
+  dialog.warning({
+    title: t("upgrade.confirmTitle"),
+    content: t("upgrade.confirmBody", { from: myVersion.value.version, to: target }),
+    positiveText: t("upgrade.confirmYes"),
+    negativeText: t("common.cancel"),
+    onPositiveClick: async () => {
+      try {
+        await upgradeApi.request(target, "self");
+        message.success(t("upgrade.requestSent"));
+        await loadUpgradeStatus();
+      } catch (err: any) {
+        message.error(err.response?.data?.error || t("upgrade.requestFailed"));
+      }
+    },
+  });
+}
+
+/** 把对端版本对照本端做"高/低/平/未知"判定 (区别 versionBadge 用 match/diff/incompat) */
+function versionBadgeForPeer(peerVer: string): "higher" | "lower" | "equal" | "unknown" {
+  if (!myVersion.value) return "unknown";
+  const partsM = myVersion.value.version.replace(/^v/, "").split(".").map(Number);
+  const partsP = peerVer.replace(/^v/, "").split(".").map(Number);
+  for (let i = 0; i < 3; i++) {
+    const a = partsP[i] ?? 0;
+    const b = partsM[i] ?? 0;
+    if (a > b) return "higher";
+    if (a < b) return "lower";
+  }
+  return "equal";
+}
+
+async function loadUpgradeStatus() {
+  try {
+    upgradeStatus.value = await upgradeApi.status();
+  } catch {
+    upgradeStatus.value = null;
+  }
+}
 
 async function loadPeers() {
   loading.value = true;
@@ -255,6 +340,19 @@ const logColumns = computed(() => [
 onMounted(() => {
   loadVersion();
   loadPeers();
+  loadUpgradeStatus();
+  // 升级 pending 时每 5s 轮询一次, 用户能看到 watcher 接管的进度
+  upgradePoller = window.setInterval(() => {
+    if (upgradeStatus.value?.pending) {
+      loadUpgradeStatus();
+    }
+  }, 5000);
+});
+
+onUnmounted(() => {
+  if (upgradePoller !== null) {
+    window.clearInterval(upgradePoller);
+  }
 });
 
 function handleAdd() {
@@ -325,6 +423,18 @@ async function handleSave() {
             <n-icon><Refresh /></n-icon>
           </template>
         </n-button>
+        <n-button
+          v-if="peers.length > 0"
+          tertiary
+          type="warning"
+          @click="triggerLocalUpgrade"
+          :title="t('upgrade.localUpgradeTip')"
+        >
+          <template #icon>
+            <n-icon><ArrowUpCircle /></n-icon>
+          </template>
+          {{ t("upgrade.localUpgradeBtn") }}
+        </n-button>
         <n-button type="primary" @click="handleAdd">
           <template #icon>
             <n-icon><Add /></n-icon>
@@ -333,6 +443,19 @@ async function handleSave() {
         </n-button>
       </n-space>
     </template>
+
+    <!-- P9.2: 升级 pending 提示 -->
+    <n-alert
+      v-if="upgradeStatus?.pending"
+      :type="(upgradeStatus.waiting_secs ?? 0) > 60 ? 'error' : 'info'"
+      style="margin-bottom: 16px"
+      :title="t('upgrade.pendingTitle', { v: upgradeStatus.request?.target_version || '?' })"
+    >
+      <div>{{ t("upgrade.pendingBody", { s: upgradeStatus.waiting_secs ?? 0 }) }}</div>
+      <div v-if="(upgradeStatus.waiting_secs ?? 0) > 60" style="margin-top: 8px; color: var(--error-color)">
+        ⚠️ {{ t("upgrade.watcherMaybeMissing") }}
+      </div>
+    </n-alert>
 
     <n-data-table
       :columns="columns"
