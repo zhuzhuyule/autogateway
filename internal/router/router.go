@@ -55,6 +55,7 @@ func NewRouter(
 	backupHandler *handler.BackupHandler,
 	syncHandler *handler.SyncHandler,
 	versionHandler *handler.VersionHandler,
+	upgradeHandler *handler.UpgradeHandler,
 	buildFS embed.FS,
 	indexPage []byte,
 ) *gin.Engine {
@@ -77,7 +78,7 @@ func NewRouter(
 
 	// 注册路由
 	registerSystemRoutes(router, serverHandler)
-	registerAPIRoutes(router, serverHandler, configManager, aliasHandler, aliasSuggestionHandler, routingSettingsHandler, modelCatalogHandler, dedupHandler, upstreamProbeHandler, freeModelsHandler, backupHandler, syncHandler, versionHandler)
+	registerAPIRoutes(router, serverHandler, configManager, aliasHandler, aliasSuggestionHandler, routingSettingsHandler, modelCatalogHandler, dedupHandler, upstreamProbeHandler, freeModelsHandler, backupHandler, syncHandler, versionHandler, upgradeHandler)
 	registerProxyRoutes(router, proxyServer, groupManager, serverHandler, selector)
 	registerFrontendRoutes(router, buildFS, indexPage)
 
@@ -104,6 +105,7 @@ func registerAPIRoutes(
 	backupHandler *handler.BackupHandler,
 	syncHandler *handler.SyncHandler,
 	versionHandler *handler.VersionHandler,
+	upgradeHandler *handler.UpgradeHandler,
 ) {
 	api := router.Group("/api")
 	api.Use(i18n.Middleware())
@@ -117,7 +119,7 @@ func registerAPIRoutes(
 	// 用户在 UI 改完即时生效,无需重启
 	protectedAPI := api.Group("")
 	protectedAPI.Use(middleware.Auth(serverHandler.SettingsManager))
-	registerProtectedAPIRoutes(protectedAPI, serverHandler, aliasHandler, aliasSuggestionHandler, routingSettingsHandler, modelCatalogHandler, dedupHandler, upstreamProbeHandler, freeModelsHandler, backupHandler, syncHandler)
+	registerProtectedAPIRoutes(protectedAPI, serverHandler, aliasHandler, aliasSuggestionHandler, routingSettingsHandler, modelCatalogHandler, dedupHandler, upstreamProbeHandler, freeModelsHandler, backupHandler, syncHandler, upgradeHandler)
 }
 
 func registerSyncRoutes(api *gin.RouterGroup, syncHandler *handler.SyncHandler) {
@@ -148,6 +150,7 @@ func registerProtectedAPIRoutes(
 	freeModelsHandler *handler.FreeModelsHandler,
 	backupHandler *handler.BackupHandler,
 	syncHandler *handler.SyncHandler,
+	upgradeHandler *handler.UpgradeHandler,
 ) {
 	api.GET("/channel-types", serverHandler.CommonHandler.GetChannelTypes)
 
@@ -259,6 +262,13 @@ func registerProtectedAPIRoutes(
 		syncPeers.POST("", syncHandler.CreatePeer)
 		syncPeers.PUT("/:id", syncHandler.UpdatePeer)
 		syncPeers.DELETE("/:id", syncHandler.DeletePeer)
+	}
+
+	// P9.2: 远程升级 - 写信号文件, 等宿主机 watcher 接管
+	upgradeGroup := api.Group("/upgrade")
+	{
+		upgradeGroup.POST("/request", upgradeHandler.Request)
+		upgradeGroup.GET("/status", upgradeHandler.Status)
 	}
 
 	// Backup/Restore
