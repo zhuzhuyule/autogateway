@@ -10,6 +10,7 @@ import (
 
 	"autogateway/internal/config"
 	"autogateway/internal/models"
+	"autogateway/internal/response"
 	"autogateway/internal/services"
 	"autogateway/internal/version"
 
@@ -412,7 +413,7 @@ type syncConfigBody struct {
 func (h *SyncHandler) GetConfig(c *gin.Context) {
 	s := h.settingsManager.GetSettings()
 	logrus.Debugf("GetConfig: sync_enabled=%v sync_key_set=%v", s.SyncEnabled, s.SyncKey != "")
-	c.JSON(http.StatusOK, syncConfigBody{
+	response.Success(c, syncConfigBody{
 		SyncEnabled: s.SyncEnabled,
 		SyncKey:     s.SyncKey,
 	})
@@ -422,7 +423,7 @@ func (h *SyncHandler) GetConfig(c *gin.Context) {
 func (h *SyncHandler) UpdateConfig(c *gin.Context) {
 	var body syncConfigBody
 	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body: " + err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_body", "message": err.Error()})
 		return
 	}
 	logrus.Infof("UpdateConfig: sync_enabled=%v sync_key_len=%d", body.SyncEnabled, len(body.SyncKey))
@@ -431,23 +432,26 @@ func (h *SyncHandler) UpdateConfig(c *gin.Context) {
 		"sync_key":     body.SyncKey,
 	}); err != nil {
 		logrus.Errorf("UpdateConfig failed: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update: " + err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "update_failed", "message": err.Error()})
 		return
 	}
 	// 立即验证读回, 防 syncer 异步 reload 没追上
 	post := h.settingsManager.GetSettings()
 	logrus.Infof("UpdateConfig OK, readback: sync_enabled=%v sync_key_len=%d", post.SyncEnabled, len(post.SyncKey))
-	c.JSON(http.StatusOK, gin.H{"message": "ok", "sync_enabled": post.SyncEnabled})
+	response.Success(c, syncConfigBody{
+		SyncEnabled: post.SyncEnabled,
+		SyncKey:     post.SyncKey,
+	})
 }
 
 // ListPeers returns all configured sync peers
 func (h *SyncHandler) ListPeers(c *gin.Context) {
 	var peers []models.SyncPeer
 	if err := h.db.Find(&peers).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch peers"})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "db_error", "message": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, peers)
+	response.Success(c, peers)
 }
 
 // CreatePeer adds a new sync peer
@@ -455,18 +459,17 @@ func (h *SyncHandler) CreatePeer(c *gin.Context) {
 	var peer models.SyncPeer
 	if err := c.ShouldBindJSON(&peer); err != nil {
 		logrus.Warnf("CreatePeer bind failed: %v", err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid payload: " + err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"code": "bind_failed", "message": err.Error()})
 		return
 	}
 	logrus.Infof("CreatePeer: id=%s name=%s url=%s key_set=%v pinned_fp=%s",
 		peer.ID, peer.Name, peer.URL, peer.SyncKey != "", peer.PinnedFingerprint)
 	if err := h.db.Create(&peer).Error; err != nil {
-		// 把实际 DB 错误返给前端 — 之前都吞掉了
 		logrus.Errorf("CreatePeer DB error: %v (peer=%+v)", err, peer)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "DB create failed: " + err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "db_create_failed", "message": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, peer)
+	response.Success(c, peer)
 }
 
 // UpdatePeer updates an existing sync peer
@@ -474,13 +477,13 @@ func (h *SyncHandler) UpdatePeer(c *gin.Context) {
 	id := c.Param("id")
 	var peer models.SyncPeer
 	if err := h.db.First(&peer, "id = ?", id).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Peer not found"})
+		c.JSON(http.StatusNotFound, gin.H{"code": "not_found", "message": "Peer not found"})
 		return
 	}
 
 	var payload models.SyncPeer
 	if err := c.ShouldBindJSON(&payload); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid payload"})
+		c.JSON(http.StatusBadRequest, gin.H{"code": "bind_failed", "message": err.Error()})
 		return
 	}
 
@@ -488,22 +491,23 @@ func (h *SyncHandler) UpdatePeer(c *gin.Context) {
 	peer.URL = payload.URL
 	peer.SyncKey = payload.SyncKey
 	peer.Role = payload.Role
+	peer.PinnedFingerprint = payload.PinnedFingerprint
 
 	if err := h.db.Save(&peer).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update peer"})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "db_save_failed", "message": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, peer)
+	response.Success(c, peer)
 }
 
 // DeletePeer removes a sync peer
 func (h *SyncHandler) DeletePeer(c *gin.Context) {
 	id := c.Param("id")
 	if err := h.db.Delete(&models.SyncPeer{}, "id = ?", id).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete peer"})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "db_delete_failed", "message": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"message": "success"})
+	response.Success(c, gin.H{"id": id})
 }
 
 // ListLogs returns recent sync logs. Supports filter by peer_id and action.
@@ -527,8 +531,8 @@ func (h *SyncHandler) ListLogs(c *gin.Context) {
 
 	var logs []models.SyncLog
 	if err := q.Find(&logs).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch logs"})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "db_query_failed", "message": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, logs)
+	response.Success(c, logs)
 }

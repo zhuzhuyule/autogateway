@@ -1,9 +1,9 @@
 package handler
 
 import (
-	"net/http"
 	"time"
 
+	"autogateway/internal/response"
 	"autogateway/internal/services"
 	"autogateway/internal/version"
 
@@ -44,7 +44,7 @@ func NewVersionHandler(keypair *services.NodeKeypairService) *VersionHandler {
 // Get 返回本节点版本与身份信息. 公开端点 (不需 auth),
 // 避免握手前先卡鉴权 + 让对端可以查我们的公钥指纹.
 func (h *VersionHandler) Get(c *gin.Context) {
-	c.JSON(http.StatusOK, VersionResponse{
+	response.Success(c, VersionResponse{
 		Version:     version.Version,
 		SchemaHash:  services.ComputeSchemaHash(),
 		PublicKey:   h.keypair.PublicKeyBase64(),

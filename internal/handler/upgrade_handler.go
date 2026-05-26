@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"time"
 
+	"autogateway/internal/response"
 	"autogateway/internal/services"
 
 	"github.com/gin-gonic/gin"
@@ -38,7 +39,7 @@ type upgradeRequestBody struct {
 func (h *UpgradeHandler) Request(c *gin.Context) {
 	var body upgradeRequestBody
 	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body: " + err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_body", "message": err.Error()})
 		return
 	}
 	if body.RequestedBy == "" {
@@ -51,19 +52,20 @@ func (h *UpgradeHandler) Request(c *gin.Context) {
 		RequestedAt:   time.Now(),
 	})
 	if err != nil {
-		// 已有 pending 用 409, 其余 400
-		code := http.StatusBadRequest
+		httpCode := http.StatusBadRequest
+		errCode := "upgrade_failed"
 		if err.Error() == "upgrade already pending" {
-			code = http.StatusConflict
+			httpCode = http.StatusConflict
+			errCode = "upgrade_pending"
 		}
-		c.JSON(code, gin.H{"error": err.Error()})
+		c.JSON(httpCode, gin.H{"code": errCode, "message": err.Error()})
 		return
 	}
-	c.JSON(http.StatusAccepted, gin.H{"message": "upgrade request accepted, awaiting host watcher"})
+	response.Success(c, gin.H{"target_version": body.TargetVersion})
 }
 
 // Status 返回当前的升级请求状态. UI 用来判断 "等待 watcher 接管" 或
 // "watcher 未部署 (信号文件超时未消费)".
 func (h *UpgradeHandler) Status(c *gin.Context) {
-	c.JSON(http.StatusOK, h.upgradeSvc.Status())
+	response.Success(c, h.upgradeSvc.Status())
 }
