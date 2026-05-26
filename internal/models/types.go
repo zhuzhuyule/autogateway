@@ -292,7 +292,6 @@ type SyncPeer struct {
 	SyncKey        string         `gorm:"type:varchar(512);not null" json:"sync_key"`
 	Role           string         `gorm:"type:varchar(50);not null;default:'client'" json:"role"`        // 'server' or 'client'
 	Status         string         `gorm:"type:varchar(50);not null;default:'disconnected'" json:"status"`
-	SyncAPIKeys    bool           `gorm:"default:false" json:"sync_api_keys"`
 	LastSyncedAt   *time.Time     `json:"last_synced_at"`
 	// P9.1 兼容性闸门: 握手成功后填入, UI 用于展示对端版本徽章 + 提示版本差异.
 	PeerVersion    string         `gorm:"type:varchar(50)" json:"peer_version"`

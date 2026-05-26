@@ -1,5 +1,13 @@
 <script setup lang="ts">
-import { syncApi, upgradeApi, type SyncPeer, type SyncLog, type VersionInfo, type UpgradeStatus } from "@/api/sync";
+import {
+  syncApi,
+  upgradeApi,
+  type SyncPeer,
+  type SyncLog,
+  type SyncConfig,
+  type VersionInfo,
+  type UpgradeStatus,
+} from "@/api/sync";
 import {
   Add,
   ArrowUpCircle,
@@ -39,34 +47,26 @@ const { t } = useI18n();
 const message = useMessage();
 const dialog = useDialog();
 
+// 全局同步配置 (顶部卡片管理)
+const config = ref<SyncConfig>({ sync_enabled: false, sync_key: "" });
+const configSaving = ref(false);
+
 const peers = ref<SyncPeer[]>([]);
 const loading = ref(false);
 const myVersion = ref<VersionInfo | null>(null);
 
-// P9.2 升级状态轮询
-const upgradeStatus = ref<UpgradeStatus | null>(null);
-let upgradePoller: number | null = null;
-
 const showModal = ref(false);
 const editingPeer = ref<Partial<SyncPeer> | null>(null);
-const confirmPhrase = ref("");
 const formRef = ref();
 
-// P9.1 历史抽屉
 const logDrawer = ref(false);
 const logPeer = ref<SyncPeer | null>(null);
 const logRows = ref<SyncLog[]>([]);
 const logLoading = ref(false);
 
-const REQUIRED_PHRASE = "I understand the risks";
+const upgradeStatus = ref<UpgradeStatus | null>(null);
+let upgradePoller: number | null = null;
 
-/**
- * 把后端复合 status 拆成 (kind, reason) 给 UI 上色用.
- *   "connected"                        → { kind: "ok" }
- *   "disconnected"                     → { kind: "off" }
- *   "warning:minor_version_diff"       → { kind: "warn", reason }
- *   "rejected:schema_mismatch"         → { kind: "rej", reason }
- */
 function parseStatus(s: string): { kind: "ok" | "off" | "warn" | "rej"; reason?: string } {
   if (s === "connected") return { kind: "ok" };
   if (s.startsWith("warning:")) return { kind: "warn", reason: s.slice("warning:".length) };
@@ -74,13 +74,6 @@ function parseStatus(s: string): { kind: "ok" | "off" | "warn" | "rej"; reason?:
   return { kind: "off" };
 }
 
-/**
- * 比对对端版本与本端版本, 返回徽章类型.
- *   未知 → "unknown"
- *   一致 → "match"
- *   仅 patch/minor 不同 → "diff"
- *   major 不同 → "incompat"
- */
 function versionBadge(
   peerVer: string | undefined
 ): "unknown" | "match" | "diff" | "incompat" {
@@ -90,6 +83,19 @@ function versionBadge(
   const majorOf = (v: string) => v.replace(/^v/, "").split(".")[0];
   if (majorOf(peerVer) !== majorOf(mine)) return "incompat";
   return "diff";
+}
+
+function versionBadgeForPeer(peerVer: string): "higher" | "lower" | "equal" | "unknown" {
+  if (!myVersion.value) return "unknown";
+  const partsM = myVersion.value.version.replace(/^v/, "").split(".").map(Number);
+  const partsP = peerVer.replace(/^v/, "").split(".").map(Number);
+  for (let i = 0; i < 3; i++) {
+    const a = partsP[i] ?? 0;
+    const b = partsM[i] ?? 0;
+    if (a > b) return "higher";
+    if (a < b) return "lower";
+  }
+  return "equal";
 }
 
 const columns = computed(() => [
@@ -130,13 +136,13 @@ const columns = computed(() => [
     key: "peer_version",
     render(row: SyncPeer) {
       const b = versionBadge(row.peer_version);
-      const config = {
+      const cfg = {
         unknown: { type: "default" as const, label: "—" },
         match: { type: "success" as const, label: row.peer_version || "" },
         diff: { type: "warning" as const, label: row.peer_version || "" },
         incompat: { type: "error" as const, label: row.peer_version || "" },
       };
-      const c = config[b];
+      const c = cfg[b];
       return h(NTag, { type: c.type, size: "small" }, { default: () => c.label });
     },
   },
@@ -205,16 +211,11 @@ const columns = computed(() => [
 ]);
 
 function confirmRemoteUpgrade(_row: SyncPeer) {
-  // 远程升级 = 触发对端的 watcher. 当前后端只暴露本端升级端点
-  // (POST /api/upgrade/request), 远程触发要通过 WS protocol 扩展.
-  // 这里先给出"提示用户去对端 UI 触发"的占位提示, 完整跨节点远程升级
-  // 在后续 mini-PR 里通过 ws upgrade_request 消息完成.
   message.info(t("upgrade.remoteNotYetImplemented"));
 }
 
 async function triggerLocalUpgrade() {
   if (!myVersion.value) return;
-  // 找 mesh 里能用的"目标版本": 任意一个 peer 的更高版本号
   const candidates = peers.value
     .map(p => p.peer_version)
     .filter((v): v is string => !!v)
@@ -241,57 +242,11 @@ async function triggerLocalUpgrade() {
   });
 }
 
-/** 把对端版本对照本端做"高/低/平/未知"判定 (区别 versionBadge 用 match/diff/incompat) */
-function versionBadgeForPeer(peerVer: string): "higher" | "lower" | "equal" | "unknown" {
-  if (!myVersion.value) return "unknown";
-  const partsM = myVersion.value.version.replace(/^v/, "").split(".").map(Number);
-  const partsP = peerVer.replace(/^v/, "").split(".").map(Number);
-  for (let i = 0; i < 3; i++) {
-    const a = partsP[i] ?? 0;
-    const b = partsM[i] ?? 0;
-    if (a > b) return "higher";
-    if (a < b) return "lower";
-  }
-  return "equal";
-}
-
 async function loadUpgradeStatus() {
   try {
     upgradeStatus.value = await upgradeApi.status();
   } catch {
     upgradeStatus.value = null;
-  }
-}
-
-async function loadPeers() {
-  loading.value = true;
-  try {
-    peers.value = await syncApi.getPeers();
-  } catch (err: any) {
-    message.error(err.response?.data?.error || t("sync.loadFailed"));
-  } finally {
-    loading.value = false;
-  }
-}
-
-async function loadVersion() {
-  try {
-    myVersion.value = await syncApi.getVersion();
-  } catch {
-    // 版本接口失败不阻断主流程, 徽章只显示 unknown
-  }
-}
-
-async function openLogs(peer: SyncPeer) {
-  logPeer.value = peer;
-  logDrawer.value = true;
-  logLoading.value = true;
-  try {
-    logRows.value = await syncApi.getLogs({ peer_id: peer.id, limit: 100 });
-  } catch (err: any) {
-    message.error(err.response?.data?.error || t("sync.loadFailed"));
-  } finally {
-    logLoading.value = false;
   }
 }
 
@@ -337,22 +292,70 @@ const logColumns = computed(() => [
   },
 ]);
 
+async function loadConfig() {
+  try {
+    config.value = await syncApi.getConfig();
+  } catch {
+    // 拉失败时保留默认 disabled 状态
+  }
+}
+
+async function saveConfig() {
+  configSaving.value = true;
+  try {
+    await syncApi.updateConfig(config.value);
+    message.success(t("sync.configSaved"));
+  } catch (err: any) {
+    message.error(err.response?.data?.error || t("common.saveFailed"));
+  } finally {
+    configSaving.value = false;
+  }
+}
+
+async function loadPeers() {
+  loading.value = true;
+  try {
+    peers.value = await syncApi.getPeers();
+  } catch (err: any) {
+    message.error(err.response?.data?.error || t("sync.loadFailed"));
+  } finally {
+    loading.value = false;
+  }
+}
+
+async function loadVersion() {
+  try {
+    myVersion.value = await syncApi.getVersion();
+  } catch {
+    /* 版本接口失败不阻断, 徽章只显示 unknown */
+  }
+}
+
+async function openLogs(peer: SyncPeer) {
+  logPeer.value = peer;
+  logDrawer.value = true;
+  logLoading.value = true;
+  try {
+    logRows.value = await syncApi.getLogs({ peer_id: peer.id, limit: 100 });
+  } catch (err: any) {
+    message.error(err.response?.data?.error || t("sync.loadFailed"));
+  } finally {
+    logLoading.value = false;
+  }
+}
+
 onMounted(() => {
   loadVersion();
+  loadConfig();
   loadPeers();
   loadUpgradeStatus();
-  // 升级 pending 时每 5s 轮询一次, 用户能看到 watcher 接管的进度
   upgradePoller = window.setInterval(() => {
-    if (upgradeStatus.value?.pending) {
-      loadUpgradeStatus();
-    }
+    if (upgradeStatus.value?.pending) loadUpgradeStatus();
   }, 5000);
 });
 
 onUnmounted(() => {
-  if (upgradePoller !== null) {
-    window.clearInterval(upgradePoller);
-  }
+  if (upgradePoller !== null) window.clearInterval(upgradePoller);
 });
 
 function handleAdd() {
@@ -362,15 +365,12 @@ function handleAdd() {
     url: "",
     sync_key: "",
     role: "client",
-    sync_api_keys: false,
   };
-  confirmPhrase.value = "";
   showModal.value = true;
 }
 
 function handleEdit(peer: SyncPeer) {
   editingPeer.value = { ...peer };
-  confirmPhrase.value = "";
   showModal.value = true;
 }
 
@@ -388,10 +388,6 @@ async function handleSave() {
   if (!editingPeer.value) return;
   try {
     await formRef.value?.validate();
-    if (editingPeer.value.sync_api_keys && confirmPhrase.value !== REQUIRED_PHRASE) {
-      message.error(t("sync.confirmPhraseError"));
-      return;
-    }
     if (peers.value.some(p => p.id === editingPeer.value?.id)) {
       await syncApi.updatePeer(editingPeer.value.id as string, editingPeer.value);
     } else {
@@ -407,21 +403,63 @@ async function handleSave() {
 </script>
 
 <template>
-  <n-card
-    class="v3-card"
-    :title="t('sync.peerSync')"
-    style="margin-bottom: 24px"
-  >
+  <n-card class="v3-card" :title="t('sync.peerSync')" style="margin-bottom: 24px">
     <template #header-extra>
-      <n-space align="center">
-        <span v-if="myVersion" style="color:var(--text-color-3);font-size:12px">
-          {{ t("sync.myVersion") }}: <strong>{{ myVersion.version }}</strong>
-          · schema <code style="font-size:11px">{{ myVersion.schema_hash }}</code>
-        </span>
-        <n-button @click="loadPeers" tertiary circle>
-          <template #icon>
-            <n-icon><Refresh /></n-icon>
-          </template>
+      <span v-if="myVersion" style="color:var(--text-color-3);font-size:12px">
+        {{ t("sync.myVersion") }}:
+        <strong>{{ myVersion.version }}</strong>
+        · schema <code style="font-size:11px">{{ myVersion.schema_hash }}</code>
+      </span>
+    </template>
+
+    <!-- 全局同步配置: enable + secret (合并自原 Settings 页) -->
+    <div class="v3-sync-config">
+      <div class="v3-sync-config__row">
+        <div class="v3-sync-config__label">
+          <div class="v3-sync-config__title">{{ t("sync.enable") }}</div>
+          <div class="v3-sync-config__hint">{{ t("sync.enableHint") }}</div>
+        </div>
+        <n-switch v-model:value="config.sync_enabled" />
+      </div>
+      <div class="v3-sync-config__row" v-if="config.sync_enabled">
+        <div class="v3-sync-config__label">
+          <div class="v3-sync-config__title">{{ t("sync.syncSecret") }}</div>
+          <div class="v3-sync-config__hint">{{ t("sync.syncSecretHint") }}</div>
+        </div>
+        <n-input
+          v-model:value="config.sync_key"
+          type="password"
+          show-password-on="click"
+          style="max-width: 320px"
+          :placeholder="t('sync.syncSecretPlaceholder')"
+        />
+      </div>
+      <div class="v3-sync-config__actions">
+        <n-button type="primary" :loading="configSaving" @click="saveConfig">
+          {{ t("common.save") }}
+        </n-button>
+      </div>
+    </div>
+
+    <!-- 升级 pending banner -->
+    <n-alert
+      v-if="upgradeStatus?.pending"
+      :type="(upgradeStatus.waiting_secs ?? 0) > 60 ? 'error' : 'info'"
+      style="margin: 16px 0"
+      :title="t('upgrade.pendingTitle', { v: upgradeStatus.request?.target_version || '?' })"
+    >
+      <div>{{ t("upgrade.pendingBody", { s: upgradeStatus.waiting_secs ?? 0 }) }}</div>
+      <div v-if="(upgradeStatus.waiting_secs ?? 0) > 60" style="margin-top: 8px; color: var(--error-color)">
+        ⚠️ {{ t("upgrade.watcherMaybeMissing") }}
+      </div>
+    </n-alert>
+
+    <!-- Peers 列表 -->
+    <div class="v3-sync-peers-head">
+      <div class="v3-sync-peers-head__title">{{ t("sync.peers") }}</div>
+      <n-space>
+        <n-button @click="loadPeers" tertiary circle :title="t('common.refresh')">
+          <template #icon><n-icon><Refresh /></n-icon></template>
         </n-button>
         <n-button
           v-if="peers.length > 0"
@@ -430,32 +468,15 @@ async function handleSave() {
           @click="triggerLocalUpgrade"
           :title="t('upgrade.localUpgradeTip')"
         >
-          <template #icon>
-            <n-icon><ArrowUpCircle /></n-icon>
-          </template>
+          <template #icon><n-icon><ArrowUpCircle /></n-icon></template>
           {{ t("upgrade.localUpgradeBtn") }}
         </n-button>
         <n-button type="primary" @click="handleAdd">
-          <template #icon>
-            <n-icon><Add /></n-icon>
-          </template>
-          {{ t("common.add") }}
+          <template #icon><n-icon><Add /></n-icon></template>
+          {{ t("sync.addPeer") }}
         </n-button>
       </n-space>
-    </template>
-
-    <!-- P9.2: 升级 pending 提示 -->
-    <n-alert
-      v-if="upgradeStatus?.pending"
-      :type="(upgradeStatus.waiting_secs ?? 0) > 60 ? 'error' : 'info'"
-      style="margin-bottom: 16px"
-      :title="t('upgrade.pendingTitle', { v: upgradeStatus.request?.target_version || '?' })"
-    >
-      <div>{{ t("upgrade.pendingBody", { s: upgradeStatus.waiting_secs ?? 0 }) }}</div>
-      <div v-if="(upgradeStatus.waiting_secs ?? 0) > 60" style="margin-top: 8px; color: var(--error-color)">
-        ⚠️ {{ t("upgrade.watcherMaybeMissing") }}
-      </div>
-    </n-alert>
+    </div>
 
     <n-data-table
       :columns="columns"
@@ -469,7 +490,7 @@ async function handleSave() {
       </template>
     </n-data-table>
 
-    <!-- 编辑 / 新增 -->
+    <!-- 新增/编辑 Peer 弹窗 (简化: 删 api_keys 开关 + 红色警告 + 手输确认) -->
     <n-modal
       v-model:show="showModal"
       preset="card"
@@ -484,7 +505,6 @@ async function handleSave() {
         >
           <n-input v-model:value="editingPeer!.name" placeholder="e.g. prod-server-1" />
         </n-form-item>
-
         <n-form-item
           :label="t('sync.peerUrl')"
           path="url"
@@ -492,7 +512,6 @@ async function handleSave() {
         >
           <n-input v-model:value="editingPeer!.url" placeholder="http://peer-ip:port" />
         </n-form-item>
-
         <n-form-item
           :label="t('sync.syncKey')"
           path="sync_key"
@@ -505,30 +524,7 @@ async function handleSave() {
             :placeholder="t('sync.syncKeyHint')"
           />
         </n-form-item>
-
-        <n-form-item :label="t('sync.syncApiKeys')">
-          <n-switch v-model:value="editingPeer!.sync_api_keys" />
-        </n-form-item>
-
-        <n-alert
-          v-if="editingPeer?.sync_api_keys"
-          type="error"
-          :title="t('sync.apiKeysWarningTitle')"
-          style="margin-bottom: 16px"
-        >
-          {{ t("sync.apiKeysWarningBody") }}
-          <div style="margin-top: 8px">
-            {{ t("sync.confirmPhrasePrompt") }}
-            <code>{{ REQUIRED_PHRASE }}</code>
-            <n-input
-              v-model:value="confirmPhrase"
-              :placeholder="REQUIRED_PHRASE"
-              style="margin-top: 8px"
-            />
-          </div>
-        </n-alert>
       </n-form>
-
       <template #footer>
         <n-space justify="end">
           <n-button @click="showModal = false">{{ t("common.cancel") }}</n-button>
@@ -559,3 +555,48 @@ async function handleSave() {
     </n-drawer>
   </n-card>
 </template>
+
+<style scoped>
+.v3-sync-config {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 12px 16px;
+  margin-bottom: 8px;
+  background: var(--v3-surface-2, rgba(0, 0, 0, 0.02));
+  border-radius: 8px;
+}
+.v3-sync-config__row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+}
+.v3-sync-config__label {
+  flex: 1;
+  min-width: 0;
+}
+.v3-sync-config__title {
+  font-weight: 500;
+  font-size: 13px;
+}
+.v3-sync-config__hint {
+  font-size: 12px;
+  color: var(--text-color-3);
+  margin-top: 2px;
+}
+.v3-sync-config__actions {
+  display: flex;
+  justify-content: flex-end;
+}
+.v3-sync-peers-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 4px 8px 4px;
+}
+.v3-sync-peers-head__title {
+  font-weight: 500;
+  font-size: 14px;
+}
+</style>

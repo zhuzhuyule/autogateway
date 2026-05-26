@@ -281,10 +281,8 @@ func (h *SyncHandler) PullEndpoint(c *gin.Context) {
 		}
 	}
 
-	// Do they want API keys?
-	syncAPIKeys := c.Query("sync_api_keys") == "true" && settings.SyncAPIKeys
-
-	payload, err := h.syncService.ExportPayload(c.Request.Context(), since, syncAPIKeys)
+	// 启用同步即同步全部 — 不再区分 sync_api_keys
+	payload, err := h.syncService.ExportPayload(c.Request.Context(), since)
 	if err != nil {
 		logrus.Errorf("failed to export payload: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to export data"})
@@ -345,6 +343,41 @@ func (h *SyncHandler) PushEndpoint(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "success"})
 }
 
+// syncConfigBody 是 /api/sync/config 的 GET 响应与 PUT 请求体.
+//
+// 前端 PeerSyncPanel 用此端点统一管理同步开关与密钥, 不再走通用的 /api/settings 路径,
+// 也不再出现在 Settings 页 (字段在 SystemSettings 上加了 hidden:"true").
+type syncConfigBody struct {
+	SyncEnabled bool   `json:"sync_enabled"`
+	SyncKey     string `json:"sync_key"`
+}
+
+// GetConfig 返回当前节点的同步开关 + Sync Secret.
+func (h *SyncHandler) GetConfig(c *gin.Context) {
+	s := h.settingsManager.GetSettings()
+	c.JSON(http.StatusOK, syncConfigBody{
+		SyncEnabled: s.SyncEnabled,
+		SyncKey:     s.SyncKey,
+	})
+}
+
+// UpdateConfig 更新同步开关 + Sync Secret. 通过 settingsManager 复用原有的 system_settings 表.
+func (h *SyncHandler) UpdateConfig(c *gin.Context) {
+	var body syncConfigBody
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body: " + err.Error()})
+		return
+	}
+	if err := h.settingsManager.UpdateSettings(map[string]any{
+		"sync_enabled": body.SyncEnabled,
+		"sync_key":     body.SyncKey,
+	}); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update: " + err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "ok"})
+}
+
 // ListPeers returns all configured sync peers
 func (h *SyncHandler) ListPeers(c *gin.Context) {
 	var peers []models.SyncPeer
@@ -388,7 +421,6 @@ func (h *SyncHandler) UpdatePeer(c *gin.Context) {
 	peer.URL = payload.URL
 	peer.SyncKey = payload.SyncKey
 	peer.Role = payload.Role
-	peer.SyncAPIKeys = payload.SyncAPIKeys
 
 	if err := h.db.Save(&peer).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update peer"})

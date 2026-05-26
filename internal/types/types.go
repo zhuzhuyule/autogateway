@@ -48,10 +48,10 @@ type SystemSettings struct {
 	// 路由阈值改由 router_engine.Selector.Settings 管理, 别名映射存
 	// 在 model_aliases 表.
 
-	// 同步配置
-	SyncEnabled   bool   `json:"sync_enabled" default:"false" name:"config.sync_enabled" category:"config.category.sync" desc:"config.sync_enabled_desc"`
-	SyncKey       string `json:"sync_key" name:"config.sync_key" category:"config.category.sync" desc:"config.sync_key_desc" sensitive:"true"`
-	SyncAPIKeys   bool   `json:"sync_api_keys" default:"false" name:"config.sync_api_keys" category:"config.category.sync" desc:"config.sync_api_keys_desc"`
+	// 同步配置 — UI 完全由 PeerSyncPanel 接管, 不出现在 Settings 动态列表里 (hidden:"true").
+	// 启用同步即同步 *所有* 内容 (groups/aliases/api_keys/...), 不再有细粒度开关.
+	SyncEnabled bool   `json:"sync_enabled" default:"false" hidden:"true"`
+	SyncKey     string `json:"sync_key" hidden:"true" sensitive:"true"`
 
 	// For cache
 	ProxyKeysMap map[string]struct{} `json:"-"`

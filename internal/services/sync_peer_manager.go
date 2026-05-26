@@ -259,7 +259,7 @@ func (m *SyncPeerManager) pushLoop(ctx context.Context) {
 func (m *SyncPeerManager) pushToPeers(ctx context.Context, settings types.SystemSettings) {
 	// since = 所有 peer 中最旧的 last_synced_at, 持久化在 SyncPeer 表里, 重启不丢.
 	since := m.computeSinceFromPeers()
-	payload, err := m.syncService.ExportPayload(ctx, since, settings.SyncAPIKeys)
+	payload, err := m.syncService.ExportPayload(ctx, since)
 	if err != nil {
 		logrus.Errorf("failed to export payload for push: %v", err)
 		m.writeLog("", "push", "error", fmt.Sprintf("export failed: %v", err), "")
@@ -348,14 +348,6 @@ func (m *SyncPeerManager) doPull(ctx context.Context) {
 		if peer.LastSyncedAt != nil {
 			pullURL += fmt.Sprintf("?since=%s", url.QueryEscape(peer.LastSyncedAt.Format(time.RFC3339Nano)))
 		}
-		if settings.SyncAPIKeys && peer.SyncAPIKeys {
-			if strings.Contains(pullURL, "?") {
-				pullURL += "&sync_api_keys=true"
-			} else {
-				pullURL += "?sync_api_keys=true"
-			}
-		}
-
 		req, err := http.NewRequestWithContext(ctx, "GET", pullURL, nil)
 		if err != nil {
 			continue

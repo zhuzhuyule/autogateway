@@ -13,7 +13,6 @@ export interface SyncPeer {
    *   - "warning:minor_version_diff"
    */
   status: string;
-  sync_api_keys: boolean;
   last_synced_at?: string;
   /** P9.1 握手回填: 对端版本号, 例如 "v2.4.10" */
   peer_version?: string;
@@ -69,7 +68,20 @@ export const upgradeApi = {
   },
 };
 
+export interface SyncConfig {
+  sync_enabled: boolean;
+  sync_key: string;
+}
+
 export const syncApi = {
+  /** P9.1: 同步全局配置 (启用开关 + 全局加密密钥) */
+  async getConfig(): Promise<SyncConfig> {
+    const response = await http.get("/sync/config");
+    return response.data;
+  },
+  async updateConfig(data: SyncConfig): Promise<void> {
+    await http.put("/sync/config", data);
+  },
   async getPeers(): Promise<SyncPeer[]> {
     const response = await http.get("/sync/peers");
     return response.data || [];

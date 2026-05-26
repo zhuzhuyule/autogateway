@@ -42,6 +42,12 @@ func GenerateSettingsMetadata(s *types.SystemSettings) []models.SystemSettingInf
 			continue
 		}
 
+		// hidden:"true" → 不出现在 Settings 动态列表里 (例如 sync_enabled / sync_key
+		// 完全由 PeerSyncPanel 自管), 但仍走 /api/settings 的 GET/PUT 接口存取.
+		if field.Tag.Get("hidden") == "true" {
+			continue
+		}
+
 		nameTag := field.Tag.Get("name")
 		descTag := field.Tag.Get("desc")
 		defaultTag := field.Tag.Get("default")

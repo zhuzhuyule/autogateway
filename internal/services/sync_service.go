@@ -90,8 +90,11 @@ func NewSyncService(db *gorm.DB, configManager types.ConfigManager) *SyncService
 	}
 }
 
-// ExportPayload 查询数据库中自 `since` 时间戳以来发生变更（包含被软删除的墓碑记录）的所有核心配置
-func (s *SyncService) ExportPayload(ctx context.Context, since *time.Time, syncAPIKeys bool) (*SyncPayload, error) {
+// ExportPayload 查询数据库中自 `since` 时间戳以来发生变更（包含被软删除的墓碑记录）的所有核心配置.
+//
+// 启用同步即同步全部内容 (含 api_keys), 不再有细粒度开关. 用户对"是否同步密钥"
+// 的选择已简化为"是否启用同步": 启用 ⇒ 全部, 不启用 ⇒ 什么都不同步.
+func (s *SyncService) ExportPayload(ctx context.Context, since *time.Time) (*SyncPayload, error) {
 	payload := &SyncPayload{
 		SourcePeerID: s.configManager.GetAuthConfig().Key, // 复用本端的 Master 密钥哈希或 Key 作为本端节点 ID
 		Timestamp:    time.Now(),
@@ -149,8 +152,8 @@ func (s *SyncService) ExportPayload(ctx context.Context, since *time.Time, syncA
 		payload.ModelAliases = items
 	}
 
-	// 5. API 密钥 (APIKeys) - 仅在配置允许并且用户开启同步时导出
-	if syncAPIKeys {
+	// 5. API 密钥 (APIKeys) - 简化后总是导出, 由 SyncEnabled 统管开关
+	{
 		var items []models.APIKey
 		query := s.db.WithContext(ctx).Unscoped()
 		if since != nil {
