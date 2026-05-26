@@ -184,22 +184,35 @@ func (s *SyncService) ProcessPayload(ctx context.Context, payload *SyncPayload) 
 
 	ctx = context.WithValue(ctx, syncMergeKey{}, true)
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		// 1. 合并系统设置 (SystemSettings)
+		// 1. 合并系统设置 (SystemSettings) — 按 setting_key 匹配, 不按 id.
+		//
+		// SystemSetting 的 id 是各端独立 autoincrement, 跨端没有意义; setting_key
+		// 才是业务唯一键 (有 UNIQUE 索引). 按 id 合并会出现 "A.id=5 的 setting_key
+		// 跟对端 incoming.id=5 不一样, Save 时撞 UNIQUE 冲突" 的灾难.
+		// 修复: 用 setting_key 找本端的现有行, 只更新它的 value/updated_at, 不动 id.
 		for _, incoming := range payload.Settings {
 			var existing models.SystemSetting
-			err := tx.Unscoped().Where("id = ?", incoming.ID).First(&existing).Error
+			err := tx.Unscoped().Where("setting_key = ?", incoming.SettingKey).First(&existing).Error
 			if err != nil {
 				if errors.Is(err, gorm.ErrRecordNotFound) {
-					if err := tx.Create(&incoming).Error; err != nil {
-						return fmt.Errorf("failed to create system setting %d: %w", incoming.ID, err)
+					// 本端没这个 setting_key, 插一条新的. 让本端自增分配新 id,
+					// 不沿用对端的 id (避免后续插入时冲突).
+					newRow := incoming
+					newRow.ID = 0
+					if err := tx.Create(&newRow).Error; err != nil {
+						return fmt.Errorf("failed to create system setting %s: %w", incoming.SettingKey, err)
 					}
 				} else {
 					return err
 				}
 			} else {
+				// LWW: 谁的 updated_at 新留谁; 注意保留 existing.ID, 不要让 Save 改主键
 				if incoming.UpdatedAt.After(existing.UpdatedAt) {
-					if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Save(&incoming).Error; err != nil {
-						return fmt.Errorf("failed to update system setting %d: %w", incoming.ID, err)
+					existing.SettingValue = incoming.SettingValue
+					existing.UpdatedAt = incoming.UpdatedAt
+					existing.DeletedAt = incoming.DeletedAt
+					if err := tx.Save(&existing).Error; err != nil {
+						return fmt.Errorf("failed to update system setting %s: %w", incoming.SettingKey, err)
 					}
 				}
 			}
