@@ -10,6 +10,7 @@ export interface SyncPeer {
    * P9.1: 复合状态字段, 可能形式:
    *   - "disconnected" / "connected"
    *   - "rejected:major_version_mismatch" / "rejected:schema_mismatch"
+   *   - "rejected:fingerprint_mismatch"
    *   - "warning:minor_version_diff"
    */
   status: string;
@@ -18,6 +19,10 @@ export interface SyncPeer {
   peer_version?: string;
   /** P9.1 握手回填: 对端 schema fingerprint */
   peer_schema_hash?: string;
+  /** P9.x 握手回填: 对端 X25519 公钥 (base64), 加密时用 */
+  public_key_x25519?: string;
+  /** P9.x 用户输入: 期望对端公钥指纹, 用于防 MITM 钉扎 */
+  pinned_fingerprint?: string;
   created_at?: string;
 }
 
@@ -34,6 +39,10 @@ export interface SyncLog {
 export interface VersionInfo {
   version: string;
   schema_hash: string;
+  /** P9.x: 本节点 X25519 公钥 (base64), 用户复制给对端配 peer 时输入 */
+  public_key: string;
+  /** P9.x: 公钥短指纹 (用户友好比对) */
+  fingerprint: string;
   started_at: string;
 }
 

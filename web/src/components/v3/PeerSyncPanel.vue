@@ -339,6 +339,16 @@ async function loadVersion() {
   }
 }
 
+async function copyFingerprint() {
+  if (!myVersion.value) return;
+  try {
+    await navigator.clipboard.writeText(myVersion.value.fingerprint);
+    message.success(t("common.copySuccess"));
+  } catch {
+    message.error(t("common.copyFailed") || "Copy failed");
+  }
+}
+
 async function openLogs(peer: SyncPeer) {
   logPeer.value = peer;
   logDrawer.value = true;
@@ -373,6 +383,7 @@ function handleAdd() {
     url: "",
     sync_key: "",
     role: "client",
+    pinned_fingerprint: "",
   };
   showModal.value = true;
 }
@@ -419,6 +430,18 @@ async function handleSave() {
         · schema <code style="font-size:11px">{{ myVersion.schema_hash }}</code>
       </span>
     </template>
+
+    <!-- 本机身份指纹 — 用户复制给对端用 -->
+    <div v-if="myVersion" class="v3-sync-identity">
+      <div class="v3-sync-identity__label">{{ t("sync.myIdentity") }}</div>
+      <div class="v3-sync-identity__fp" :title="myVersion.public_key">
+        <code>{{ myVersion.fingerprint }}</code>
+        <n-button size="tiny" tertiary @click="copyFingerprint">
+          {{ t("common.copy") }}
+        </n-button>
+      </div>
+      <div class="v3-sync-identity__hint">{{ t("sync.identityHint") }}</div>
+    </div>
 
     <!-- 全局同步配置: enable + secret (合并自原 Settings 页) -->
     <div class="v3-sync-config">
@@ -532,6 +555,15 @@ async function handleSave() {
             :placeholder="t('sync.syncKeyHint')"
           />
         </n-form-item>
+        <n-form-item :label="t('sync.pinnedFingerprint')" path="pinned_fingerprint">
+          <n-input
+            v-model:value="editingPeer!.pinned_fingerprint"
+            :placeholder="t('sync.pinnedFingerprintPlaceholder')"
+          />
+        </n-form-item>
+        <div style="font-size: 12px; color: var(--text-color-3); margin-bottom: 12px; line-height: 1.5">
+          {{ t("sync.pinnedFingerprintHint") }}
+        </div>
       </n-form>
       <template #footer>
         <n-space justify="end">
@@ -606,5 +638,35 @@ async function handleSave() {
 .v3-sync-peers-head__title {
   font-weight: 500;
   font-size: 14px;
+}
+.v3-sync-identity {
+  padding: 12px 16px;
+  margin-bottom: 12px;
+  border-radius: 8px;
+  background: var(--v3-surface-2, rgba(0, 0, 0, 0.02));
+  border-left: 3px solid var(--primary-color, #18a058);
+}
+.v3-sync-identity__label {
+  font-size: 12px;
+  color: var(--text-color-3);
+  font-weight: 500;
+  margin-bottom: 4px;
+}
+.v3-sync-identity__fp {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.v3-sync-identity__fp code {
+  font: 600 14px var(--v3-mono, ui-monospace);
+  letter-spacing: 0.5px;
+  background: var(--code-color, rgba(0, 0, 0, 0.04));
+  padding: 4px 10px;
+  border-radius: 4px;
+}
+.v3-sync-identity__hint {
+  font-size: 11px;
+  color: var(--text-color-3);
+  margin-top: 6px;
 }
 </style>

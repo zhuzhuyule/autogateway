@@ -27,19 +27,24 @@ type SyncPayload struct {
 }
 
 // WSMessage 是 WebSocket 上传递的统一消息封装. 通过 type 字段区分:
-//   - "hello"   : 客户端连上后第一帧, 携带 version + schema_hash
-//   - "welcome" : 服务端鉴权 + 兼容性通过, 同步可以开始
-//   - "warning" : 服务端允许同步但发现 minor 版本不一致, 仅警告
-//   - "reject"  : 服务端拒绝同步 (major / schema 不兼容), 含 reason 字段
+//   - "hello"   : 客户端连上后第一帧, 携带 version + schema_hash + public_key (X25519, b64)
+//   - "welcome" : 服务端鉴权 + 兼容性通过, 同步可以开始 (回传 my_public_key)
+//   - "warning" : 服务端允许同步但发现 minor 版本不一致, 仅警告 (回传 my_public_key)
+//   - "reject"  : 服务端拒绝同步 (major / schema / fingerprint 不匹配), 含 reason 字段
 //   - "sync"    : 携带 ciphertext, 走正常 payload 同步路径
+//
+// PublicKey 字段是 X25519 公钥 base64, 取代全局 SyncSecret 模型. 握手交换公钥后,
+// 后续 sync 帧用 nacl/box(发方私钥 + 收方公钥) 加密.
 type WSMessage struct {
 	Type        string `json:"type"`
 	Version     string `json:"version,omitempty"`
 	SchemaHash  string `json:"schema_hash,omitempty"`
+	PublicKey   string `json:"public_key,omitempty"`    // X25519 公钥 (b64), hello 时客户端发, welcome/warning 时服务端回
 	PeerVersion string `json:"peer_version,omitempty"`
 	PeerSchema  string `json:"peer_schema,omitempty"`
 	MyVersion   string `json:"my_version,omitempty"`
 	MySchema    string `json:"my_schema,omitempty"`
+	MyPublicKey string `json:"my_public_key,omitempty"` // 服务端在响应里回传自己的公钥
 	Reason      string `json:"reason,omitempty"`
 	Ciphertext  string `json:"ciphertext,omitempty"`
 }
@@ -80,13 +85,15 @@ func IsSyncMerge(ctx context.Context) bool {
 type SyncService struct {
 	db            *gorm.DB
 	configManager types.ConfigManager
+	keypair       *NodeKeypairService
 }
 
 // NewSyncService 构造函数，支持 dig 自动依赖注入
-func NewSyncService(db *gorm.DB, configManager types.ConfigManager) *SyncService {
+func NewSyncService(db *gorm.DB, configManager types.ConfigManager, keypair *NodeKeypairService) *SyncService {
 	return &SyncService{
 		db:            db,
 		configManager: configManager,
+		keypair:       keypair,
 	}
 }
 
@@ -286,7 +293,44 @@ func (s *SyncService) ProcessPayload(ctx context.Context, payload *SyncPayload) 
 	})
 }
 
-// EncryptPayload 使用指定的同步密钥对配置数据明文包进行 AES-256-GCM 强对称加密，生成十六进制密文
+// EncryptPayloadFor 使用 nacl/box 把 payload 加密给指定 peer (用 peer 的 X25519 公钥).
+// 这是 P9.x 后的主路径, 取代全局 SyncSecret. 单 peer 私钥泄漏只影响该 peer.
+//
+// peerPublicKeyB64 = 对端公钥的 base64 标准编码 (44 字符), 通常从 SyncPeer.PublicKeyX25519 拿.
+func (s *SyncService) EncryptPayloadFor(payload *SyncPayload, peerPublicKeyB64 string) (string, error) {
+	plain, err := json.Marshal(payload)
+	if err != nil {
+		return "", fmt.Errorf("marshal payload: %w", err)
+	}
+	pk, err := DecodePublicKeyBase64(peerPublicKeyB64)
+	if err != nil {
+		return "", fmt.Errorf("decode peer pub: %w", err)
+	}
+	return s.keypair.EncryptFor(plain, pk)
+}
+
+// DecryptPayloadFrom 用 nacl/box 解密一个来自指定 peer 的密文 (用 peer 的 X25519 公钥).
+// 私钥从 keypair service 取.
+func (s *SyncService) DecryptPayloadFrom(ciphertextB64 string, senderPublicKeyB64 string) (*SyncPayload, error) {
+	pk, err := DecodePublicKeyBase64(senderPublicKeyB64)
+	if err != nil {
+		return nil, fmt.Errorf("decode sender pub: %w", err)
+	}
+	plain, err := s.keypair.DecryptFrom(ciphertextB64, pk)
+	if err != nil {
+		return nil, err
+	}
+	var payload SyncPayload
+	if err := json.Unmarshal(plain, &payload); err != nil {
+		return nil, fmt.Errorf("unmarshal: %w", err)
+	}
+	return &payload, nil
+}
+
+// EncryptPayload 使用指定的同步密钥对配置数据明文包进行 AES-256-GCM 强对称加密，生成十六进制密文.
+//
+// Deprecated: 用 EncryptPayloadFor 替代. 此函数为过渡期兼容保留, 当 peer 未升级到
+// 非对称模型 (PublicKeyX25519 为空) 时仍回退到 SyncKey 路径.
 func (s *SyncService) EncryptPayload(payload *SyncPayload, syncKey string) (string, error) {
 	plainBytes, err := json.Marshal(payload)
 	if err != nil {

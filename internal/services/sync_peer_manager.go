@@ -32,6 +32,7 @@ type SyncPeerManager struct {
 	db              *gorm.DB
 	syncService     *SyncService
 	settingsManager *config.SystemSettingsManager
+	keypair         *NodeKeypairService
 
 	peersMu     sync.Mutex
 	activePeers map[string]*websocket.Conn // key: Peer ID
@@ -48,11 +49,12 @@ func (m *SyncPeerManager) SetBroadcaster(b Broadcaster) {
 	m.broadcaster = b
 }
 
-func NewSyncPeerManager(db *gorm.DB, syncService *SyncService, settingsManager *config.SystemSettingsManager) *SyncPeerManager {
+func NewSyncPeerManager(db *gorm.DB, syncService *SyncService, settingsManager *config.SystemSettingsManager, keypair *NodeKeypairService) *SyncPeerManager {
 	return &SyncPeerManager{
 		db:              db,
 		syncService:     syncService,
 		settingsManager: settingsManager,
+		keypair:         keypair,
 		activePeers:     make(map[string]*websocket.Conn),
 		notifyChan:      make(chan struct{}, 1),
 	}
@@ -147,11 +149,12 @@ func (m *SyncPeerManager) ensureConnection(peer models.SyncPeer) {
 		return
 	}
 
-	// P9.1 兼容性握手: 发送 hello{version, schema_hash}, 等待 welcome/warning/reject.
+	// P9.1 兼容性握手 + P9.x 公钥交换: hello 携带本机 X25519 公钥.
 	hello := WSMessage{
 		Type:       "hello",
 		Version:    version.Version,
 		SchemaHash: ComputeSchemaHash(),
+		PublicKey:  m.keypair.PublicKeyBase64(),
 	}
 	if err := conn.WriteJSON(hello); err != nil {
 		logrus.Warnf("failed to send hello to peer %s: %v", peer.Name, err)
@@ -166,6 +169,22 @@ func (m *SyncPeerManager) ensureConnection(peer models.SyncPeer) {
 		return
 	}
 	_ = conn.SetReadDeadline(time.Time{})
+	// P9.x: 若用户在 SyncPeer.PinnedFingerprint 钉了对端指纹, 这里要校验对端
+	// MyPublicKey 算出的指纹是否一致, 防 MITM.
+	if peer.PinnedFingerprint != "" && resp.MyPublicKey != "" {
+		actualFp := FingerprintOf(resp.MyPublicKey)
+		if actualFp != peer.PinnedFingerprint {
+			logrus.Warnf("peer %s fingerprint mismatch: pinned=%s actual=%s",
+				peer.Name, peer.PinnedFingerprint, actualFp)
+			m.db.Model(&models.SyncPeer{}).Where("id = ?", peer.ID).Update("status",
+				"rejected:fingerprint_mismatch")
+			m.writeLog(peer.ID, "push", "error",
+				fmt.Sprintf("fingerprint mismatch pinned=%s actual=%s", peer.PinnedFingerprint, actualFp), "")
+			conn.Close()
+			return
+		}
+	}
+
 	switch resp.Type {
 	case "reject":
 		logrus.Warnf("peer %s rejected handshake: %s (peer=%s mine=%s)",
@@ -182,15 +201,17 @@ func (m *SyncPeerManager) ensureConnection(peer models.SyncPeer) {
 		logrus.Warnf("peer %s warning: %s (peer=%s mine=%s)",
 			peer.Name, resp.Reason, resp.PeerVersion, version.Version)
 		m.db.Model(&models.SyncPeer{}).Where("id = ?", peer.ID).Updates(map[string]any{
-			"status":           "warning:" + resp.Reason,
-			"peer_version":     resp.MyVersion,
-			"peer_schema_hash": resp.MySchema,
+			"status":            "warning:" + resp.Reason,
+			"peer_version":      resp.MyVersion,
+			"peer_schema_hash":  resp.MySchema,
+			"public_key_x25519": resp.MyPublicKey,
 		})
 	case "welcome":
 		m.db.Model(&models.SyncPeer{}).Where("id = ?", peer.ID).Updates(map[string]any{
-			"status":           "connected",
-			"peer_version":     resp.MyVersion,
-			"peer_schema_hash": resp.MySchema,
+			"status":            "connected",
+			"peer_version":      resp.MyVersion,
+			"peer_schema_hash":  resp.MySchema,
+			"public_key_x25519": resp.MyPublicKey,
 		})
 	default:
 		logrus.Warnf("peer %s sent unexpected handshake response: %s", peer.Name, resp.Type)
@@ -272,22 +293,50 @@ func (m *SyncPeerManager) pushToPeers(ctx context.Context, settings types.System
 		return // Nothing changed
 	}
 
-	ciphertext, err := m.syncService.EncryptPayload(payload, settings.SyncKey)
-	if err != nil {
-		logrus.Errorf("failed to encrypt payload for push: %v", err)
-		m.writeLog("", "push", "error", fmt.Sprintf("encrypt failed: %v", err), payloadSummary(payload))
+	// P9.x: per-peer 单独加密. 把全部 peers 从 DB 拉一次, 找到每个 ID 对应的
+	// PublicKeyX25519 (握手时落库), 用 nacl/box 单独加密一份给该 peer.
+	// 这样单 peer 私钥泄漏只暴露发给它的密文, 其他 peer 安全.
+	var allPeers []models.SyncPeer
+	if err := m.db.Find(&allPeers).Error; err != nil {
+		logrus.Errorf("failed to load peers for per-peer encryption: %v", err)
+		m.writeLog("", "push", "error", fmt.Sprintf("load peers: %v", err), "")
 		return
 	}
+	peerPubByID := make(map[string]string, len(allPeers))
+	for _, p := range allPeers {
+		peerPubByID[p.ID] = p.PublicKeyX25519
+	}
 
-	msg, _ := json.Marshal(WSMessage{Type: "sync", Ciphertext: ciphertext})
+	summary := payloadSummary(payload)
 
 	m.peersMu.Lock()
 	defer m.peersMu.Unlock()
 
-	summary := payloadSummary(payload)
 	pushedToAny := false
 	for peerID, conn := range m.activePeers {
-		if err := conn.WriteMessage(websocket.TextMessage, msg); err != nil {
+		var msgBytes []byte
+		peerPub := peerPubByID[peerID]
+		if peerPub != "" {
+			// 主路径: 用 peer 的 X25519 公钥加密
+			ciphertext, err := m.syncService.EncryptPayloadFor(payload, peerPub)
+			if err != nil {
+				logrus.Warnf("failed to encrypt for peer %s (asymmetric): %v", peerID, err)
+				m.writeLog(peerID, "push", "error", "asym encrypt: "+err.Error(), summary)
+				continue
+			}
+			msgBytes, _ = json.Marshal(WSMessage{Type: "sync", Ciphertext: ciphertext})
+		} else {
+			// 回退: 老版本 peer 未升级, 走全局 SyncKey
+			ciphertext, err := m.syncService.EncryptPayload(payload, settings.SyncKey)
+			if err != nil {
+				logrus.Warnf("failed to encrypt for peer %s (legacy): %v", peerID, err)
+				m.writeLog(peerID, "push", "error", "legacy encrypt: "+err.Error(), summary)
+				continue
+			}
+			msgBytes, _ = json.Marshal(WSMessage{Type: "sync", Ciphertext: ciphertext})
+		}
+
+		if err := conn.WriteMessage(websocket.TextMessage, msgBytes); err != nil {
 			logrus.Warnf("failed to push to peer %s: %v", peerID, err)
 			m.writeLog(peerID, "push", "error", err.Error(), summary)
 			conn.Close()
@@ -300,10 +349,17 @@ func (m *SyncPeerManager) pushToPeers(ctx context.Context, settings types.System
 		}
 	}
 
-	// Gap 3: 同时让 ws server 端持有的 conn 也收到推送 (双向 mesh).
-	// peersMu 锁内调用是安全的, broadcaster 自己管 clientsMu.
-	if m.broadcaster != nil {
-		m.broadcaster.Broadcast(msg)
+	// Gap 3 双向 mesh: ws server 端持有的 conn 也要推. 它们不在 m.activePeers 里,
+	// 只能用对应的 peer 公钥单独加密 (server 端不知道 conn 对应哪个 peer 公钥的话,
+	// 退化到对每个 peer 加密一份, 让 broadcaster 按 conn 拣选投递).
+	// 当前 broadcaster 是无差别广播一条 msg, 这一份用回退路径加密 (settings.SyncKey),
+	// 保证 server 端 conn 仍能解; 后续可扩展 broadcaster 接口支持 per-peer 分发.
+	if m.broadcaster != nil && settings.SyncKey != "" {
+		legacyCt, err := m.syncService.EncryptPayload(payload, settings.SyncKey)
+		if err == nil {
+			legacyMsg, _ := json.Marshal(WSMessage{Type: "sync", Ciphertext: legacyCt})
+			m.broadcaster.Broadcast(legacyMsg)
+		}
 	}
 
 	if pushedToAny {

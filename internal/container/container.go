@@ -135,6 +135,9 @@ func BuildContainer() (*dig.Container, error) {
 	if err := container.Provide(handler.NewSyncHandler); err != nil {
 		return nil, err
 	}
+	if err := container.Provide(services.NewNodeKeypairService); err != nil {
+		return nil, err
+	}
 	if err := container.Provide(handler.NewVersionHandler); err != nil {
 		return nil, err
 	}

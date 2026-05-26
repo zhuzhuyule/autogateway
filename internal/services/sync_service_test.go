@@ -70,7 +70,7 @@ func newSyncTestDB(t *testing.T) *gorm.DB {
 func TestSyncService_EncryptDecrypt(t *testing.T) {
 	db := newSyncTestDB(t)
 	cfg := &mockConfigManager{masterKey: "test-node-1"}
-	svc := NewSyncService(db, cfg)
+	svc := NewSyncService(db, cfg, NewNodeKeypairService())
 
 	payload := &SyncPayload{
 		SourcePeerID: "test-node-1",
@@ -120,7 +120,7 @@ func TestSyncService_EncryptDecrypt(t *testing.T) {
 func TestSyncService_ProcessPayload_LWW_And_Tombstone(t *testing.T) {
 	db := newSyncTestDB(t)
 	cfg := &mockConfigManager{masterKey: "test-node-1"}
-	svc := NewSyncService(db, cfg)
+	svc := NewSyncService(db, cfg, NewNodeKeypairService())
 
 	ctx := context.Background()
 
@@ -270,7 +270,7 @@ func TestSyncService_ProcessPayload_LWW_And_Tombstone(t *testing.T) {
 func TestProcessPayload_MarksSyncMergeContext(t *testing.T) {
 	db := newSyncTestDB(t)
 	cfg := &mockConfigManager{masterKey: "node-merge"}
-	svc := NewSyncService(db, cfg)
+	svc := NewSyncService(db, cfg, NewNodeKeypairService())
 
 	var (
 		mergeHookSawFlag    bool

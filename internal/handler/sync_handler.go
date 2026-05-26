@@ -30,6 +30,7 @@ var upgrader = websocket.Upgrader{
 type SyncHandler struct {
 	syncService     *services.SyncService
 	settingsManager *config.SystemSettingsManager
+	keypair         *services.NodeKeypairService
 	db              *gorm.DB
 
 	// Active WebSocket connections
@@ -38,10 +39,11 @@ type SyncHandler struct {
 }
 
 // NewSyncHandler creates a new SyncHandler
-func NewSyncHandler(syncService *services.SyncService, settingsManager *config.SystemSettingsManager, db *gorm.DB) *SyncHandler {
+func NewSyncHandler(syncService *services.SyncService, settingsManager *config.SystemSettingsManager, keypair *services.NodeKeypairService, db *gorm.DB) *SyncHandler {
 	return &SyncHandler{
 		syncService:     syncService,
 		settingsManager: settingsManager,
+		keypair:         keypair,
 		db:              db,
 		clients:         make(map[*websocket.Conn]bool),
 	}
@@ -172,7 +174,15 @@ func (h *SyncHandler) WsEndpoint(c *gin.Context) {
 				continue // 心跳/未知类型暂时忽略
 			}
 
-			payload, err := h.syncService.DecryptPayload(msgIn.Ciphertext, settings.SyncKey)
+			// P9.x 优先用非对称密钥解 (sender 是握手时记录的 peer.PublicKeyX25519);
+			// 仅当未记录公钥 (老版本未升级 peer) 时回退到全局 SyncKey 路径.
+			var payload *services.SyncPayload
+			var err error
+			if peer.PublicKeyX25519 != "" {
+				payload, err = h.syncService.DecryptPayloadFrom(msgIn.Ciphertext, peer.PublicKeyX25519)
+			} else {
+				payload, err = h.syncService.DecryptPayload(msgIn.Ciphertext, settings.SyncKey)
+			}
 			if err != nil {
 				logrus.Errorf("failed to decrypt sync payload: %v", err)
 				h.writeLog(peer.ID, "push", "error", fmt.Sprintf("decrypt: %v", err), "ws")
@@ -219,6 +229,7 @@ func (h *SyncHandler) performHandshake(ws *websocket.Conn, peer *models.SyncPeer
 
 	myVer := version.Version
 	mySchema := services.ComputeSchemaHash()
+	myPub := h.keypair.PublicKeyBase64()
 
 	if services.ExtractMajor(hello.Version) != services.ExtractMajor(myVer) {
 		_ = ws.WriteJSON(services.WSMessage{
@@ -241,8 +252,34 @@ func (h *SyncHandler) performHandshake(ws *websocket.Conn, peer *models.SyncPeer
 		return false
 	}
 
-	// 通过 — 若 minor/patch 不一致只发 welcome + reason="minor_diff", 不阻断
-	resp := services.WSMessage{Type: "welcome", MyVersion: myVer, MySchema: mySchema}
+	// P9.x: 指纹钉扎 — 若 SyncPeer.PinnedFingerprint 存在, 对端 hello.PublicKey 算出的
+	// 指纹必须匹配, 否则拒绝 (防止冒名顶替 / MITM).
+	if peer.PinnedFingerprint != "" && hello.PublicKey != "" {
+		actualFp := services.FingerprintOf(hello.PublicKey)
+		if actualFp != peer.PinnedFingerprint {
+			_ = ws.WriteJSON(services.WSMessage{
+				Type:   "reject",
+				Reason: "fingerprint_mismatch",
+			})
+			h.writeLog(peer.ID, "push", "error",
+				fmt.Sprintf("fingerprint mismatch pinned=%s actual=%s", peer.PinnedFingerprint, actualFp), "ws")
+			return false
+		}
+	}
+
+	// 握手通过 — 把对端公钥落库, 后续 sync 帧用它解密.
+	if hello.PublicKey != "" {
+		h.db.Model(&models.SyncPeer{}).Where("id = ?", peer.ID).Update("public_key_x25519", hello.PublicKey)
+		peer.PublicKeyX25519 = hello.PublicKey
+	}
+
+	// 若 minor/patch 不一致只发 warning, 不阻断
+	resp := services.WSMessage{
+		Type:        "welcome",
+		MyVersion:   myVer,
+		MySchema:    mySchema,
+		MyPublicKey: myPub,
+	}
 	if hello.Version != myVer {
 		resp.Type = "warning"
 		resp.Reason = "minor_version_diff"

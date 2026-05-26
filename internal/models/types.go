@@ -296,6 +296,11 @@ type SyncPeer struct {
 	// P9.1 兼容性闸门: 握手成功后填入, UI 用于展示对端版本徽章 + 提示版本差异.
 	PeerVersion    string         `gorm:"type:varchar(50)" json:"peer_version"`
 	PeerSchemaHash string         `gorm:"type:varchar(32)" json:"peer_schema_hash"`
+	// P9.x 非对称密钥模型: 添加 peer 时用户输入 PinnedFingerprint (期望对端公钥指纹).
+	// 握手时从对端 /api/version 拿 PublicKeyX25519, 比对指纹一致才接受.
+	// 加密用 nacl/box(my_priv + peer_pub), 不再用全局 SyncSecret.
+	PublicKeyX25519    string `gorm:"type:varchar(64)" json:"public_key_x25519"`
+	PinnedFingerprint  string `gorm:"type:varchar(32)" json:"pinned_fingerprint"`
 	CreatedAt      time.Time      `json:"created_at"`
 	UpdatedAt      time.Time      `json:"updated_at"`
 	DeletedAt      gorm.DeletedAt `gorm:"index" json:"-"`
