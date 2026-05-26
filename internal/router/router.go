@@ -248,7 +248,8 @@ func registerProtectedAPIRoutes(
 		settings.PUT("", serverHandler.UpdateSettings)
 	}
 
-	// Sync Peer CRUD
+	// Sync Peer CRUD + sync logs
+	api.GET("/sync/logs", syncHandler.ListLogs)
 	syncPeers := api.Group("/sync/peers")
 	{
 		syncPeers.GET("", syncHandler.ListPeers)

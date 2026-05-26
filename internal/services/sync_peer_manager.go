@@ -173,6 +173,7 @@ func (m *SyncPeerManager) pushToPeers(ctx context.Context, settings types.System
 	payload, err := m.syncService.ExportPayload(ctx, &m.lastPushTime, settings.SyncAPIKeys)
 	if err != nil {
 		logrus.Errorf("failed to export payload for push: %v", err)
+		m.writeLog("", "push", "error", fmt.Sprintf("export failed: %v", err), "")
 		return
 	}
 
@@ -185,6 +186,7 @@ func (m *SyncPeerManager) pushToPeers(ctx context.Context, settings types.System
 	ciphertext, err := m.syncService.EncryptPayload(payload, settings.SyncKey)
 	if err != nil {
 		logrus.Errorf("failed to encrypt payload for push: %v", err)
+		m.writeLog("", "push", "error", fmt.Sprintf("encrypt failed: %v", err), payloadSummary(payload))
 		return
 	}
 
@@ -195,23 +197,25 @@ func (m *SyncPeerManager) pushToPeers(ctx context.Context, settings types.System
 	m.peersMu.Lock()
 	defer m.peersMu.Unlock()
 
+	summary := payloadSummary(payload)
 	pushedToAny := false
 	for peerID, conn := range m.activePeers {
 		if err := conn.WriteMessage(websocket.TextMessage, msg); err != nil {
 			logrus.Warnf("failed to push to peer %s: %v", peerID, err)
+			m.writeLog(peerID, "push", "error", err.Error(), summary)
 			conn.Close()
 			delete(m.activePeers, peerID)
 		} else {
 			pushedToAny = true
-			// Update last synced at
 			now := time.Now()
 			m.db.Model(&models.SyncPeer{}).Where("id = ?", peerID).Update("last_synced_at", now)
+			m.writeLog(peerID, "push", "success", "", summary)
 		}
 	}
 
 	if pushedToAny {
 		m.lastPushTime = time.Now()
-		logrus.Infof("successfully pushed local changes to connected peers")
+		logrus.Infof("successfully pushed local changes to connected peers (%s)", summary)
 	}
 }
 
@@ -269,10 +273,12 @@ func (m *SyncPeerManager) doPull(ctx context.Context) {
 		resp, err := client.Do(req)
 		if err != nil {
 			logrus.Debugf("failed to pull from peer %s: %v", peer.Name, err)
+			m.writeLog(peer.ID, "pull", "error", fmt.Sprintf("http failed: %v", err), "")
 			continue
 		}
 
 		if resp.StatusCode != http.StatusOK {
+			m.writeLog(peer.ID, "pull", "error", fmt.Sprintf("http status %d", resp.StatusCode), "")
 			resp.Body.Close()
 			continue
 		}
@@ -281,29 +287,86 @@ func (m *SyncPeerManager) doPull(ctx context.Context) {
 			Ciphertext string `json:"ciphertext"`
 		}
 		if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+			m.writeLog(peer.ID, "pull", "error", fmt.Sprintf("decode response: %v", err), "")
 			resp.Body.Close()
 			continue
 		}
 		resp.Body.Close()
 
 		if response.Ciphertext == "" {
-			continue // No new data
+			continue // No new data, not an error - skip logging to avoid noise
 		}
 
 		payload, err := m.syncService.DecryptPayload(response.Ciphertext, settings.SyncKey)
 		if err != nil {
 			logrus.Errorf("failed to decrypt pulled payload from peer %s: %v", peer.Name, err)
+			m.writeLog(peer.ID, "pull", "error", fmt.Sprintf("decrypt: %v", err), "")
 			continue
 		}
 
 		if err := m.syncService.ProcessPayload(ctx, payload); err != nil {
 			logrus.Errorf("failed to process pulled payload from peer %s: %v", peer.Name, err)
+			m.writeLog(peer.ID, "pull", "error", fmt.Sprintf("merge: %v", err), payloadSummary(payload))
 			continue
 		}
 
 		now := time.Now()
 		m.db.Model(&models.SyncPeer{}).Where("id = ?", peer.ID).Update("last_synced_at", now)
-		logrus.Infof("successfully pulled and merged changes from peer %s", peer.Name)
+		summary := payloadSummary(payload)
+		m.writeLog(peer.ID, "pull", "success", "", summary)
+		logrus.Infof("successfully pulled and merged changes from peer %s (%s)", peer.Name, summary)
+	}
+}
+
+// writeLog 写一条 SyncLog 到数据库. 失败时只 warn, 不阻断同步主路径.
+func (m *SyncPeerManager) writeLog(peerID, action, status, errMsg, details string) {
+	log := models.SyncLog{
+		PeerID:       peerID,
+		Action:       action,
+		Status:       status,
+		ErrorMessage: errMsg,
+		Details:      details,
+		Timestamp:    time.Now(),
+	}
+	if err := m.db.Create(&log).Error; err != nil {
+		logrus.Warnf("failed to write sync log: %v", err)
+	}
+}
+
+// payloadSummary 把 SyncPayload 摘要成 "groups=2,aliases=5" 这样的字符串, 给 SyncLog.Details 用.
+func payloadSummary(p *SyncPayload) string {
+	parts := []string{}
+	if n := len(p.Settings); n > 0 {
+		parts = append(parts, fmt.Sprintf("settings=%d", n))
+	}
+	if n := len(p.Groups); n > 0 {
+		parts = append(parts, fmt.Sprintf("groups=%d", n))
+	}
+	if n := len(p.SubGroups); n > 0 {
+		parts = append(parts, fmt.Sprintf("sub_groups=%d", n))
+	}
+	if n := len(p.ModelAliases); n > 0 {
+		parts = append(parts, fmt.Sprintf("aliases=%d", n))
+	}
+	if n := len(p.APIKeys); n > 0 {
+		parts = append(parts, fmt.Sprintf("api_keys=%d", n))
+	}
+	if len(parts) == 0 {
+		return "(empty)"
+	}
+	return strings.Join(parts, ",")
+}
+
+// PurgeOldLogs 删除超过 daysToKeep 天的 sync_logs, 避免无限增长.
+func (m *SyncPeerManager) PurgeOldLogs(daysToKeep int) {
+	cutoff := time.Now().AddDate(0, 0, -daysToKeep)
+	res := m.db.Where("timestamp < ?", cutoff).Delete(&models.SyncLog{})
+	if res.Error != nil {
+		logrus.Warnf("failed to purge old sync_logs: %v", res.Error)
+		return
+	}
+	if res.RowsAffected > 0 {
+		logrus.Infof("purged %d sync_logs older than %d days", res.RowsAffected, daysToKeep)
 	}
 }
 

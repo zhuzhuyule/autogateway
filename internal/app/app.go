@@ -195,6 +195,8 @@ func (a *App) Start() error {
 		a.requestLogService.Start()
 		a.logCleanupService.Start()
 		a.cronChecker.Start()
+		// 启动同步管理器前清理 30 天以上的 sync_logs, 避免无限增长
+		a.syncPeerManager.PurgeOldLogs(30)
 		a.syncPeerManager.Start(context.Background())
 	} else {
 		logrus.Info("Starting as Slave Node.")

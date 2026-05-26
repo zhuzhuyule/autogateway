@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"sync"
 	"time"
@@ -41,6 +42,21 @@ func NewSyncHandler(syncService *services.SyncService, settingsManager *config.S
 		settingsManager: settingsManager,
 		db:              db,
 		clients:         make(map[*websocket.Conn]bool),
+	}
+}
+
+// writeLog 写一条 SyncLog. 失败时只 warn, 不阻断同步主路径.
+func (h *SyncHandler) writeLog(peerID, action, status, errMsg, details string) {
+	log := models.SyncLog{
+		PeerID:       peerID,
+		Action:       action,
+		Status:       status,
+		ErrorMessage: errMsg,
+		Details:      details,
+		Timestamp:    time.Now(),
+	}
+	if err := h.db.Create(&log).Error; err != nil {
+		logrus.Warnf("failed to write sync log: %v", err)
 	}
 }
 
@@ -91,20 +107,24 @@ func (h *SyncHandler) WsEndpoint(c *gin.Context) {
 			}
 			if err := json.Unmarshal(msg, &request); err != nil {
 				logrus.Warnf("failed to unmarshal sync message: %v", err)
+				h.writeLog("", "push", "error", fmt.Sprintf("unmarshal: %v", err), "ws")
 				continue
 			}
 
 			payload, err := h.syncService.DecryptPayload(request.Ciphertext, settings.SyncKey)
 			if err != nil {
 				logrus.Errorf("failed to decrypt sync payload: %v", err)
+				h.writeLog("", "push", "error", fmt.Sprintf("decrypt: %v", err), "ws")
 				continue
 			}
 
 			if err := h.syncService.ProcessPayload(context.Background(), payload); err != nil {
 				logrus.Errorf("failed to process sync payload: %v", err)
+				h.writeLog(payload.SourcePeerID, "push", "error", fmt.Sprintf("merge: %v", err), "ws")
 				continue
 			}
 
+			h.writeLog(payload.SourcePeerID, "push", "success", "", "ws")
 			logrus.Infof("successfully processed sync payload from peer %s (ws)", payload.SourcePeerID)
 		}
 	}
@@ -263,4 +283,31 @@ func (h *SyncHandler) DeletePeer(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "success"})
+}
+
+// ListLogs returns recent sync logs. Supports filter by peer_id and action.
+// Capped at 200 rows, ordered by timestamp desc, for the UI 历史抽屉.
+func (h *SyncHandler) ListLogs(c *gin.Context) {
+	peerID := c.Query("peer_id")
+	action := c.Query("action")
+	limitStr := c.DefaultQuery("limit", "50")
+	limit := 50
+	if n, err := fmt.Sscanf(limitStr, "%d", &limit); err != nil || n != 1 || limit <= 0 || limit > 200 {
+		limit = 50
+	}
+
+	q := h.db.Model(&models.SyncLog{}).Order("timestamp desc").Limit(limit)
+	if peerID != "" {
+		q = q.Where("peer_id = ?", peerID)
+	}
+	if action != "" {
+		q = q.Where("action = ?", action)
+	}
+
+	var logs []models.SyncLog
+	if err := q.Find(&logs).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch logs"})
+		return
+	}
+	c.JSON(http.StatusOK, logs)
 }

@@ -340,3 +340,36 @@ func TestProcessPayload_MarksSyncMergeContext(t *testing.T) {
 		t.Error("expected normal hook NOT to see syncMergeKey on direct write")
 	}
 }
+
+// TestPayloadSummary 验证 payloadSummary 输出格式
+func TestPayloadSummary(t *testing.T) {
+	cases := []struct {
+		name string
+		p    SyncPayload
+		want string
+	}{
+		{"empty", SyncPayload{}, "(empty)"},
+		{
+			"groups only",
+			SyncPayload{Groups: []models.Group{{}, {}, {}}},
+			"groups=3",
+		},
+		{
+			"mixed",
+			SyncPayload{
+				Settings:     []models.SystemSetting{{}},
+				Groups:       []models.Group{{}, {}},
+				ModelAliases: []models.ModelAlias{{}, {}, {}, {}, {}},
+			},
+			"settings=1,groups=2,aliases=5",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := payloadSummary(&tc.p)
+			if got != tc.want {
+				t.Errorf("payloadSummary() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
