@@ -263,3 +263,80 @@ func TestSyncService_ProcessPayload_LWW_And_Tombstone(t *testing.T) {
 		t.Error("expected valid DeletedAt timestamp on unscoped record")
 	}
 }
+
+// TestProcessPayload_MarksSyncMergeContext 验证 ProcessPayload 在事务 context 上
+// 设置了 syncMergeKey 标记,GORM hook 可借此判断当前是合并事务,从而短路 NotifyChange,
+// 防止 A→B→A 同步回环.
+func TestProcessPayload_MarksSyncMergeContext(t *testing.T) {
+	db := newSyncTestDB(t)
+	cfg := &mockConfigManager{masterKey: "node-merge"}
+	svc := NewSyncService(db, cfg)
+
+	var (
+		mergeHookSawFlag    bool
+		nonMergeHookSawFlag bool
+	)
+
+	// 注册一个 hook,记录 hook 触发时 context 里的 syncMergeKey 状态
+	hookFn := func(target *bool) func(tx *gorm.DB) {
+		return func(tx *gorm.DB) {
+			if tx.Statement == nil {
+				return
+			}
+			if IsSyncMerge(tx.Statement.Context) {
+				*target = true
+			}
+		}
+	}
+
+	// 注意: gorm 同名 callback 不能重复注册,我们用两个 hook 名分别测试两路径
+	if err := db.Callback().Create().After("gorm:create").Register("test_merge_hook", hookFn(&mergeHookSawFlag)); err != nil {
+		t.Fatalf("failed to register merge hook: %v", err)
+	}
+	defer db.Callback().Create().Remove("test_merge_hook")
+
+	// 路径 1: 通过 ProcessPayload 触发 → hook 应看到 flag=true
+	payload := &SyncPayload{
+		SourcePeerID: "node-other",
+		Timestamp:    time.Now(),
+		ModelAliases: []models.ModelAlias{
+			{
+				ID:        7777,
+				Alias:     "loop-defense",
+				GroupID:   1,
+				RealModel: "test-model",
+				Enabled:   true,
+				CreatedAt: time.Now(),
+				UpdatedAt: time.Now(),
+			},
+		},
+	}
+	if err := svc.ProcessPayload(context.Background(), payload); err != nil {
+		t.Fatalf("ProcessPayload failed: %v", err)
+	}
+	if !mergeHookSawFlag {
+		t.Error("expected merge hook to see syncMergeKey=true after ProcessPayload")
+	}
+
+	// 路径 2: 直接 DB 操作不带标记 → hook 不应看到 flag=true
+	db.Callback().Create().Remove("test_merge_hook")
+	if err := db.Callback().Create().After("gorm:create").Register("test_normal_hook", hookFn(&nonMergeHookSawFlag)); err != nil {
+		t.Fatalf("failed to register normal hook: %v", err)
+	}
+	defer db.Callback().Create().Remove("test_normal_hook")
+
+	if err := db.Create(&models.ModelAlias{
+		ID:        8888,
+		Alias:     "user-write",
+		GroupID:   1,
+		RealModel: "user-model",
+		Enabled:   true,
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}).Error; err != nil {
+		t.Fatalf("direct create failed: %v", err)
+	}
+	if nonMergeHookSawFlag {
+		t.Error("expected normal hook NOT to see syncMergeKey on direct write")
+	}
+}

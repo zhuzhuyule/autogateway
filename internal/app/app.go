@@ -165,16 +165,17 @@ func (a *App) Start() error {
 		// unreachable — frontend has a static fallback list.
 		a.freeModelsRegistry.Start(context.Background())
 
-		// 注册 GORM 回调，以便在配置变更时触发同步推送
+		// 注册 GORM 回调，以便在配置变更时触发同步推送。
+		// 通过 services.IsSyncMerge 判断当前事务是否由合并触发,如是则短路防止 A→B→A 回环。
 		notifyFunc := func(db *gorm.DB) {
 			if db.Error != nil || db.Statement == nil || db.Statement.Schema == nil {
 				return
 			}
+			if services.IsSyncMerge(db.Statement.Context) {
+				return
+			}
 			table := db.Statement.Schema.Table
 			if table == "system_settings" || table == "groups" || table == "group_sub_groups" || table == "model_aliases" || table == "api_keys" {
-				// Avoid infinite loop if this was a sync merge transaction by checking a context flag?
-				// Actually, SyncService.ProcessPayload doesn't set a flag, but we can just let it notify.
-				// The push loop debounces and checks for actual changes since lastPushTime.
 				a.syncPeerManager.NotifyChange()
 			}
 		}

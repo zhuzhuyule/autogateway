@@ -25,6 +25,16 @@ type SyncPayload struct {
 	ModelAliases []models.ModelAlias    `json:"model_aliases,omitempty"`
 }
 
+// syncMergeKey 是用于在 context 中标记"当前事务是同步合并触发"的 key,
+// 防止 GORM hook 在合并事务中再次触发 push 形成回环。
+type syncMergeKey struct{}
+
+// IsSyncMerge 供 GORM hook 判断当前事务是否由同步合并触发。
+func IsSyncMerge(ctx context.Context) bool {
+	v, _ := ctx.Value(syncMergeKey{}).(bool)
+	return v
+}
+
 // SyncService 负责多端数据加密封包、解密解包以及记录级智能合并业务
 type SyncService struct {
 	db            *gorm.DB
@@ -114,12 +124,14 @@ func (s *SyncService) ExportPayload(ctx context.Context, since *time.Time, syncA
 	return payload, nil
 }
 
-// ProcessPayload 在单个事务中执行记录级最新写入生效（LWW per Record）智能合并
+// ProcessPayload 在单个事务中执行记录级最新写入生效（LWW per Record）智能合并。
+// 在 context 上挂 syncMergeKey 标记,GORM hook 见到后短路,避免合并触发回环 push。
 func (s *SyncService) ProcessPayload(ctx context.Context, payload *SyncPayload) error {
 	if payload == nil {
 		return nil
 	}
 
+	ctx = context.WithValue(ctx, syncMergeKey{}, true)
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// 1. 合并系统设置 (SystemSettings)
 		for _, incoming := range payload.Settings {
