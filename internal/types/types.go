@@ -30,7 +30,7 @@ type SystemSettings struct {
 	// 请求设置
 	RequestTimeout        int    `json:"request_timeout" default:"600" name:"config.request_timeout" category:"config.category.request" desc:"config.request_timeout_desc" validate:"required,min=1"`
 	ConnectTimeout        int    `json:"connect_timeout" default:"15" name:"config.connect_timeout" category:"config.category.request" desc:"config.connect_timeout_desc" validate:"required,min=1"`
-	IdleConnTimeout       int    `json:"idle_conn_timeout" default:"120" name:"config.idle_conn_timeout" category:"config.category.idle_conn_timeout" desc:"config.idle_conn_timeout_desc" validate:"required,min=1"`
+	IdleConnTimeout       int    `json:"idle_conn_timeout" default:"120" name:"config.idle_conn_timeout" category:"config.category.request" desc:"config.idle_conn_timeout_desc" validate:"required,min=1"`
 	ResponseHeaderTimeout int    `json:"response_header_timeout" default:"600" name:"config.response_header_timeout" category:"config.category.request" desc:"config.response_header_timeout_desc" validate:"required,min=1"`
 	MaxIdleConns          int    `json:"max_idle_conns" default:"100" name:"config.max_idle_conns" category:"config.category.request" desc:"config.max_idle_conns_desc" validate:"required,min=1"`
 	MaxIdleConnsPerHost   int    `json:"max_idle_conns_per_host" default:"50" name:"config.max_idle_conns_per_host" category:"config.category.request" desc:"config.max_idle_conns_per_host_desc" validate:"required,min=1"`
@@ -47,6 +47,11 @@ type SystemSettings struct {
 	// Model Routing 重写后, auto_routing 旧配置字段已删除 (§13 硬切).
 	// 路由阈值改由 router_engine.Selector.Settings 管理, 别名映射存
 	// 在 model_aliases 表.
+
+	// 同步配置 — UI 完全由 PeerSyncPanel 接管, 不出现在 Settings 动态列表里 (hidden:"true").
+	// 启用同步即同步 *所有* 内容 (groups/aliases/api_keys/...), 不再有细粒度开关.
+	SyncEnabled bool   `json:"sync_enabled" default:"false" hidden:"true"`
+	SyncKey     string `json:"sync_key" hidden:"true" sensitive:"true"`
 
 	// For cache
 	ProxyKeysMap map[string]struct{} `json:"-"`

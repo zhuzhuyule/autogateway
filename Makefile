@@ -17,6 +17,15 @@ dev: ## Run in development mode (with race detection)
 	@echo "🔧 Starting development mode..."
 	go run -race ./main.go
 
+.PHONY: dev-all
+dev-all: ## Run backend (:3001) + frontend vite (:5173) together, Ctrl+C stops both
+	@echo "🚀 dev-all: backend :3001  ·  frontend :5173 (vite HMR)"
+	@[ -d web/node_modules ] || (echo "📦 first-time: npm install"; cd web && npm install)
+	@trap 'echo ""; echo "🛑 stopping..."; kill 0' INT TERM EXIT; \
+	  (cd web && npm run dev) & \
+	  go run -race ./main.go; \
+	  wait
+
 # ==============================================================================
 # Key Migration
 # ==============================================================================

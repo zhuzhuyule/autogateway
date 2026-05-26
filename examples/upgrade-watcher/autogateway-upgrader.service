@@ -1,0 +1,31 @@
+# systemd service file for AutoGateway remote-upgrade watcher.
+#
+# 安装步骤:
+#   sudo cp upgrader.sh /opt/autogateway/upgrader.sh
+#   sudo chmod +x /opt/autogateway/upgrader.sh
+#   sudo cp autogateway-upgrader.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now autogateway-upgrader
+#
+# 调整 AUTOGATEWAY_DIR 为你实际的 docker-compose 目录.
+
+[Unit]
+Description=AutoGateway Remote Upgrade Watcher
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment="AUTOGATEWAY_DIR=/opt/autogateway"
+Environment="POLL_INTERVAL=10"
+ExecStart=/opt/autogateway/upgrader.sh
+Restart=always
+RestartSec=5
+
+# 最小权限: watcher 只需要能跑 docker compose, 不需要其他权限
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/opt/autogateway
+
+[Install]
+WantedBy=multi-user.target

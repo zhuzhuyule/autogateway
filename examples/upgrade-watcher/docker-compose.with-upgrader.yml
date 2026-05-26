@@ -1,0 +1,36 @@
+# 伴随容器方案: 在原 docker-compose.yml 旁加一个最小化 watcher 容器,
+# 仅这一个容器挂 docker.sock, 主容器 (autogateway) 保持零特权.
+#
+# 用法:
+#   docker compose -f docker-compose.yml -f examples/upgrade-watcher/docker-compose.with-upgrader.yml up -d
+
+services:
+  autogateway-upgrader:
+    image: docker:cli
+    container_name: autogateway-upgrader
+    restart: always
+    # 主容器的 ./data 这里只读挂载, 用于监听信号文件
+    volumes:
+      - ./data:/data
+      - /var/run/docker.sock:/var/run/docker.sock
+      - .:/workspace:ro
+    working_dir: /workspace
+    # 简化版 watcher: bash 内联实现, 不依赖外部脚本
+    entrypoint:
+      - sh
+      - -c
+      - |
+        echo "[$(date -Iseconds)] upgrade-watcher started"
+        while true; do
+          if [ -f /data/.upgrade-request ]; then
+            target=$$(grep -oE '"target_version"[[:space:]]*:[[:space:]]*"[^"]+"' /data/.upgrade-request | sed -E 's/.*"([^"]+)"$$/\1/')
+            echo "[$(date -Iseconds)] signal detected: target=$$target"
+            rm /data/.upgrade-request
+            if docker compose pull && docker compose up -d; then
+              echo "[$(date -Iseconds)] upgrade succeeded: $$target"
+            else
+              echo "[$(date -Iseconds)] upgrade FAILED: $$target"
+            fi
+          fi
+          sleep 10
+        done

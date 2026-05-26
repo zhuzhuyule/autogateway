@@ -11,6 +11,7 @@ import {
   GitBranchOutline,
   CubeOutline,
   PulseOutline,
+  GitNetworkOutline,
   SettingsOutline,
   MenuOutline,
   CloseOutline,
@@ -46,6 +47,7 @@ const railItems = computed(() => [
   { name: "aliases", icon: GitBranchOutline, tip: t("nav.aliases") },
   { name: "model-catalog", icon: CubeOutline, tip: t("nav.modelCatalog") },
   { name: "logs", icon: PulseOutline, tip: t("nav.logs") },
+  { name: "sync", icon: GitNetworkOutline, tip: t("nav.sync") },
 ]);
 
 const activeName = computed(() => route.name);

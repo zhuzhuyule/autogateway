@@ -26,7 +26,12 @@ export default defineConfig(({ mode }) => {
     },
     // 开发服务器配置
     server: {
-      // 代理配置示例
+      // 默认 vite 在 macOS/Linux 优先监听 [::1] (IPv6 only), 但 proxy target
+      // 是 127.0.0.1 (IPv4), 浏览器走 localhost (AAAA 优先) 能进 vite, 但
+      // curl/某些客户端走 127.0.0.1 直连 5173 会 "Connection refused". 显式
+      // 监听 IPv4 + IPv6 双栈, 排除一切回环歧义.
+      host: "0.0.0.0",
+      // 代理后端 API
       proxy: {
         "/api": {
           target: env.VITE_API_BASE_URL || "http://127.0.0.1:3001",
