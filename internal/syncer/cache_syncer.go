@@ -60,9 +60,21 @@ func (s *CacheSyncer[T]) Get() T {
 	return s.cache
 }
 
-// Invalidate publishes a notification to all instances to reload their cache.
+// Invalidate 立即同步本地 reload, 并广播通知给其他实例.
+//
+// 原实现只发 publish 异步通知, 在 MemoryStore 单实例下:
+//   1. UpdateXxx → Invalidate (publish) → HTTP 200 → 前端立即 GET
+//   2. listenForUpdates goroutine 还没收到 Publish 消息, cache 仍是旧值
+//   3. 前端拿到旧值, "保存后刷新发现没生效" 的经典 race condition
+//
+// 现在: 同步 reload 把本端 cache 立刻刷成新值, 再 publish 通知其他实例.
+// 远端实例仍走 publish→listen→reload 路径, 行为不变. 本端少等一次异步消息.
 func (s *CacheSyncer[T]) Invalidate() error {
-	s.logger.Debug("publishing invalidation notification")
+	s.logger.Debug("invalidating: sync reload + publish")
+	if err := s.reload(); err != nil {
+		s.logger.Warnf("local reload after update failed: %v", err)
+		// 即使本地 reload 失败也尝试 publish, 不阻塞其他实例.
+	}
 	return s.store.Publish(s.channelName, []byte("reload"))
 }
 
