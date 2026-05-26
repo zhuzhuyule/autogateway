@@ -286,17 +286,20 @@ type GroupHourlyStat struct {
 
 // SyncPeer 对应 sync_peers 表，用于管理多端同步节点
 type SyncPeer struct {
-	ID           string         `gorm:"type:varchar(255);primaryKey" json:"id"`
-	Name         string         `gorm:"type:varchar(255);not null" json:"name"`
-	URL          string         `gorm:"type:varchar(512);not null" json:"url"`
-	SyncKey      string         `gorm:"type:varchar(512);not null" json:"sync_key"`
-	Role         string         `gorm:"type:varchar(50);not null;default:'client'" json:"role"` // 'server' or 'client'
-	Status       string         `gorm:"type:varchar(50);not null;default:'disconnected'" json:"status"`
-	SyncAPIKeys  bool           `gorm:"default:false" json:"sync_api_keys"`
-	LastSyncedAt *time.Time     `json:"last_synced_at"`
-	CreatedAt    time.Time      `json:"created_at"`
-	UpdatedAt    time.Time      `json:"updated_at"`
-	DeletedAt    gorm.DeletedAt `gorm:"index" json:"-"`
+	ID             string         `gorm:"type:varchar(255);primaryKey" json:"id"`
+	Name           string         `gorm:"type:varchar(255);not null" json:"name"`
+	URL            string         `gorm:"type:varchar(512);not null" json:"url"`
+	SyncKey        string         `gorm:"type:varchar(512);not null" json:"sync_key"`
+	Role           string         `gorm:"type:varchar(50);not null;default:'client'" json:"role"`        // 'server' or 'client'
+	Status         string         `gorm:"type:varchar(50);not null;default:'disconnected'" json:"status"`
+	SyncAPIKeys    bool           `gorm:"default:false" json:"sync_api_keys"`
+	LastSyncedAt   *time.Time     `json:"last_synced_at"`
+	// P9.1 兼容性闸门: 握手成功后填入, UI 用于展示对端版本徽章 + 提示版本差异.
+	PeerVersion    string         `gorm:"type:varchar(50)" json:"peer_version"`
+	PeerSchemaHash string         `gorm:"type:varchar(32)" json:"peer_schema_hash"`
+	CreatedAt      time.Time      `json:"created_at"`
+	UpdatedAt      time.Time      `json:"updated_at"`
+	DeletedAt      gorm.DeletedAt `gorm:"index" json:"-"`
 }
 
 // SyncLog 对应 sync_logs 表，用于记录配置同步历史与状态

@@ -170,17 +170,28 @@ func (m *SyncPeerManager) ensureConnection(peer models.SyncPeer) {
 	case "reject":
 		logrus.Warnf("peer %s rejected handshake: %s (peer=%s mine=%s)",
 			peer.Name, resp.Reason, resp.MyVersion+"/"+resp.MySchema, version.Version+"/"+ComputeSchemaHash())
-		m.db.Model(&models.SyncPeer{}).Where("id = ?", peer.ID).Update("status", "rejected:"+resp.Reason)
+		m.db.Model(&models.SyncPeer{}).Where("id = ?", peer.ID).Updates(map[string]any{
+			"status":           "rejected:" + resp.Reason,
+			"peer_version":     resp.MyVersion,
+			"peer_schema_hash": resp.MySchema,
+		})
 		m.writeLog(peer.ID, "push", "error", "handshake rejected: "+resp.Reason, "")
 		conn.Close()
 		return
 	case "warning":
 		logrus.Warnf("peer %s warning: %s (peer=%s mine=%s)",
 			peer.Name, resp.Reason, resp.PeerVersion, version.Version)
-		// 仍允许进入同步, 状态显示警告
-		m.db.Model(&models.SyncPeer{}).Where("id = ?", peer.ID).Update("status", "warning:"+resp.Reason)
+		m.db.Model(&models.SyncPeer{}).Where("id = ?", peer.ID).Updates(map[string]any{
+			"status":           "warning:" + resp.Reason,
+			"peer_version":     resp.MyVersion,
+			"peer_schema_hash": resp.MySchema,
+		})
 	case "welcome":
-		m.db.Model(&models.SyncPeer{}).Where("id = ?", peer.ID).Update("status", "connected")
+		m.db.Model(&models.SyncPeer{}).Where("id = ?", peer.ID).Updates(map[string]any{
+			"status":           "connected",
+			"peer_version":     resp.MyVersion,
+			"peer_schema_hash": resp.MySchema,
+		})
 	default:
 		logrus.Warnf("peer %s sent unexpected handshake response: %s", peer.Name, resp.Type)
 		conn.Close()
