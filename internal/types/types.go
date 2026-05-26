@@ -48,6 +48,11 @@ type SystemSettings struct {
 	// 路由阈值改由 router_engine.Selector.Settings 管理, 别名映射存
 	// 在 model_aliases 表.
 
+	// 同步配置
+	SyncEnabled   bool   `json:"sync_enabled" default:"false" name:"config.sync_enabled" category:"config.category.sync" desc:"config.sync_enabled_desc"`
+	SyncKey       string `json:"sync_key" name:"config.sync_key" category:"config.category.sync" desc:"config.sync_key_desc" sensitive:"true"`
+	SyncAPIKeys   bool   `json:"sync_api_keys" default:"false" name:"config.sync_api_keys" category:"config.category.sync" desc:"config.sync_api_keys_desc"`
+
 	// For cache
 	ProxyKeysMap map[string]struct{} `json:"-"`
 }

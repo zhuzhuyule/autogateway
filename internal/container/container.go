@@ -108,6 +108,14 @@ func BuildContainer() (*dig.Container, error) {
 		return nil, err
 	}
 
+	// Sync Service
+	if err := container.Provide(services.NewSyncService); err != nil {
+		return nil, err
+	}
+	if err := container.Provide(services.NewSyncPeerManager); err != nil {
+		return nil, err
+	}
+
 	// Handlers
 	if err := container.Provide(handler.NewServer); err != nil {
 		return nil, err
@@ -122,6 +130,9 @@ func BuildContainer() (*dig.Container, error) {
 		return nil, err
 	}
 	if err := container.Provide(handler.NewFreeModelsHandler); err != nil {
+		return nil, err
+	}
+	if err := container.Provide(handler.NewSyncHandler); err != nil {
 		return nil, err
 	}
 

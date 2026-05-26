@@ -39,6 +39,7 @@ type App struct {
 	cronChecker           *keypool.CronChecker
 	keyPoolProvider       *keypool.KeyProvider
 	proxyServer           *proxy.ProxyServer
+	syncPeerManager       *services.SyncPeerManager
 	storage               store.Store
 	db                    *gorm.DB
 	httpServer            *http.Server
@@ -59,6 +60,7 @@ type AppParams struct {
 	CronChecker           *keypool.CronChecker
 	KeyPoolProvider       *keypool.KeyProvider
 	ProxyServer           *proxy.ProxyServer
+	SyncPeerManager       *services.SyncPeerManager
 	Storage               store.Store
 	DB                    *gorm.DB
 }
@@ -78,6 +80,7 @@ func NewApp(params AppParams) *App {
 		cronChecker:           params.CronChecker,
 		keyPoolProvider:       params.KeyPoolProvider,
 		proxyServer:           params.ProxyServer,
+		syncPeerManager:       params.SyncPeerManager,
 		storage:               params.Storage,
 		db:                    params.DB,
 	}
@@ -118,6 +121,8 @@ func (a *App) Start() error {
 			&models.RequestLog{},
 			&models.GroupHourlyStat{},
 			&models.ModelAlias{},
+			&models.SyncPeer{},
+			&models.SyncLog{},
 		); err != nil {
 			return fmt.Errorf("database auto-migration failed: %w", err)
 		}
@@ -160,6 +165,23 @@ func (a *App) Start() error {
 		// unreachable — frontend has a static fallback list.
 		a.freeModelsRegistry.Start(context.Background())
 
+		// 注册 GORM 回调，以便在配置变更时触发同步推送
+		notifyFunc := func(db *gorm.DB) {
+			if db.Error != nil || db.Statement == nil || db.Statement.Schema == nil {
+				return
+			}
+			table := db.Statement.Schema.Table
+			if table == "system_settings" || table == "groups" || table == "group_sub_groups" || table == "model_aliases" || table == "api_keys" {
+				// Avoid infinite loop if this was a sync merge transaction by checking a context flag?
+				// Actually, SyncService.ProcessPayload doesn't set a flag, but we can just let it notify.
+				// The push loop debounces and checks for actual changes since lastPushTime.
+				a.syncPeerManager.NotifyChange()
+			}
+		}
+		a.db.Callback().Create().After("gorm:create").Register("sync_notify", notifyFunc)
+		a.db.Callback().Update().After("gorm:update").Register("sync_notify", notifyFunc)
+		a.db.Callback().Delete().After("gorm:delete").Register("sync_notify", notifyFunc)
+
 		a.settingsManager.Initialize(a.storage, a.groupManager, a.configManager.IsMaster())
 
 		// 从数据库加载密钥到 Redis
@@ -172,9 +194,11 @@ func (a *App) Start() error {
 		a.requestLogService.Start()
 		a.logCleanupService.Start()
 		a.cronChecker.Start()
+		a.syncPeerManager.Start(context.Background())
 	} else {
 		logrus.Info("Starting as Slave Node.")
 		a.settingsManager.Initialize(a.storage, a.groupManager, a.configManager.IsMaster())
+		a.syncPeerManager.Start(context.Background())
 	}
 
 	// 显示配置并启动所有后台服务

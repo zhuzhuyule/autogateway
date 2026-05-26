@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"gorm.io/datatypes"
+	"gorm.io/gorm"
 )
 
 // Key状态
@@ -16,12 +17,13 @@ const (
 
 // SystemSetting 对应 system_settings 表
 type SystemSetting struct {
-	ID           uint      `gorm:"primaryKey;autoIncrement" json:"id"`
-	SettingKey   string    `gorm:"type:varchar(255);not null;unique" json:"setting_key"`
-	SettingValue string    `gorm:"type:text;not null" json:"setting_value"`
-	Description  string    `gorm:"type:varchar(512)" json:"description"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	ID           uint           `gorm:"primaryKey;autoIncrement" json:"id"`
+	SettingKey   string         `gorm:"type:varchar(255);not null;unique" json:"setting_key"`
+	SettingValue string         `gorm:"type:text;not null" json:"setting_value"`
+	Description  string         `gorm:"type:varchar(512)" json:"description"`
+	CreatedAt    time.Time      `json:"created_at"`
+	UpdatedAt    time.Time      `json:"updated_at"`
+	DeletedAt    gorm.DeletedAt `gorm:"index" json:"-"`
 }
 
 // GroupConfig 存储特定于分组的配置
@@ -51,12 +53,13 @@ type HeaderRule struct {
 
 // GroupSubGroup 聚合分组和子分组的关联表
 type GroupSubGroup struct {
-	ID         uint      `gorm:"primaryKey;autoIncrement" json:"id"`
-	GroupID    uint      `gorm:"not null;uniqueIndex:idx_group_sub" json:"group_id"`
-	SubGroupID uint      `gorm:"not null;uniqueIndex:idx_group_sub" json:"sub_group_id"`
-	Weight     int       `gorm:"default:0" json:"weight"`
-	CreatedAt  time.Time `json:"created_at"`
-	UpdatedAt  time.Time `json:"updated_at"`
+	ID         uint           `gorm:"primaryKey;autoIncrement" json:"id"`
+	GroupID    uint           `gorm:"not null;uniqueIndex:idx_group_sub" json:"group_id"`
+	SubGroupID uint           `gorm:"not null;uniqueIndex:idx_group_sub" json:"sub_group_id"`
+	Weight     int            `gorm:"default:0" json:"weight"`
+	CreatedAt  time.Time      `json:"created_at"`
+	UpdatedAt  time.Time      `json:"updated_at"`
+	DeletedAt  gorm.DeletedAt `gorm:"index" json:"-"`
 
 	// Lightweight association - only store necessary info for performance
 	SubGroupName string `gorm:"-" json:"sub_group_name,omitempty"`
@@ -145,6 +148,7 @@ type Group struct {
 	BlockedModels datatypes.JSON `gorm:"type:json" json:"blocked_models"`
 	CreatedAt     time.Time      `json:"created_at"`
 	UpdatedAt     time.Time      `json:"updated_at"`
+	DeletedAt     gorm.DeletedAt `gorm:"index" json:"-"`
 
 	// For cache
 	ProxyKeysMap              map[string]struct{}        `gorm:"-" json:"-"`
@@ -171,9 +175,10 @@ type ModelAlias struct {
 	Weight     int       `gorm:"not null;default:1" json:"weight"`
 	Priority   int       `gorm:"not null;default:100" json:"priority"`
 	Enabled    bool      `gorm:"not null;default:true;index:idx_alias_enabled" json:"enabled"`
-	IsReserved bool      `gorm:"not null;default:false" json:"is_reserved"`
-	CreatedAt  time.Time `json:"created_at"`
-	UpdatedAt  time.Time `json:"updated_at"`
+	IsReserved bool           `gorm:"not null;default:false" json:"is_reserved"`
+	CreatedAt  time.Time      `json:"created_at"`
+	UpdatedAt  time.Time      `json:"updated_at"`
+	DeletedAt  gorm.DeletedAt `gorm:"index" json:"-"`
 }
 
 // TableName forces the table name even if GORM pluralization changes.
@@ -189,9 +194,10 @@ type APIKey struct {
 	Notes        string     `gorm:"type:varchar(255);default:''" json:"notes"`
 	RequestCount int64      `gorm:"not null;default:0" json:"request_count"`
 	FailureCount int64      `gorm:"not null;default:0" json:"failure_count"`
-	LastUsedAt   *time.Time `gorm:"index:idx_api_keys_group_last_used_id,priority:2" json:"last_used_at"`
-	CreatedAt    time.Time  `json:"created_at"`
-	UpdatedAt    time.Time  `json:"updated_at"`
+	LastUsedAt   *time.Time     `gorm:"index:idx_api_keys_group_last_used_id,priority:2" json:"last_used_at"`
+	CreatedAt    time.Time      `json:"created_at"`
+	UpdatedAt    time.Time      `json:"updated_at"`
+	DeletedAt    gorm.DeletedAt `gorm:"index" json:"-"`
 }
 
 // RequestType 请求类型常量
@@ -276,4 +282,30 @@ type GroupHourlyStat struct {
 	FailureCount int64     `gorm:"not null;default:0" json:"failure_count"`
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
+}
+
+// SyncPeer 对应 sync_peers 表，用于管理多端同步节点
+type SyncPeer struct {
+	ID           string         `gorm:"type:varchar(255);primaryKey" json:"id"`
+	Name         string         `gorm:"type:varchar(255);not null" json:"name"`
+	URL          string         `gorm:"type:varchar(512);not null" json:"url"`
+	SyncKey      string         `gorm:"type:varchar(512);not null" json:"sync_key"`
+	Role         string         `gorm:"type:varchar(50);not null;default:'client'" json:"role"` // 'server' or 'client'
+	Status       string         `gorm:"type:varchar(50);not null;default:'disconnected'" json:"status"`
+	SyncAPIKeys  bool           `gorm:"default:false" json:"sync_api_keys"`
+	LastSyncedAt *time.Time     `json:"last_synced_at"`
+	CreatedAt    time.Time      `json:"created_at"`
+	UpdatedAt    time.Time      `json:"updated_at"`
+	DeletedAt    gorm.DeletedAt `gorm:"index" json:"-"`
+}
+
+// SyncLog 对应 sync_logs 表，用于记录配置同步历史与状态
+type SyncLog struct {
+	ID           uint      `gorm:"primaryKey;autoIncrement" json:"id"`
+	PeerID       string    `gorm:"type:varchar(255);index" json:"peer_id"`
+	Action       string    `gorm:"type:varchar(50);not null" json:"action"` // 'push' or 'pull'
+	Status       string    `gorm:"type:varchar(50);not null" json:"status"` // 'success' or 'error'
+	ErrorMessage string    `gorm:"type:text" json:"error_message"`
+	Details      string    `gorm:"type:text" json:"details"` // 记录同步的表名/ID等元数据
+	Timestamp    time.Time `gorm:"not null;index" json:"timestamp"`
 }

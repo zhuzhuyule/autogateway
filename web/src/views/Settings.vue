@@ -2,6 +2,7 @@
 import { settingsApi, type Setting, type SettingCategory } from "@/api/settings";
 import ProxyKeysInput from "@/components/common/ProxyKeysInput.vue";
 import V3BackupCard from "@/components/v3/V3BackupCard.vue";
+import PeerSyncPanel from "@/components/v3/PeerSyncPanel.vue";
 import { HelpCircle, Save } from "@vicons/ionicons5";
 import {
   NForm,
@@ -105,6 +106,7 @@ function generateValidationRules(item: Setting): FormItemRule[] {
     </h1>
 
     <V3BackupCard style="margin-bottom: 24px" />
+    <PeerSyncPanel />
 
     <n-form ref="formRef" :model="form" label-placement="top">
       <div class="v3-settings-grid">

@@ -53,6 +53,7 @@ func NewRouter(
 	upstreamProbeHandler *handler.UpstreamProbeHandler,
 	freeModelsHandler *handler.FreeModelsHandler,
 	backupHandler *handler.BackupHandler,
+	syncHandler *handler.SyncHandler,
 	buildFS embed.FS,
 	indexPage []byte,
 ) *gin.Engine {
@@ -75,7 +76,7 @@ func NewRouter(
 
 	// 注册路由
 	registerSystemRoutes(router, serverHandler)
-	registerAPIRoutes(router, serverHandler, configManager, aliasHandler, aliasSuggestionHandler, routingSettingsHandler, modelCatalogHandler, dedupHandler, upstreamProbeHandler, freeModelsHandler, backupHandler)
+	registerAPIRoutes(router, serverHandler, configManager, aliasHandler, aliasSuggestionHandler, routingSettingsHandler, modelCatalogHandler, dedupHandler, upstreamProbeHandler, freeModelsHandler, backupHandler, syncHandler)
 	registerProxyRoutes(router, proxyServer, groupManager, serverHandler, selector)
 	registerFrontendRoutes(router, buildFS, indexPage)
 
@@ -100,18 +101,29 @@ func registerAPIRoutes(
 	upstreamProbeHandler *handler.UpstreamProbeHandler,
 	freeModelsHandler *handler.FreeModelsHandler,
 	backupHandler *handler.BackupHandler,
+	syncHandler *handler.SyncHandler,
 ) {
 	api := router.Group("/api")
 	api.Use(i18n.Middleware())
 
 	// 公开
 	registerPublicAPIRoutes(api, serverHandler)
+	registerSyncRoutes(api, syncHandler)
 
 	// 认证 — middleware 通过 SettingsManager 每次请求动态读 auth_key,
 	// 用户在 UI 改完即时生效,无需重启
 	protectedAPI := api.Group("")
 	protectedAPI.Use(middleware.Auth(serverHandler.SettingsManager))
-	registerProtectedAPIRoutes(protectedAPI, serverHandler, aliasHandler, aliasSuggestionHandler, routingSettingsHandler, modelCatalogHandler, dedupHandler, upstreamProbeHandler, freeModelsHandler, backupHandler)
+	registerProtectedAPIRoutes(protectedAPI, serverHandler, aliasHandler, aliasSuggestionHandler, routingSettingsHandler, modelCatalogHandler, dedupHandler, upstreamProbeHandler, freeModelsHandler, backupHandler, syncHandler)
+}
+
+func registerSyncRoutes(api *gin.RouterGroup, syncHandler *handler.SyncHandler) {
+	syncGroup := api.Group("/sync")
+	{
+		syncGroup.GET("/ws", syncHandler.WsEndpoint)
+		syncGroup.GET("/pull", syncHandler.PullEndpoint)
+		syncGroup.POST("/push", syncHandler.PushEndpoint)
+	}
 }
 
 // registerPublicAPIRoutes 公开API路由
@@ -132,6 +144,7 @@ func registerProtectedAPIRoutes(
 	upstreamProbeHandler *handler.UpstreamProbeHandler,
 	freeModelsHandler *handler.FreeModelsHandler,
 	backupHandler *handler.BackupHandler,
+	syncHandler *handler.SyncHandler,
 ) {
 	api.GET("/channel-types", serverHandler.CommonHandler.GetChannelTypes)
 
@@ -233,6 +246,15 @@ func registerProtectedAPIRoutes(
 	{
 		settings.GET("", serverHandler.GetSettings)
 		settings.PUT("", serverHandler.UpdateSettings)
+	}
+
+	// Sync Peer CRUD
+	syncPeers := api.Group("/sync/peers")
+	{
+		syncPeers.GET("", syncHandler.ListPeers)
+		syncPeers.POST("", syncHandler.CreatePeer)
+		syncPeers.PUT("/:id", syncHandler.UpdatePeer)
+		syncPeers.DELETE("/:id", syncHandler.DeletePeer)
 	}
 
 	// Backup/Restore
