@@ -54,6 +54,7 @@ func NewRouter(
 	freeModelsHandler *handler.FreeModelsHandler,
 	backupHandler *handler.BackupHandler,
 	syncHandler *handler.SyncHandler,
+	versionHandler *handler.VersionHandler,
 	buildFS embed.FS,
 	indexPage []byte,
 ) *gin.Engine {
@@ -76,7 +77,7 @@ func NewRouter(
 
 	// 注册路由
 	registerSystemRoutes(router, serverHandler)
-	registerAPIRoutes(router, serverHandler, configManager, aliasHandler, aliasSuggestionHandler, routingSettingsHandler, modelCatalogHandler, dedupHandler, upstreamProbeHandler, freeModelsHandler, backupHandler, syncHandler)
+	registerAPIRoutes(router, serverHandler, configManager, aliasHandler, aliasSuggestionHandler, routingSettingsHandler, modelCatalogHandler, dedupHandler, upstreamProbeHandler, freeModelsHandler, backupHandler, syncHandler, versionHandler)
 	registerProxyRoutes(router, proxyServer, groupManager, serverHandler, selector)
 	registerFrontendRoutes(router, buildFS, indexPage)
 
@@ -102,6 +103,7 @@ func registerAPIRoutes(
 	freeModelsHandler *handler.FreeModelsHandler,
 	backupHandler *handler.BackupHandler,
 	syncHandler *handler.SyncHandler,
+	versionHandler *handler.VersionHandler,
 ) {
 	api := router.Group("/api")
 	api.Use(i18n.Middleware())
@@ -109,6 +111,7 @@ func registerAPIRoutes(
 	// 公开
 	registerPublicAPIRoutes(api, serverHandler)
 	registerSyncRoutes(api, syncHandler)
+	api.GET("/version", versionHandler.Get)
 
 	// 认证 — middleware 通过 SettingsManager 每次请求动态读 auth_key,
 	// 用户在 UI 改完即时生效,无需重启

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"autogateway/internal/encryption"
@@ -23,6 +24,46 @@ type SyncPayload struct {
 	SubGroups    []models.GroupSubGroup `json:"sub_groups,omitempty"`
 	APIKeys      []models.APIKey        `json:"api_keys,omitempty"`
 	ModelAliases []models.ModelAlias    `json:"model_aliases,omitempty"`
+}
+
+// WSMessage 是 WebSocket 上传递的统一消息封装. 通过 type 字段区分:
+//   - "hello"   : 客户端连上后第一帧, 携带 version + schema_hash
+//   - "welcome" : 服务端鉴权 + 兼容性通过, 同步可以开始
+//   - "warning" : 服务端允许同步但发现 minor 版本不一致, 仅警告
+//   - "reject"  : 服务端拒绝同步 (major / schema 不兼容), 含 reason 字段
+//   - "sync"    : 携带 ciphertext, 走正常 payload 同步路径
+type WSMessage struct {
+	Type        string `json:"type"`
+	Version     string `json:"version,omitempty"`
+	SchemaHash  string `json:"schema_hash,omitempty"`
+	PeerVersion string `json:"peer_version,omitempty"`
+	PeerSchema  string `json:"peer_schema,omitempty"`
+	MyVersion   string `json:"my_version,omitempty"`
+	MySchema    string `json:"my_schema,omitempty"`
+	Reason      string `json:"reason,omitempty"`
+	Ciphertext  string `json:"ciphertext,omitempty"`
+}
+
+// ExtractMajor 仅返回 semver 的 major 部分.
+// "v2.4.10" -> 2; "v3.0.0" -> 3; 解析失败 / 空串返回 -1.
+func ExtractMajor(v string) int {
+	v = strings.TrimPrefix(v, "v")
+	if v == "" {
+		return -1
+	}
+	parts := strings.SplitN(v, ".", 2)
+	head := parts[0]
+	if head == "" {
+		return -1
+	}
+	n := 0
+	for _, ch := range head {
+		if ch < '0' || ch > '9' {
+			return -1
+		}
+		n = n*10 + int(ch-'0')
+	}
+	return n
 }
 
 // syncMergeKey 是用于在 context 中标记"当前事务是同步合并触发"的 key,

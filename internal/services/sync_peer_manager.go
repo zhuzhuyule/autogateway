@@ -14,6 +14,7 @@ import (
 	"autogateway/internal/config"
 	"autogateway/internal/models"
 	"autogateway/internal/types"
+	"autogateway/internal/version"
 
 	"github.com/gorilla/websocket"
 	"github.com/sirupsen/logrus"
@@ -146,13 +147,50 @@ func (m *SyncPeerManager) ensureConnection(peer models.SyncPeer) {
 		return
 	}
 
+	// P9.1 兼容性握手: 发送 hello{version, schema_hash}, 等待 welcome/warning/reject.
+	hello := WSMessage{
+		Type:       "hello",
+		Version:    version.Version,
+		SchemaHash: ComputeSchemaHash(),
+	}
+	if err := conn.WriteJSON(hello); err != nil {
+		logrus.Warnf("failed to send hello to peer %s: %v", peer.Name, err)
+		conn.Close()
+		return
+	}
+	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	var resp WSMessage
+	if err := conn.ReadJSON(&resp); err != nil {
+		logrus.Warnf("failed to read welcome from peer %s: %v", peer.Name, err)
+		conn.Close()
+		return
+	}
+	_ = conn.SetReadDeadline(time.Time{})
+	switch resp.Type {
+	case "reject":
+		logrus.Warnf("peer %s rejected handshake: %s (peer=%s mine=%s)",
+			peer.Name, resp.Reason, resp.MyVersion+"/"+resp.MySchema, version.Version+"/"+ComputeSchemaHash())
+		m.db.Model(&models.SyncPeer{}).Where("id = ?", peer.ID).Update("status", "rejected:"+resp.Reason)
+		m.writeLog(peer.ID, "push", "error", "handshake rejected: "+resp.Reason, "")
+		conn.Close()
+		return
+	case "warning":
+		logrus.Warnf("peer %s warning: %s (peer=%s mine=%s)",
+			peer.Name, resp.Reason, resp.PeerVersion, version.Version)
+		// 仍允许进入同步, 状态显示警告
+		m.db.Model(&models.SyncPeer{}).Where("id = ?", peer.ID).Update("status", "warning:"+resp.Reason)
+	case "welcome":
+		m.db.Model(&models.SyncPeer{}).Where("id = ?", peer.ID).Update("status", "connected")
+	default:
+		logrus.Warnf("peer %s sent unexpected handshake response: %s", peer.Name, resp.Type)
+		conn.Close()
+		return
+	}
+
 	logrus.Infof("connected to peer %s (WS)", peer.Name)
 	m.peersMu.Lock()
 	m.activePeers[peer.ID] = conn
 	m.peersMu.Unlock()
-
-	// Update status
-	m.db.Model(&models.SyncPeer{}).Where("id = ?", peer.ID).Update("status", "connected")
 
 	// Read loop for this connection (detect disconnects)
 	go func(peerID string, c *websocket.Conn) {
@@ -230,9 +268,7 @@ func (m *SyncPeerManager) pushToPeers(ctx context.Context, settings types.System
 		return
 	}
 
-	msg, _ := json.Marshal(map[string]string{
-		"ciphertext": ciphertext,
-	})
+	msg, _ := json.Marshal(WSMessage{Type: "sync", Ciphertext: ciphertext})
 
 	m.peersMu.Lock()
 	defer m.peersMu.Unlock()

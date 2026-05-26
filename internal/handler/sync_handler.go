@@ -11,6 +11,7 @@ import (
 	"autogateway/internal/config"
 	"autogateway/internal/models"
 	"autogateway/internal/services"
+	"autogateway/internal/version"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
@@ -136,6 +137,12 @@ func (h *SyncHandler) WsEndpoint(c *gin.Context) {
 
 	logrus.Infof("peer %s connected to WS sync endpoint: %s", peer.Name, ws.RemoteAddr())
 
+	// P9.1 hello/welcome 握手: 客户端必须先发 hello{version, schema_hash}.
+	// 服务端做兼容性闸门 → welcome / warning / reject.
+	if !h.performHandshake(ws, &peer) {
+		return // reject 时 performHandshake 已经写完拒绝帧
+	}
+
 	for {
 		messageType, msg, err := ws.ReadMessage()
 		if err != nil {
@@ -146,33 +153,103 @@ func (h *SyncHandler) WsEndpoint(c *gin.Context) {
 		}
 
 		if messageType == websocket.TextMessage {
-			// Expecting a JSON object with ciphertext and sync_api_keys flag
-			var request struct {
-				Ciphertext string `json:"ciphertext"`
-			}
-			if err := json.Unmarshal(msg, &request); err != nil {
-				logrus.Warnf("failed to unmarshal sync message: %v", err)
-				h.writeLog("", "push", "error", fmt.Sprintf("unmarshal: %v", err), "ws")
-				continue
+			var msgIn services.WSMessage
+			if err := json.Unmarshal(msg, &msgIn); err != nil {
+				// 兼容旧客户端: 把整个消息当作裸 ciphertext 包尝试一次
+				var legacy struct {
+					Ciphertext string `json:"ciphertext"`
+				}
+				if err2 := json.Unmarshal(msg, &legacy); err2 != nil {
+					logrus.Warnf("failed to unmarshal sync message: %v", err)
+					h.writeLog(peer.ID, "push", "error", fmt.Sprintf("unmarshal: %v", err), "ws")
+					continue
+				}
+				msgIn.Type = "sync"
+				msgIn.Ciphertext = legacy.Ciphertext
 			}
 
-			payload, err := h.syncService.DecryptPayload(request.Ciphertext, settings.SyncKey)
+			if msgIn.Type != "sync" || msgIn.Ciphertext == "" {
+				continue // 心跳/未知类型暂时忽略
+			}
+
+			payload, err := h.syncService.DecryptPayload(msgIn.Ciphertext, settings.SyncKey)
 			if err != nil {
 				logrus.Errorf("failed to decrypt sync payload: %v", err)
-				h.writeLog("", "push", "error", fmt.Sprintf("decrypt: %v", err), "ws")
+				h.writeLog(peer.ID, "push", "error", fmt.Sprintf("decrypt: %v", err), "ws")
 				continue
 			}
 
 			if err := h.syncService.ProcessPayload(context.Background(), payload); err != nil {
 				logrus.Errorf("failed to process sync payload: %v", err)
-				h.writeLog(payload.SourcePeerID, "push", "error", fmt.Sprintf("merge: %v", err), "ws")
+				h.writeLog(peer.ID, "push", "error", fmt.Sprintf("merge: %v", err), "ws")
 				continue
 			}
 
-			h.writeLog(payload.SourcePeerID, "push", "success", "", "ws")
+			h.writeLog(peer.ID, "push", "success", "", "ws")
 			logrus.Infof("successfully processed sync payload from peer %s (ws)", payload.SourcePeerID)
 		}
 	}
+}
+
+// performHandshake 在 ws 连接建立后做一次 hello/welcome 兼容性握手.
+// 返回 true 表示握手通过, 同步可以继续; false 表示已发 reject 并应关闭连接.
+//
+// 闸门规则:
+//   - major 版本不一致 → reject
+//   - schema_hash 不一致 → reject (LWW 会把对端缺失字段抹空, 风险太高)
+//   - 都一致 → welcome
+//   - 仅 minor/patch 不一致 → welcome + warning (向后兼容)
+//
+// 5s 内未收到 hello → reject.
+func (h *SyncHandler) performHandshake(ws *websocket.Conn, peer *models.SyncPeer) bool {
+	_ = ws.SetReadDeadline(time.Now().Add(5 * time.Second))
+	defer ws.SetReadDeadline(time.Time{}) // 复位
+
+	_, raw, err := ws.ReadMessage()
+	if err != nil {
+		h.writeLog(peer.ID, "push", "error", "handshake timeout: "+err.Error(), "ws")
+		return false
+	}
+	var hello services.WSMessage
+	if err := json.Unmarshal(raw, &hello); err != nil || hello.Type != "hello" {
+		_ = ws.WriteJSON(services.WSMessage{Type: "reject", Reason: "expected hello frame"})
+		h.writeLog(peer.ID, "push", "error", "bad hello frame", "ws")
+		return false
+	}
+
+	myVer := version.Version
+	mySchema := services.ComputeSchemaHash()
+
+	if services.ExtractMajor(hello.Version) != services.ExtractMajor(myVer) {
+		_ = ws.WriteJSON(services.WSMessage{
+			Type:        "reject",
+			Reason:      "major_version_mismatch",
+			PeerVersion: hello.Version, MyVersion: myVer,
+		})
+		h.writeLog(peer.ID, "push", "error",
+			fmt.Sprintf("major version mismatch peer=%s mine=%s", hello.Version, myVer), "ws")
+		return false
+	}
+	if hello.SchemaHash != mySchema {
+		_ = ws.WriteJSON(services.WSMessage{
+			Type:       "reject",
+			Reason:     "schema_mismatch",
+			PeerSchema: hello.SchemaHash, MySchema: mySchema,
+		})
+		h.writeLog(peer.ID, "push", "error",
+			fmt.Sprintf("schema mismatch peer=%s mine=%s", hello.SchemaHash, mySchema), "ws")
+		return false
+	}
+
+	// 通过 — 若 minor/patch 不一致只发 welcome + reason="minor_diff", 不阻断
+	resp := services.WSMessage{Type: "welcome", MyVersion: myVer, MySchema: mySchema}
+	if hello.Version != myVer {
+		resp.Type = "warning"
+		resp.Reason = "minor_version_diff"
+		resp.PeerVersion = hello.Version
+	}
+	_ = ws.WriteJSON(resp)
+	return true
 }
 
 // PullEndpoint allows peers to fetch the latest state via HTTP (cold-start / recovery)
