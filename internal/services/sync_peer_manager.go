@@ -438,7 +438,13 @@ func (m *SyncPeerManager) doPull(ctx context.Context) {
 			continue // No new data, not an error - skip logging to avoid noise
 		}
 
-		payload, err := m.syncService.DecryptPayload(response.Ciphertext, settings.SyncKey)
+		// 跟 ws 路径一致: 优先非对称 (用对端公钥), 否则回退 legacy 全局密钥
+		var payload *SyncPayload
+		if peer.PublicKeyX25519 != "" {
+			payload, err = m.syncService.DecryptPayloadFrom(response.Ciphertext, peer.PublicKeyX25519)
+		} else {
+			payload, err = m.syncService.DecryptPayload(response.Ciphertext, settings.SyncKey)
+		}
 		if err != nil {
 			logrus.Errorf("failed to decrypt pulled payload from peer %s: %v", peer.Name, err)
 			m.writeLog(peer.ID, "pull", "error", fmt.Sprintf("decrypt: %v", err), "")

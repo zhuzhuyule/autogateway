@@ -289,7 +289,12 @@ func (h *SyncHandler) performHandshake(ws *websocket.Conn, peer *models.SyncPeer
 	return true
 }
 
-// PullEndpoint allows peers to fetch the latest state via HTTP (cold-start / recovery)
+// PullEndpoint allows peers to fetch the latest state via HTTP (cold-start / recovery).
+//
+// 鉴权 & 加密 跟 WsEndpoint 一致 (P9.x 非对称):
+//   - X-Sync-Key 头匹配 peers 表的某行 (per-peer token, 不再是全局 settings.SyncKey)
+//   - 若该 peer 有 PublicKeyX25519 (握手时落库) → 用 nacl/box 非对称加密响应
+//   - 否则回退到全局 SyncKey 路径 (兼容老 peer)
 func (h *SyncHandler) PullEndpoint(c *gin.Context) {
 	settings := h.settingsManager.GetSettings()
 	if !settings.SyncEnabled {
@@ -301,10 +306,18 @@ func (h *SyncHandler) PullEndpoint(c *gin.Context) {
 		return
 	}
 
-	// Verify auth (simple pre-shared SyncKey check via header)
+	// Per-peer 鉴权 — 跟 WsEndpoint 一致
 	reqKey := c.GetHeader("X-Sync-Key")
-	if reqKey != settings.SyncKey {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid SyncKey"})
+	if reqKey == "" {
+		reqKey = c.Query("sync_key")
+	}
+	if reqKey == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Missing X-Sync-Key"})
+		return
+	}
+	var peer models.SyncPeer
+	if err := h.db.Where("sync_key = ?", reqKey).First(&peer).Error; err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid X-Sync-Key"})
 		return
 	}
 
@@ -326,7 +339,13 @@ func (h *SyncHandler) PullEndpoint(c *gin.Context) {
 		return
 	}
 
-	ciphertext, err := h.syncService.EncryptPayload(payload, settings.SyncKey)
+	// 优先用 peer 的 X25519 公钥加密 (跟 ws push 一致), 公钥未知时回退 legacy
+	var ciphertext string
+	if peer.PublicKeyX25519 != "" {
+		ciphertext, err = h.syncService.EncryptPayloadFor(payload, peer.PublicKeyX25519)
+	} else {
+		ciphertext, err = h.syncService.EncryptPayload(payload, settings.SyncKey)
+	}
 	if err != nil {
 		logrus.Errorf("failed to encrypt payload: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to encrypt data"})
