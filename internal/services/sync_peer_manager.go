@@ -20,6 +20,12 @@ import (
 	"gorm.io/gorm"
 )
 
+// Broadcaster 抽象了 "向所有 ws server 端持有的 client conn 广播一条消息" 的能力.
+// 用接口而不是直接依赖 handler 包以避免循环依赖.
+type Broadcaster interface {
+	Broadcast(msg []byte)
+}
+
 // SyncPeerManager manages outgoing connections to other nodes in the mesh.
 type SyncPeerManager struct {
 	db              *gorm.DB
@@ -29,6 +35,16 @@ type SyncPeerManager struct {
 	peersMu     sync.Mutex
 	activePeers map[string]*websocket.Conn // key: Peer ID
 	notifyChan  chan struct{}
+
+	// broadcaster 由 app.go 在启动时注入 (setter 注入避免与 dig 注册顺序冲突).
+	// 用于 Gap 3 双向化: pushToPeers 既推 client 持有的 conn, 也通过 broadcaster
+	// 推 server 持有的 conn.
+	broadcaster Broadcaster
+}
+
+// SetBroadcaster 注入 ws server 端的广播器.
+func (m *SyncPeerManager) SetBroadcaster(b Broadcaster) {
+	m.broadcaster = b
 }
 
 func NewSyncPeerManager(db *gorm.DB, syncService *SyncService, settingsManager *config.SystemSettingsManager) *SyncPeerManager {
@@ -235,6 +251,12 @@ func (m *SyncPeerManager) pushToPeers(ctx context.Context, settings types.System
 			m.db.Model(&models.SyncPeer{}).Where("id = ?", peerID).Update("last_synced_at", now)
 			m.writeLog(peerID, "push", "success", "", summary)
 		}
+	}
+
+	// Gap 3: 同时让 ws server 端持有的 conn 也收到推送 (双向 mesh).
+	// peersMu 锁内调用是安全的, broadcaster 自己管 clientsMu.
+	if m.broadcaster != nil {
+		m.broadcaster.Broadcast(msg)
 	}
 
 	if pushedToAny {

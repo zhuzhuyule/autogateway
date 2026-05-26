@@ -46,6 +46,28 @@ func NewSyncHandler(syncService *services.SyncService, settingsManager *config.S
 	}
 }
 
+// Broadcast 向所有已连接的 client (作为 ws server 端持有) 推送密文消息.
+// SyncPeerManager 在本地变更触发 push 时也调用此方法, 让 server 端持有的 conn 也能
+// 收到推送, 实现双向 mesh (Gap 3 修复).
+func (h *SyncHandler) Broadcast(msg []byte) {
+	h.clientsMu.Lock()
+	conns := make([]*websocket.Conn, 0, len(h.clients))
+	for c := range h.clients {
+		conns = append(conns, c)
+	}
+	h.clientsMu.Unlock()
+
+	for _, c := range conns {
+		if err := c.WriteMessage(websocket.TextMessage, msg); err != nil {
+			logrus.Warnf("ws broadcast failed: %v", err)
+			h.clientsMu.Lock()
+			delete(h.clients, c)
+			h.clientsMu.Unlock()
+			_ = c.Close()
+		}
+	}
+}
+
 // writeLog 写一条 SyncLog. 失败时只 warn, 不阻断同步主路径.
 func (h *SyncHandler) writeLog(peerID, action, status, errMsg, details string) {
 	log := models.SyncLog{

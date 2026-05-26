@@ -10,6 +10,7 @@ import (
 
 	"autogateway/internal/config"
 	db "autogateway/internal/db/migrations"
+	"autogateway/internal/handler"
 	"autogateway/internal/i18n"
 	"autogateway/internal/keypool"
 	"autogateway/internal/models"
@@ -40,6 +41,7 @@ type App struct {
 	keyPoolProvider       *keypool.KeyProvider
 	proxyServer           *proxy.ProxyServer
 	syncPeerManager       *services.SyncPeerManager
+	syncHandler           *handler.SyncHandler
 	storage               store.Store
 	db                    *gorm.DB
 	httpServer            *http.Server
@@ -61,6 +63,7 @@ type AppParams struct {
 	KeyPoolProvider       *keypool.KeyProvider
 	ProxyServer           *proxy.ProxyServer
 	SyncPeerManager       *services.SyncPeerManager
+	SyncHandler           *handler.SyncHandler
 	Storage               store.Store
 	DB                    *gorm.DB
 }
@@ -81,6 +84,7 @@ func NewApp(params AppParams) *App {
 		keyPoolProvider:       params.KeyPoolProvider,
 		proxyServer:           params.ProxyServer,
 		syncPeerManager:       params.SyncPeerManager,
+		syncHandler:           params.SyncHandler,
 		storage:               params.Storage,
 		db:                    params.DB,
 	}
@@ -197,10 +201,14 @@ func (a *App) Start() error {
 		a.cronChecker.Start()
 		// 启动同步管理器前清理 30 天以上的 sync_logs, 避免无限增长
 		a.syncPeerManager.PurgeOldLogs(30)
+		// Gap 3: 双向 mesh 注入 broadcaster, push 时既推 client 持有的 conn,
+		// 也推 ws server 端持有的 conn.
+		a.syncPeerManager.SetBroadcaster(a.syncHandler)
 		a.syncPeerManager.Start(context.Background())
 	} else {
 		logrus.Info("Starting as Slave Node.")
 		a.settingsManager.Initialize(a.storage, a.groupManager, a.configManager.IsMaster())
+		a.syncPeerManager.SetBroadcaster(a.syncHandler)
 		a.syncPeerManager.Start(context.Background())
 	}
 
