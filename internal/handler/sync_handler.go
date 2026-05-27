@@ -176,11 +176,16 @@ func (h *SyncHandler) WsEndpoint(c *gin.Context) {
 			}
 
 			// P9.x 优先用非对称密钥解 (sender 是握手时记录的 peer.PublicKeyX25519);
-			// 仅当未记录公钥 (老版本未升级 peer) 时回退到全局 SyncKey 路径.
+			// 失败再回退到 legacy AES-GCM. 必须双试: 对端的 broadcaster.Broadcast
+			// 路径用 legacy 加密 (因为不知道每个 conn 对应哪个 peer 公钥), 这是
+			// mini → 本机 实时同步的关键路径; 没 fallback 这条路径就死.
 			var payload *services.SyncPayload
 			var err error
 			if peer.PublicKeyX25519 != "" {
 				payload, err = h.syncService.DecryptPayloadFrom(msgIn.Ciphertext, peer.PublicKeyX25519)
+				if err != nil && settings.SyncKey != "" {
+					payload, err = h.syncService.DecryptPayload(msgIn.Ciphertext, settings.SyncKey)
+				}
 			} else {
 				payload, err = h.syncService.DecryptPayload(msgIn.Ciphertext, settings.SyncKey)
 			}

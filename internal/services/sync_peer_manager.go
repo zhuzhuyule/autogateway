@@ -455,10 +455,13 @@ func (m *SyncPeerManager) doPull(ctx context.Context) {
 			continue // No new data, not an error - skip logging to avoid noise
 		}
 
-		// 跟 ws 路径一致: 优先非对称 (用对端公钥), 否则回退 legacy 全局密钥
+		// 跟 ws 路径一致: 优先非对称 (用对端公钥), 失败再回退 legacy.
 		var payload *SyncPayload
 		if peer.PublicKeyX25519 != "" {
 			payload, err = m.syncService.DecryptPayloadFrom(response.Ciphertext, peer.PublicKeyX25519)
+			if err != nil && settings.SyncKey != "" {
+				payload, err = m.syncService.DecryptPayload(response.Ciphertext, settings.SyncKey)
+			}
 		} else {
 			payload, err = m.syncService.DecryptPayload(response.Ciphertext, settings.SyncKey)
 		}
