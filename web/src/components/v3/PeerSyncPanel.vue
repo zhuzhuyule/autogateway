@@ -8,6 +8,7 @@ import {
   type VersionInfo,
   type UpgradeStatus,
 } from "@/api/sync";
+import { versionService } from "@/services/version";
 import {
   Add,
   ArrowUpCircle,
@@ -169,37 +170,10 @@ const columns = computed(() => [
     title: t("common.actions"),
     key: "actions",
     render(row: SyncPeer) {
-      // 升级按钮方向 — 按对端 vs 本机版本关系决定:
-      //   higher: 对端比我新 → 升级本机到对端版本
-      //   lower:  对端比我旧 → 提示对端升级到本机版本
-      //   equal / unknown / incompat: 不显示
-      const cmp = row.peer_version ? versionBadgeForPeer(row.peer_version) : "unknown";
-      const showUpgrade =
-        !!myVersion.value &&
-        !!row.peer_version &&
-        versionBadge(row.peer_version) === "diff" &&
-        (cmp === "higher" || cmp === "lower");
-      const target = cmp === "higher" ? row.peer_version! : myVersion.value?.version || "";
-      const isSelfUpgrade = cmp === "higher";
+      // 注: peer 行不再显示升级按钮 — 跨节点远程升级当前未实现, 显示按钮反而误导.
+      // 顶部"升级本端"按钮基于 GitHub release 真实测算, 才是用户唯一可触发的升级路径.
       return h(NSpace, { size: 4 }, {
         default: () => [
-          showUpgrade &&
-            h(
-              NButton,
-              {
-                size: "small",
-                type: "primary",
-                tertiary: true,
-                onClick: () => isSelfUpgrade ? triggerSelfUpgradeTo(target) : confirmRemoteUpgrade(row),
-                title: isSelfUpgrade
-                  ? t("upgrade.upgradeSelfTip", { v: target })
-                  : t("upgrade.upgradePeerTip", { v: target }),
-              },
-              {
-                icon: () => h(NIcon, null, { default: () => h(ArrowUpCircle) }),
-                default: () => target,
-              }
-            ),
           h(
             NButton,
             { size: "small", tertiary: true, onClick: () => openLogs(row), title: t("sync.viewHistory") },
@@ -253,19 +227,68 @@ function triggerSelfUpgradeTo(target: string) {
   });
 }
 
-async function triggerLocalUpgrade() {
-  if (!myVersion.value) return;
-  // 找 mesh 里所有比本机版本高的对端 peer, 选最高那个作 target
-  const candidates = peers.value
-    .map(p => p.peer_version)
-    .filter((v): v is string => !!v)
-    .filter(v => versionBadgeForPeer(v) === "higher");
-  const target = candidates.sort().pop();
-  if (!target) {
-    message.info(t("upgrade.noTargetFound"));
-    return;
+// GitHub release 真实测算 — 不依赖 mesh 内对端版本
+const githubLatest = ref<{ version: string; url: string } | null>(null);
+const githubChecked = ref(false);
+
+async function loadGithubLatest() {
+  try {
+    const info = await versionService.checkForUpdates();
+    if (info.latestVersion) {
+      githubLatest.value = {
+        version: info.latestVersion,
+        url: info.releaseUrl || "",
+      };
+    }
+  } catch {
+    /* 拉失败不阻断 */
+  } finally {
+    githubChecked.value = true;
   }
-  triggerSelfUpgradeTo(target);
+}
+
+/** 本机是否有比当前更新的 release. 基于后端 /api/version + GitHub latest. */
+const hasNewerRelease = computed(() => {
+  if (!myVersion.value || !githubLatest.value) return false;
+  return compareSemverStr(githubLatest.value.version, myVersion.value.version) > 0;
+});
+
+/** 简单 semver 字符串比较: -1 / 0 / 1 */
+function compareSemverStr(a: string, b: string): number {
+  const pa = a.replace(/^v/, "").split(".").map(Number);
+  const pb = b.replace(/^v/, "").split(".").map(Number);
+  for (let i = 0; i < 3; i++) {
+    const x = pa[i] ?? 0, y = pb[i] ?? 0;
+    if (x !== y) return x < y ? -1 : 1;
+  }
+  return 0;
+}
+
+/** "升级本端"按钮点击 — 弹复制命令对话框 (不再走 watcher 信号文件路径, 大多数用户没部署) */
+function triggerLocalUpgrade() {
+  if (!myVersion.value) return;
+  const cmd = "bash <(curl -fsSL https://raw.githubusercontent.com/zhuzhuyule/autogateway/main/scripts/update.sh)";
+  const latest = githubLatest.value?.version || "latest";
+  dialog.info({
+    title: hasNewerRelease.value
+      ? t("upgrade.copyCmdTitleHasNew", { v: latest })
+      : t("upgrade.copyCmdTitleAlreadyLatest"),
+    content: () => h("div", [
+      h("p", { style: "margin: 0 0 8px 0; color: var(--text-color-2)" },
+        hasNewerRelease.value
+          ? t("upgrade.copyCmdBody", { from: myVersion.value!.version, to: latest })
+          : t("upgrade.copyCmdBodyAlreadyLatest", { v: myVersion.value!.version })),
+      h("pre", {
+        style: "background: var(--code-color, rgba(0,0,0,0.05)); padding: 10px; border-radius: 6px; " +
+          "font-size: 12px; overflow-x: auto; margin: 0; user-select: all"
+      }, cmd),
+    ]),
+    positiveText: t("common.copy"),
+    negativeText: t("common.cancel"),
+    onPositiveClick: async () => {
+      await copyText(cmd, "cmd");
+    },
+  });
 }
 
 async function loadUpgradeStatus() {
@@ -406,6 +429,7 @@ onMounted(() => {
   loadConfig();
   loadPeers();
   loadUpgradeStatus();
+  loadGithubLatest();
   upgradePoller = window.setInterval(() => {
     if (upgradeStatus.value?.pending) loadUpgradeStatus();
   }, 5000);
@@ -466,6 +490,12 @@ async function handleSave() {
       <span v-if="myVersion" style="color:var(--text-color-3);font-size:12px">
         {{ t("sync.myVersion") }}:
         <strong>{{ myVersion.version }}</strong>
+        <span
+          v-if="githubChecked && !hasNewerRelease"
+          style="margin-left: 4px; color: var(--success-color, #18a058)"
+        >
+          ✓
+        </span>
         · schema <code style="font-size:11px">{{ myVersion.schema_hash }}</code>
       </span>
     </template>
@@ -550,16 +580,22 @@ async function handleSave() {
         <n-button @click="loadPeers" tertiary circle :title="t('common.refresh')">
           <template #icon><n-icon><Refresh /></n-icon></template>
         </n-button>
+        <!-- 升级本端按钮 — 仅 GitHub release > 本机 时显示 (真实测算, 不靠 mesh 对比) -->
         <n-button
-          v-if="peers.length > 0"
+          v-if="hasNewerRelease"
           tertiary
           type="warning"
           @click="triggerLocalUpgrade"
           :title="t('upgrade.localUpgradeTip')"
         >
           <template #icon><n-icon><ArrowUpCircle /></n-icon></template>
-          {{ t("upgrade.localUpgradeBtn") }}
+          {{ t("upgrade.localUpgradeBtnWithVersion", { v: githubLatest?.version || "" }) }}
         </n-button>
+        <!-- 已是最新 — disabled 状态 -->
+        <n-tag v-else-if="githubChecked && myVersion" size="small" type="success" round>
+          <template #icon><n-icon><CheckmarkCircle /></n-icon></template>
+          {{ t("upgrade.alreadyLatest") }}
+        </n-tag>
         <n-button type="primary" @click="handleAdd">
           <template #icon><n-icon><Add /></n-icon></template>
           {{ t("sync.addPeer") }}
