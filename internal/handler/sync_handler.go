@@ -268,11 +268,21 @@ func (h *SyncHandler) performHandshake(ws *websocket.Conn, peer *models.SyncPeer
 		}
 	}
 
-	// 握手通过 — 把对端公钥落库, 后续 sync 帧用它解密.
+	// 握手通过 — 把对端公钥 + 版本/schema/状态落库.
+	// status="connected" 反映 "数据通畅" 而非 "我们主动 dial 对方". 即使本机
+	// 因为容器网络无法 dial 对端, 但对端连进来 + 推数据成功, UI 就该绿色显示.
+	now := time.Now()
+	updates := map[string]any{
+		"status":           "connected",
+		"peer_version":     hello.Version,
+		"peer_schema_hash": hello.SchemaHash,
+		"last_synced_at":   now,
+	}
 	if hello.PublicKey != "" {
-		h.db.Model(&models.SyncPeer{}).Where("id = ?", peer.ID).Update("public_key_x25519", hello.PublicKey)
+		updates["public_key_x25519"] = hello.PublicKey
 		peer.PublicKeyX25519 = hello.PublicKey
 	}
+	h.db.Model(&models.SyncPeer{}).Where("id = ?", peer.ID).Updates(updates)
 
 	// 若 minor/patch 不一致只发 warning, 不阻断
 	resp := services.WSMessage{
@@ -285,6 +295,7 @@ func (h *SyncHandler) performHandshake(ws *websocket.Conn, peer *models.SyncPeer
 		resp.Type = "warning"
 		resp.Reason = "minor_version_diff"
 		resp.PeerVersion = hello.Version
+		h.db.Model(&models.SyncPeer{}).Where("id = ?", peer.ID).Update("status", "warning:minor_version_diff")
 	}
 	_ = ws.WriteJSON(resp)
 	return true
@@ -366,6 +377,13 @@ func (h *SyncHandler) PullEndpoint(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to encrypt data"})
 		return
 	}
+
+	// 对端来 pull 也算"数据通畅", 更新本端的 peer.status / last_synced_at,
+	// UI 上让用户看到这个 peer 是活的 (即使本端没主动连出去).
+	h.db.Model(&models.SyncPeer{}).Where("id = ?", peer.ID).Updates(map[string]any{
+		"status":         "connected",
+		"last_synced_at": time.Now(),
+	})
 
 	c.JSON(http.StatusOK, gin.H{
 		"ciphertext": ciphertext,
