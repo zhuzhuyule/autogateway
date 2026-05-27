@@ -410,8 +410,10 @@ func (m *SyncPeerManager) doPull(ctx context.Context) {
 		// 这是修 mini 端 "Max" peer 错存了自己公钥 → 加密给本端无法解 的 stale-record bug.
 		params := []string{}
 		// doPull 用专属的 LastPulledAt 作为 since 下限, 跟 LastSyncedAt (push 也会改) 解耦.
+		// 必须用 UTC 序列化 — SQLite TEXT 比较是字典序, "+00:00" 时间戳跟
+		// "+08:00" 时间戳字典序混乱 (15:46+00 < 23:45+08 字面上, 但实际 15:46 UTC > 15:45 UTC).
 		if peer.LastPulledAt != nil {
-			params = append(params, "since="+url.QueryEscape(peer.LastPulledAt.Format(time.RFC3339Nano)))
+			params = append(params, "since="+url.QueryEscape(peer.LastPulledAt.UTC().Format(time.RFC3339Nano)))
 		}
 		if myPubKey != "" {
 			params = append(params, "my_public_key="+url.QueryEscape(myPubKey))
