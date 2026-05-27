@@ -225,25 +225,62 @@ func (m *SyncPeerManager) ensureConnection(peer models.SyncPeer) {
 	m.peersMu.Unlock()
 
 	// Read loop for this connection (detect disconnects)
-	go func(peerID string, c *websocket.Conn) {
+	// 当前 peer 用值拷贝是为了在 goroutine 里安全引用 (避免 closure 捕获 range var).
+	peerCopy := peer
+	go func(peerCopy models.SyncPeer, c *websocket.Conn) {
+		peerID := peerCopy.ID
 		defer func() {
 			c.Close()
 			m.peersMu.Lock()
 			delete(m.activePeers, peerID)
 			m.peersMu.Unlock()
 			m.db.Model(&models.SyncPeer{}).Where("id = ?", peerID).Update("status", "disconnected")
-			logrus.Infof("disconnected from peer %s", peerID)
+			logrus.Infof("disconnected from peer %s", peerCopy.Name)
 		}()
 
+		// 关键 — 不能 silent drop, 否则对端 server 通过 broadcaster 推给本端的
+		// sync 帧全部丢失, 这是 mini → 本机 (本机作 client) 实时同步的唯一通道.
+		settings := m.settingsManager.GetSettings()
 		for {
-			_, _, err := c.ReadMessage()
+			_, msg, err := c.ReadMessage()
 			if err != nil {
 				break
 			}
-			// Currently we don't expect messages on the client connection, 
-			// the server connection handles incoming pushes.
+			// 尝试解码 sync 帧 + ProcessPayload, 保证 server→client 推送也生效
+			var msgIn WSMessage
+			if err := json.Unmarshal(msg, &msgIn); err != nil {
+				continue
+			}
+			if msgIn.Type != "sync" || msgIn.Ciphertext == "" {
+				continue // 心跳 / 其他类型暂时忽略
+			}
+			// 优先非对称解 (用对端公钥), 失败 fallback legacy.
+			var payload *SyncPayload
+			var perr error
+			if peerCopy.PublicKeyX25519 != "" {
+				payload, perr = m.syncService.DecryptPayloadFrom(msgIn.Ciphertext, peerCopy.PublicKeyX25519)
+				if perr != nil && settings.SyncKey != "" {
+					payload, perr = m.syncService.DecryptPayload(msgIn.Ciphertext, settings.SyncKey)
+				}
+			} else if settings.SyncKey != "" {
+				payload, perr = m.syncService.DecryptPayload(msgIn.Ciphertext, settings.SyncKey)
+			} else {
+				continue
+			}
+			if perr != nil {
+				logrus.Warnf("client-side ws decrypt failed from peer %s: %v", peerCopy.Name, perr)
+				m.writeLog(peerID, "push", "error", "client ws decrypt: "+perr.Error(), "")
+				continue
+			}
+			if err := m.syncService.ProcessPayload(context.Background(), payload); err != nil {
+				logrus.Warnf("client-side ws merge failed from peer %s: %v", peerCopy.Name, err)
+				m.writeLog(peerID, "push", "error", "client ws merge: "+err.Error(), "")
+				continue
+			}
+			m.writeLog(peerID, "push", "success", "", "client-ws")
+			logrus.Infof("client-ws: received and merged %s from peer %s", payloadSummary(payload), peerCopy.Name)
 		}
-	}(peer.ID, conn)
+	}(peerCopy, conn)
 }
 
 func (m *SyncPeerManager) disconnectAll() {
