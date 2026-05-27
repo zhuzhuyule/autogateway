@@ -82,9 +82,11 @@ upgrade_via_docker_run() {
   restart=$(docker inspect -f '{{.HostConfig.RestartPolicy.Name}}' "$container")
   name="$container"
 
-  # ports
-  port_map=$(docker inspect -f '{{range $p, $conf := .NetworkSettings.Ports}}{{range $conf}}-p {{.HostPort}}:{{$p}} {{end}}{{end}}' "$container" \
-    | sed -E 's|/tcp||g; s|/udp||g' | tr -s ' ')
+  # ports — docker inspect 把同一端口的 IPv4+IPv6 binding 各列一次, 会产生
+  # 重复的 -p HOST:CONTAINER. 必须 dedupe, 否则第二次 docker run 时 bind 冲突.
+  port_map=$(docker inspect -f '{{range $p, $conf := .NetworkSettings.Ports}}{{range $conf}}-p {{.HostPort}}:{{$p}}{{println}}{{end}}{{end}}' "$container" \
+    | sed -E 's|/tcp||; s|/udp||' \
+    | sort -u | tr '\n' ' ')
 
   # env (skip docker default PATH)
   env_args=$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$container" \
