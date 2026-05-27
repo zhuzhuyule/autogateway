@@ -61,14 +61,21 @@ func (h *SyncHandler) Broadcast(msg []byte) {
 	}
 	h.clientsMu.Unlock()
 
+	logrus.Infof("ws broadcast: pushing %d bytes to %d connected ws clients", len(msg), len(conns))
+	sent := 0
 	for _, c := range conns {
 		if err := c.WriteMessage(websocket.TextMessage, msg); err != nil {
-			logrus.Warnf("ws broadcast failed: %v", err)
+			logrus.Warnf("ws broadcast write failed: %v", err)
 			h.clientsMu.Lock()
 			delete(h.clients, c)
 			h.clientsMu.Unlock()
 			_ = c.Close()
+		} else {
+			sent++
 		}
+	}
+	if len(conns) > 0 {
+		logrus.Infof("ws broadcast: sent OK to %d/%d clients", sent, len(conns))
 	}
 }
 
