@@ -371,7 +371,10 @@ func (m *SyncPeerManager) pushToPeers(ctx context.Context, settings types.System
 // pullLoop pulls periodically from HTTP (cold-start / recovery)
 func (m *SyncPeerManager) pullLoop(ctx context.Context) {
 	// 5-minute poll
-	ticker := time.NewTicker(5 * time.Minute)
+	// 1 分钟 pull 兜底: ws push 在 LAN 内秒级触达, pull 兜底覆盖 ws 不通的场景
+	// (例如对端 docker 容器网络隔离, 没法 dial 本端 ws server). 1min 间隔在
+	// 实时性 (用户能接受的等待) 和 mini 端负载 (60次/小时 vs 12次/小时) 之间平衡.
+	ticker := time.NewTicker(1 * time.Minute)
 	defer ticker.Stop()
 
 	// Do an initial pull right away if sync is enabled
@@ -406,8 +409,9 @@ func (m *SyncPeerManager) doPull(ctx context.Context) {
 		// 把本端公钥显式带在 query, 让对端用这个加密响应 (绕过对端 db 里可能陈旧的公钥记录).
 		// 这是修 mini 端 "Max" peer 错存了自己公钥 → 加密给本端无法解 的 stale-record bug.
 		params := []string{}
-		if peer.LastSyncedAt != nil {
-			params = append(params, "since="+url.QueryEscape(peer.LastSyncedAt.Format(time.RFC3339Nano)))
+		// doPull 用专属的 LastPulledAt 作为 since 下限, 跟 LastSyncedAt (push 也会改) 解耦.
+		if peer.LastPulledAt != nil {
+			params = append(params, "since="+url.QueryEscape(peer.LastPulledAt.Format(time.RFC3339Nano)))
 		}
 		if myPubKey != "" {
 			params = append(params, "my_public_key="+url.QueryEscape(myPubKey))
@@ -469,7 +473,11 @@ func (m *SyncPeerManager) doPull(ctx context.Context) {
 		}
 
 		now := time.Now()
-		m.db.Model(&models.SyncPeer{}).Where("id = ?", peer.ID).Update("last_synced_at", now)
+		// 同时更新 last_synced_at (展示用) 和 last_pulled_at (pull since 用)
+		m.db.Model(&models.SyncPeer{}).Where("id = ?", peer.ID).Updates(map[string]any{
+			"last_synced_at": now,
+			"last_pulled_at": now,
+		})
 		summary := payloadSummary(payload)
 		m.writeLog(peer.ID, "pull", "success", "", summary)
 		logrus.Infof("successfully pulled and merged changes from peer %s (%s)", peer.Name, summary)

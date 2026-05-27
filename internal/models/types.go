@@ -293,6 +293,9 @@ type SyncPeer struct {
 	Role           string         `gorm:"type:varchar(50);not null;default:'client'" json:"role"`        // 'server' or 'client'
 	Status         string         `gorm:"type:varchar(50);not null;default:'disconnected'" json:"status"`
 	LastSyncedAt   *time.Time     `json:"last_synced_at"`
+	// LastPulledAt 仅在成功 pull 后更新, 用作下次 pull 的 since 下限.
+	// 跟 LastSyncedAt 分开存, 防止 push 把 since 推到 now 导致 pull 永远 empty.
+	LastPulledAt   *time.Time     `json:"last_pulled_at"`
 	// P9.1 兼容性闸门: 握手成功后填入, UI 用于展示对端版本徽章 + 提示版本差异.
 	PeerVersion    string         `gorm:"type:varchar(50)" json:"peer_version"`
 	PeerSchemaHash string         `gorm:"type:varchar(32)" json:"peer_schema_hash"`
