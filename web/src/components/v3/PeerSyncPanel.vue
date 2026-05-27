@@ -86,19 +86,6 @@ function versionBadge(
   return "diff";
 }
 
-function versionBadgeForPeer(peerVer: string): "higher" | "lower" | "equal" | "unknown" {
-  if (!myVersion.value) return "unknown";
-  const partsM = myVersion.value.version.replace(/^v/, "").split(".").map(Number);
-  const partsP = peerVer.replace(/^v/, "").split(".").map(Number);
-  for (let i = 0; i < 3; i++) {
-    const a = partsP[i] ?? 0;
-    const b = partsM[i] ?? 0;
-    if (a > b) return "higher";
-    if (a < b) return "lower";
-  }
-  return "equal";
-}
-
 const columns = computed(() => [
   {
     title: t("sync.peerName"),
@@ -202,30 +189,6 @@ const columns = computed(() => [
     },
   },
 ]);
-
-function confirmRemoteUpgrade(_row: SyncPeer) {
-  message.info(t("upgrade.remoteNotYetImplemented"));
-}
-
-/** 升级本机到指定版本 — peer 行的"↑ vX.Y.Z"按钮在 cmp=higher 时触发 */
-function triggerSelfUpgradeTo(target: string) {
-  if (!myVersion.value || !target) return;
-  dialog.warning({
-    title: t("upgrade.confirmTitle"),
-    content: t("upgrade.confirmBody", { from: myVersion.value.version, to: target }),
-    positiveText: t("upgrade.confirmYes"),
-    negativeText: t("common.cancel"),
-    onPositiveClick: async () => {
-      try {
-        await upgradeApi.request(target, "self");
-        message.success(t("upgrade.requestSent"));
-        await loadUpgradeStatus();
-      } catch (err: any) {
-        message.error(err.response?.data?.error || t("upgrade.requestFailed"));
-      }
-    },
-  });
-}
 
 // GitHub release 真实测算 — 不依赖 mesh 内对端版本
 const githubLatest = ref<{ version: string; url: string } | null>(null);
