@@ -1255,9 +1255,16 @@ export default {
     pinnedFingerprintHint: "対向ノードの UI に表示される「本ノード ID フィンガープリント」. 握手時に実際の公開鍵フィンガープリントと一致するか検証, 不一致なら接続拒否. 空欄 = 初回接続信頼 (TOFU).",
     status: "状態",
     statusConnected: "接続済み",
+    statusConnectedMinorDiff: "接続済み (バージョン微差)",
     statusDisconnected: "未接続",
     statusWarning: "警告",
     statusRejected: "拒否",
+    reason: {
+      minor_version_diff: "マイナーバージョン差",
+      major_version_mismatch: "メジャーバージョン非互換",
+      schema_mismatch: "データ構造非互換",
+      fingerprint_mismatch: "公開鍵フィンガープリント不一致",
+    },
     peerVersion: "対向バージョン",
     myVersion: "本ノードバージョン",
     lastSync: "最終同期",
@@ -1275,6 +1282,8 @@ export default {
   upgrade: {
     localUpgradeBtn: "本ノードを更新",
     localUpgradeTip: "ホスト watcher に更新リクエストを送信 (mesh 内最新版へ)",
+    upgradeSelfTip: "本ノードは対向より古い、本ノードを {v} に更新",
+    upgradePeerTip: "対向ノードは本ノードより古い、対向に {v} への更新を提案",
     remoteUpgradeTip: "対向ノードに {v} への更新を提案",
     remoteNotYetImplemented:
       "クロスノード更新トリガーは今後の対応予定です — 現状は対向ノードの UI から実行してください",

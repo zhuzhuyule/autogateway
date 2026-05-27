@@ -399,10 +399,21 @@ func (m *SyncPeerManager) doPull(ctx context.Context) {
 		return
 	}
 
+	myPubKey := m.keypair.PublicKeyBase64()
+
 	for _, peer := range peers {
 		pullURL := fmt.Sprintf("%s/api/sync/pull", strings.TrimRight(peer.URL, "/"))
+		// 把本端公钥显式带在 query, 让对端用这个加密响应 (绕过对端 db 里可能陈旧的公钥记录).
+		// 这是修 mini 端 "Max" peer 错存了自己公钥 → 加密给本端无法解 的 stale-record bug.
+		params := []string{}
 		if peer.LastSyncedAt != nil {
-			pullURL += fmt.Sprintf("?since=%s", url.QueryEscape(peer.LastSyncedAt.Format(time.RFC3339Nano)))
+			params = append(params, "since="+url.QueryEscape(peer.LastSyncedAt.Format(time.RFC3339Nano)))
+		}
+		if myPubKey != "" {
+			params = append(params, "my_public_key="+url.QueryEscape(myPubKey))
+		}
+		if len(params) > 0 {
+			pullURL += "?" + strings.Join(params, "&")
 		}
 		req, err := http.NewRequestWithContext(ctx, "GET", pullURL, nil)
 		if err != nil {

@@ -340,10 +340,24 @@ func (h *SyncHandler) PullEndpoint(c *gin.Context) {
 		return
 	}
 
-	// 优先用 peer 的 X25519 公钥加密 (跟 ws push 一致), 公钥未知时回退 legacy
+	// 加密公钥选择优先级 (修 mini 端 peer.PublicKeyX25519 错存自己公钥的 stale bug):
+	//   1. 调用方在 query 里显式带的 my_public_key (最权威, 是 caller 的 fresh 公钥)
+	//   2. 我们 db 里 peer.PublicKeyX25519 (握手时落库)
+	//   3. legacy 全局 SyncKey AES-GCM (最后回退)
+	// 同时, 如果 query 公钥跟 db 不一致, 顺手更新 db 让下次直接走快路径.
 	var ciphertext string
-	if peer.PublicKeyX25519 != "" {
-		ciphertext, err = h.syncService.EncryptPayloadFor(payload, peer.PublicKeyX25519)
+	callerPubKey := c.Query("my_public_key")
+	if callerPubKey != "" && callerPubKey != peer.PublicKeyX25519 {
+		h.db.Model(&models.SyncPeer{}).Where("id = ?", peer.ID).Update("public_key_x25519", callerPubKey)
+		logrus.Infof("PullEndpoint: peer %s public_key_x25519 corrected from %.16s... to %.16s...",
+			peer.ID, peer.PublicKeyX25519, callerPubKey)
+	}
+	encryptKey := callerPubKey
+	if encryptKey == "" {
+		encryptKey = peer.PublicKeyX25519
+	}
+	if encryptKey != "" {
+		ciphertext, err = h.syncService.EncryptPayloadFor(payload, encryptKey)
 	} else {
 		ciphertext, err = h.syncService.EncryptPayload(payload, settings.SyncKey)
 	}

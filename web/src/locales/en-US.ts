@@ -1305,9 +1305,16 @@ export default {
     pinnedFingerprintHint: "The peer's 'My Identity Fingerprint' from their UI. We verify the actual public key matches this during handshake; mismatch = connection refused. Leave blank = trust on first use (TOFU).",
     status: "Status",
     statusConnected: "Connected",
+    statusConnectedMinorDiff: "Connected (slight version diff)",
     statusDisconnected: "Disconnected",
     statusWarning: "Warning",
     statusRejected: "Rejected",
+    reason: {
+      minor_version_diff: "minor version differs",
+      major_version_mismatch: "major version incompatible",
+      schema_mismatch: "data schema incompatible",
+      fingerprint_mismatch: "public-key fingerprint mismatch",
+    },
     peerVersion: "Peer Version",
     myVersion: "My Version",
     lastSync: "Last Sync",
@@ -1325,6 +1332,8 @@ export default {
   upgrade: {
     localUpgradeBtn: "Upgrade Self",
     localUpgradeTip: "Send an upgrade request to the host watcher (to mesh-latest version)",
+    upgradeSelfTip: "Self is older than peer, upgrade self to {v}",
+    upgradePeerTip: "Peer is older than self, suggest peer upgrade to {v}",
     remoteUpgradeTip: "Suggest peer upgrade to {v}",
     remoteNotYetImplemented:
       "Cross-node upgrade triggering is planned for a follow-up — for now upgrade from the peer's own UI",

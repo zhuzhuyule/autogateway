@@ -43,7 +43,7 @@ import {
 import { computed, h, onMounted, onUnmounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 
-const { t } = useI18n();
+const { t, te } = useI18n();
 const message = useMessage();
 const dialog = useDialog();
 
@@ -114,18 +114,27 @@ const columns = computed(() => [
     key: "status",
     render(row: SyncPeer) {
       const st = parseStatus(row.status);
+      // minor 版本不一致只是 cosmetic, 同步仍正常工作 — 用 info 蓝色 + 友好文案,
+      // 而不是 warning 黄色让用户以为出问题了.
+      const isMinorVerOnly = st.kind === "warn" && st.reason === "minor_version_diff";
       const map = {
         ok: { type: "success" as const, icon: CheckmarkCircle, label: t("sync.statusConnected") },
         off: { type: "default" as const, icon: CloseCircle, label: t("sync.statusDisconnected") },
         warn: { type: "warning" as const, icon: WarningOutline, label: t("sync.statusWarning") },
         rej: { type: "error" as const, icon: CloseCircle, label: t("sync.statusRejected") },
       };
-      const item = map[st.kind];
+      const item = isMinorVerOnly
+        ? { type: "info" as const, icon: CheckmarkCircle, label: t("sync.statusConnectedMinorDiff") }
+        : map[st.kind];
+      // reason 用 i18n key 翻译, 未知 reason 退回原值
+      const reasonText = st.reason
+        ? (te(`sync.reason.${st.reason}`) ? t(`sync.reason.${st.reason}`) : st.reason)
+        : "";
       return h(
         NTag,
         { type: item.type, size: "small" },
         {
-          default: () => item.label + (st.reason ? `: ${st.reason}` : ""),
+          default: () => (isMinorVerOnly || !reasonText) ? item.label : `${item.label}: ${reasonText}`,
           icon: () => h(NIcon, { component: item.icon }),
         }
       );
@@ -160,25 +169,35 @@ const columns = computed(() => [
     title: t("common.actions"),
     key: "actions",
     render(row: SyncPeer) {
-      const canUpgrade =
-        versionBadge(row.peer_version) === "diff" &&
+      // 升级按钮方向 — 按对端 vs 本机版本关系决定:
+      //   higher: 对端比我新 → 升级本机到对端版本
+      //   lower:  对端比我旧 → 提示对端升级到本机版本
+      //   equal / unknown / incompat: 不显示
+      const cmp = row.peer_version ? versionBadgeForPeer(row.peer_version) : "unknown";
+      const showUpgrade =
         !!myVersion.value &&
-        !!row.peer_version;
+        !!row.peer_version &&
+        versionBadge(row.peer_version) === "diff" &&
+        (cmp === "higher" || cmp === "lower");
+      const target = cmp === "higher" ? row.peer_version! : myVersion.value?.version || "";
+      const isSelfUpgrade = cmp === "higher";
       return h(NSpace, { size: 4 }, {
         default: () => [
-          canUpgrade &&
+          showUpgrade &&
             h(
               NButton,
               {
                 size: "small",
                 type: "primary",
                 tertiary: true,
-                onClick: () => confirmRemoteUpgrade(row),
-                title: t("upgrade.remoteUpgradeTip", { v: myVersion.value!.version }),
+                onClick: () => isSelfUpgrade ? triggerSelfUpgradeTo(target) : confirmRemoteUpgrade(row),
+                title: isSelfUpgrade
+                  ? t("upgrade.upgradeSelfTip", { v: target })
+                  : t("upgrade.upgradePeerTip", { v: target }),
               },
               {
                 icon: () => h(NIcon, null, { default: () => h(ArrowUpCircle) }),
-                default: () => myVersion.value!.version,
+                default: () => target,
               }
             ),
           h(
@@ -214,17 +233,9 @@ function confirmRemoteUpgrade(_row: SyncPeer) {
   message.info(t("upgrade.remoteNotYetImplemented"));
 }
 
-async function triggerLocalUpgrade() {
-  if (!myVersion.value) return;
-  const candidates = peers.value
-    .map(p => p.peer_version)
-    .filter((v): v is string => !!v)
-    .filter(v => versionBadgeForPeer(v) === "higher");
-  const target = candidates.sort().pop();
-  if (!target) {
-    message.info(t("upgrade.noTargetFound"));
-    return;
-  }
+/** 升级本机到指定版本 — peer 行的"↑ vX.Y.Z"按钮在 cmp=higher 时触发 */
+function triggerSelfUpgradeTo(target: string) {
+  if (!myVersion.value || !target) return;
   dialog.warning({
     title: t("upgrade.confirmTitle"),
     content: t("upgrade.confirmBody", { from: myVersion.value.version, to: target }),
@@ -240,6 +251,21 @@ async function triggerLocalUpgrade() {
       }
     },
   });
+}
+
+async function triggerLocalUpgrade() {
+  if (!myVersion.value) return;
+  // 找 mesh 里所有比本机版本高的对端 peer, 选最高那个作 target
+  const candidates = peers.value
+    .map(p => p.peer_version)
+    .filter((v): v is string => !!v)
+    .filter(v => versionBadgeForPeer(v) === "higher");
+  const target = candidates.sort().pop();
+  if (!target) {
+    message.info(t("upgrade.noTargetFound"));
+    return;
+  }
+  triggerSelfUpgradeTo(target);
 }
 
 async function loadUpgradeStatus() {
