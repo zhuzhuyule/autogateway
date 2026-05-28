@@ -37,54 +37,83 @@ func NewProvider(db *gorm.DB, store store.Store, settingsManager *config.SystemS
 // SelectKey 为指定的分组原子性地选择并轮换一个可用的 APIKey。
 func (p *KeyProvider) SelectKey(groupID uint) (*models.APIKey, error) {
 	activeKeysListKey := fmt.Sprintf("group:%d:active_keys", groupID)
+	// 防御性最大跳过次数. 正常路径一发命中, 这是 store/db desync 兜底.
+	// 设 16 而不是无限循环, 避免上层 bug 让 SelectKey 卡死.
+	const maxSkip = 16
 
-	// 1. Atomically rotate the key ID from the list
-	keyIDStr, err := p.store.Rotate(activeKeysListKey)
-	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			return nil, app_errors.ErrNoActiveKeys
+	for attempt := 0; attempt < maxSkip; attempt++ {
+		// 1. Atomically rotate the key ID from the list
+		keyIDStr, err := p.store.Rotate(activeKeysListKey)
+		if err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				return nil, app_errors.ErrNoActiveKeys
+			}
+			return nil, fmt.Errorf("failed to rotate key from store: %w", err)
 		}
-		return nil, fmt.Errorf("failed to rotate key from store: %w", err)
+
+		keyID, err := strconv.ParseUint(keyIDStr, 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse key ID '%s': %w", keyIDStr, err)
+		}
+
+		// 2. Get key details from HASH
+		keyHashKey := fmt.Sprintf("key:%d", keyID)
+		keyDetails, err := p.store.HGetAll(keyHashKey)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get key details for key ID %d: %w", keyID, err)
+		}
+
+		// 防御性 check: hash 不存在 (被 SyncGroupKeysFromDB Delete 但 active_keys
+		// LRem 没及时) 或 status 非 active (被对端 sync 标 invalid 但 active_keys
+		// 没清干净) → 跳过这把 key + 从 active_keys LRem 出去, 让下次 Rotate
+		// 直接拿下一把. 这是 store/db desync 的最后一道闸, 兜住直接 SQL 改 db
+		// 或未来新路径绕过 store 同步的场景.
+		if len(keyDetails) == 0 || keyDetails["status"] != models.KeyStatusActive {
+			reason := "status_not_active"
+			if len(keyDetails) == 0 {
+				reason = "hash_missing"
+			}
+			logrus.WithFields(logrus.Fields{
+				"groupID": groupID,
+				"keyID":   keyID,
+				"reason":  reason,
+				"status":  keyDetails["status"],
+			}).Warn("SelectKey: stale entry in active_keys, evicting and re-rotating")
+			_ = p.store.LRem(activeKeysListKey, 0, uint(keyID))
+			if len(keyDetails) > 0 {
+				_ = p.store.Delete(keyHashKey)
+			}
+			continue
+		}
+
+		// 3. Manually unmarshal the map into an APIKey struct
+		failureCount, _ := strconv.ParseInt(keyDetails["failure_count"], 10, 64)
+		createdAt, _ := strconv.ParseInt(keyDetails["created_at"], 10, 64)
+
+		// Decrypt the key value for use by channels
+		encryptedKeyValue := keyDetails["key_string"]
+		decryptedKeyValue, err := p.encryptionSvc.Decrypt(encryptedKeyValue)
+		if err != nil {
+			// If decryption fails, try to use the value as-is (backward compatibility for unencrypted keys)
+			logrus.WithFields(logrus.Fields{
+				"keyID": keyID,
+				"error": err,
+			}).Debug("Failed to decrypt key value, using as-is for backward compatibility")
+			decryptedKeyValue = encryptedKeyValue
+		}
+
+		return &models.APIKey{
+			ID:           uint(keyID),
+			KeyValue:     decryptedKeyValue,
+			Status:       keyDetails["status"],
+			FailureCount: failureCount,
+			GroupID:      groupID,
+			CreatedAt:    time.Unix(createdAt, 0),
+		}, nil
 	}
 
-	keyID, err := strconv.ParseUint(keyIDStr, 10, 64)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse key ID '%s': %w", keyIDStr, err)
-	}
-
-	// 2. Get key details from HASH
-	keyHashKey := fmt.Sprintf("key:%d", keyID)
-	keyDetails, err := p.store.HGetAll(keyHashKey)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get key details for key ID %d: %w", keyID, err)
-	}
-
-	// 3. Manually unmarshal the map into an APIKey struct
-	failureCount, _ := strconv.ParseInt(keyDetails["failure_count"], 10, 64)
-	createdAt, _ := strconv.ParseInt(keyDetails["created_at"], 10, 64)
-
-	// Decrypt the key value for use by channels
-	encryptedKeyValue := keyDetails["key_string"]
-	decryptedKeyValue, err := p.encryptionSvc.Decrypt(encryptedKeyValue)
-	if err != nil {
-		// If decryption fails, try to use the value as-is (backward compatibility for unencrypted keys)
-		logrus.WithFields(logrus.Fields{
-			"keyID": keyID,
-			"error": err,
-		}).Debug("Failed to decrypt key value, using as-is for backward compatibility")
-		decryptedKeyValue = encryptedKeyValue
-	}
-
-	apiKey := &models.APIKey{
-		ID:           uint(keyID),
-		KeyValue:     decryptedKeyValue,
-		Status:       keyDetails["status"],
-		FailureCount: failureCount,
-		GroupID:      groupID,
-		CreatedAt:    time.Unix(createdAt, 0),
-	}
-
-	return apiKey, nil
+	// 跳过 maxSkip 次后还没找到有效 key, 当作整组没活 key 处理.
+	return nil, app_errors.ErrNoActiveKeys
 }
 
 // UpdateStatus 异步地提交一个 Key 状态更新任务。

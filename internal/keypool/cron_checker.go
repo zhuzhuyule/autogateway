@@ -30,8 +30,9 @@ type CronChecker struct {
 	wg              sync.WaitGroup
 
 	// backoff 状态: key.ID → 上次探活时刻 + 连续失败次数. 已知失效但慢的
-	// key (上游 quota 超 / 账号封 / 服务挂) 每 5min tick 全打一遍上游浪费配额
-	// 还引入噪音, 退避按 15min → 30min → 1h → 2h → 4h → 8h → 24h 指数延长.
+	// key (上游 quota 超 / 账号封 / 服务挂) 每 group 级 interval (默认 1h) 全
+	// 打一遍上游浪费配额. 语义: 前 3 次失败给机会 (临时抖动可恢复), 第 4 次起
+	// 进退避 1h → 2h → 4h → 8h → 16h → 24h.
 	backoffMu    sync.Mutex
 	backoffState map[uint]*keyBackoffState
 }
@@ -54,8 +55,10 @@ func NewCronChecker(
 }
 
 // shouldSkipByBackoff 判断当前 invalid key 是否还在退避窗口内 (true 表示跳过本次).
-// 退避公式: nextDelay = min(15min * 2^max(0, consecutiveFailures-1), 24h).
-// 第一次失败立即试 (delay=15min 起步), 之后逐步指数延长.
+//
+// 语义: 前 3 次失败是网络/上游临时抖动, 给机会按 group 级 KeyValidationInterval
+// 正常探活; 第 4 次起进退避, 1h → 2h → 4h → 8h → 16h → 24h (上限).
+// 区分"真死 key" vs "暂时不通", 避免临时抖动被过早惩罚.
 func (s *CronChecker) shouldSkipByBackoff(keyID uint) bool {
 	s.backoffMu.Lock()
 	defer s.backoffMu.Unlock()
@@ -63,14 +66,15 @@ func (s *CronChecker) shouldSkipByBackoff(keyID uint) bool {
 	if !ok {
 		return false
 	}
-	exp := st.consecutiveFailures - 1
-	if exp < 0 {
-		exp = 0
+	const graceCount = 3
+	if st.consecutiveFailures < graceCount {
+		return false
 	}
-	if exp > 7 { // 2^7 = 128, 128*15min = 32h, 截到 24h 上限
-		exp = 7
+	exp := st.consecutiveFailures - graceCount
+	if exp > 4 { // 2^4 = 16, 16h; >4 就直接 24h 上限
+		exp = 4
 	}
-	delay := 15 * time.Minute * time.Duration(1<<exp)
+	delay := time.Hour * time.Duration(1<<exp)
 	if delay > 24*time.Hour {
 		delay = 24 * time.Hour
 	}
