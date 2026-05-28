@@ -107,6 +107,19 @@ func NewSyncService(db *gorm.DB, configManager types.ConfigManager, keypair *Nod
 	}
 }
 
+// effectiveTime 返回一条 row 的 "最后变更时刻" — 取 UpdatedAt 和 DeletedAt 较大值.
+//
+// 关键: GORM Delete 走软删除只 SET deleted_at = NOW(), 不更新 updated_at. 如果
+// LWW 只看 updated_at, 删除事件 (deleted_at 变化) 在对端永远比不过 — 因为两端的
+// updated_at 都是 row 创建/最后编辑时刻, 完全相等. 这就是 mesh sync 删除信号丢失
+// 的真正根因. 取 max(UpdatedAt, DeletedAt) 让删除变 LWW 可见事件.
+func effectiveTime(updatedAt time.Time, deletedAt gorm.DeletedAt) time.Time {
+	if deletedAt.Valid && deletedAt.Time.After(updatedAt) {
+		return deletedAt.Time
+	}
+	return updatedAt
+}
+
 // ExportPayload 查询数据库中自 `since` 时间戳以来发生变更（包含被软删除的墓碑记录）的所有核心配置.
 //
 // 启用同步即同步全部内容 (含 api_keys), 不再有细粒度开关. 用户对"是否同步密钥"
@@ -223,8 +236,9 @@ func (s *SyncService) ProcessPayload(ctx context.Context, payload *SyncPayload) 
 					return err
 				}
 			} else {
-				// LWW: 谁的 updated_at 新留谁; 注意保留 existing.ID, 不要让 Save 改主键
-				if incoming.UpdatedAt.After(existing.UpdatedAt) {
+				// LWW: 取 max(UpdatedAt, DeletedAt) 作为事件时刻, 否则纯软删 (updated_at
+				// 不变, 只 deleted_at 推进) 在对端永远比不赢. 注意保留 existing.ID.
+				if effectiveTime(incoming.UpdatedAt, incoming.DeletedAt).After(effectiveTime(existing.UpdatedAt, existing.DeletedAt)) {
 					existing.SettingValue = incoming.SettingValue
 					existing.UpdatedAt = incoming.UpdatedAt
 					existing.DeletedAt = incoming.DeletedAt
@@ -262,7 +276,7 @@ func (s *SyncService) ProcessPayload(ctx context.Context, payload *SyncPayload) 
 				}
 			} else {
 				groupIDMap[incoming.ID] = existing.ID
-				if incoming.UpdatedAt.After(existing.UpdatedAt) {
+				if effectiveTime(incoming.UpdatedAt, incoming.DeletedAt).After(effectiveTime(existing.UpdatedAt, existing.DeletedAt)) {
 					incoming.ID = existing.ID // 保留本端 id, 不要让 Save 改主键
 					if err := tx.Unscoped().Save(&incoming).Error; err != nil {
 						return fmt.Errorf("failed to update group %s: %w", incoming.Name, err)
@@ -299,7 +313,7 @@ func (s *SyncService) ProcessPayload(ctx context.Context, payload *SyncPayload) 
 					return err
 				}
 			} else {
-				if incoming.UpdatedAt.After(existing.UpdatedAt) {
+				if effectiveTime(incoming.UpdatedAt, incoming.DeletedAt).After(effectiveTime(existing.UpdatedAt, existing.DeletedAt)) {
 					incoming.ID = existing.ID
 					if err := tx.Unscoped().Save(&incoming).Error; err != nil {
 						return fmt.Errorf("failed to update subgroup assoc (g=%d sub=%d): %w",
@@ -328,7 +342,7 @@ func (s *SyncService) ProcessPayload(ctx context.Context, payload *SyncPayload) 
 					return err
 				}
 			} else {
-				if incoming.UpdatedAt.After(existing.UpdatedAt) {
+				if effectiveTime(incoming.UpdatedAt, incoming.DeletedAt).After(effectiveTime(existing.UpdatedAt, existing.DeletedAt)) {
 					incoming.ID = existing.ID
 					if err := tx.Unscoped().Save(&incoming).Error; err != nil {
 						return fmt.Errorf("failed to update alias %s/%d/%s: %w",
@@ -362,7 +376,7 @@ func (s *SyncService) ProcessPayload(ctx context.Context, payload *SyncPayload) 
 					return err
 				}
 			} else {
-				if incoming.UpdatedAt.After(existing.UpdatedAt) {
+				if effectiveTime(incoming.UpdatedAt, incoming.DeletedAt).After(effectiveTime(existing.UpdatedAt, existing.DeletedAt)) {
 					incoming.ID = existing.ID
 					if err := tx.Unscoped().Save(&incoming).Error; err != nil {
 						return fmt.Errorf("failed to update api key %d: %w", existing.ID, err)
