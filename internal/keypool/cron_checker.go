@@ -13,6 +13,13 @@ import (
 	"gorm.io/gorm"
 )
 
+// keyBackoffState 记录一把 invalid key 探活的退避状态. 内存 map, 不持久化 —
+// 重启时全部清空, 等效首次探活. 这是有意的简化, 避免加 db 字段 + migration.
+type keyBackoffState struct {
+	lastAttemptAt       time.Time
+	consecutiveFailures int
+}
+
 // NewCronChecker is responsible for periodically validating invalid keys.
 type CronChecker struct {
 	DB              *gorm.DB
@@ -21,6 +28,12 @@ type CronChecker struct {
 	EncryptionSvc   encryption.Service
 	stopChan        chan struct{}
 	wg              sync.WaitGroup
+
+	// backoff 状态: key.ID → 上次探活时刻 + 连续失败次数. 已知失效但慢的
+	// key (上游 quota 超 / 账号封 / 服务挂) 每 5min tick 全打一遍上游浪费配额
+	// 还引入噪音, 退避按 15min → 30min → 1h → 2h → 4h → 8h → 24h 指数延长.
+	backoffMu    sync.Mutex
+	backoffState map[uint]*keyBackoffState
 }
 
 // NewCronChecker creates a new CronChecker.
@@ -36,7 +49,49 @@ func NewCronChecker(
 		Validator:       validator,
 		EncryptionSvc:   encryptionSvc,
 		stopChan:        make(chan struct{}),
+		backoffState:    make(map[uint]*keyBackoffState),
 	}
+}
+
+// shouldSkipByBackoff 判断当前 invalid key 是否还在退避窗口内 (true 表示跳过本次).
+// 退避公式: nextDelay = min(15min * 2^max(0, consecutiveFailures-1), 24h).
+// 第一次失败立即试 (delay=15min 起步), 之后逐步指数延长.
+func (s *CronChecker) shouldSkipByBackoff(keyID uint) bool {
+	s.backoffMu.Lock()
+	defer s.backoffMu.Unlock()
+	st, ok := s.backoffState[keyID]
+	if !ok {
+		return false
+	}
+	exp := st.consecutiveFailures - 1
+	if exp < 0 {
+		exp = 0
+	}
+	if exp > 7 { // 2^7 = 128, 128*15min = 32h, 截到 24h 上限
+		exp = 7
+	}
+	delay := 15 * time.Minute * time.Duration(1<<exp)
+	if delay > 24*time.Hour {
+		delay = 24 * time.Hour
+	}
+	return time.Since(st.lastAttemptAt) < delay
+}
+
+// recordBackoffResult 探活后更新退避状态. success=true 清空记录, false 累加失败.
+func (s *CronChecker) recordBackoffResult(keyID uint, success bool) {
+	s.backoffMu.Lock()
+	defer s.backoffMu.Unlock()
+	if success {
+		delete(s.backoffState, keyID)
+		return
+	}
+	st, ok := s.backoffState[keyID]
+	if !ok {
+		st = &keyBackoffState{}
+		s.backoffState[keyID] = st
+	}
+	st.lastAttemptAt = time.Now()
+	st.consecutiveFailures++
 }
 
 // Start begins the cron job execution.
@@ -132,9 +187,29 @@ func (s *CronChecker) validateGroupKeys(group *models.Group) {
 		return
 	}
 
+	// 退避过滤: 跳过仍在退避窗口内的 key, 避免对已知失效 key 反复打上游.
+	candidateKeys := make([]models.APIKey, 0, len(invalidKeys))
+	var skippedByBackoff int
+	for i := range invalidKeys {
+		if s.shouldSkipByBackoff(invalidKeys[i].ID) {
+			skippedByBackoff++
+			continue
+		}
+		candidateKeys = append(candidateKeys, invalidKeys[i])
+	}
+	if skippedByBackoff > 0 {
+		logrus.Debugf("CronChecker: Group '%s' skipped %d invalid key(s) still in backoff window.", group.Name, skippedByBackoff)
+	}
+	if len(candidateKeys) == 0 {
+		if err := s.DB.Model(group).Update("last_validated_at", time.Now()).Error; err != nil {
+			logrus.Errorf("CronChecker: Failed to update last_validated_at for group %s: %v", group.Name, err)
+		}
+		return
+	}
+
 	var becameValidCount int32
 	var keyWg sync.WaitGroup
-	jobs := make(chan *models.APIKey, len(invalidKeys))
+	jobs := make(chan *models.APIKey, len(candidateKeys))
 
 	concurrency := group.EffectiveConfig.KeyValidationConcurrency
 	for range concurrency {
@@ -160,6 +235,7 @@ func (s *CronChecker) validateGroupKeys(group *models.Group) {
 					keyForValidation.KeyValue = decryptedKey
 
 					isValid, _ := s.Validator.ValidateSingleKey(&keyForValidation, group)
+					s.recordBackoffResult(key.ID, isValid)
 					if isValid {
 						atomic.AddInt32(&becameValidCount, 1)
 					}
@@ -171,9 +247,9 @@ func (s *CronChecker) validateGroupKeys(group *models.Group) {
 	}
 
 DistributeLoop:
-	for i := range invalidKeys {
+	for i := range candidateKeys {
 		select {
-		case jobs <- &invalidKeys[i]:
+		case jobs <- &candidateKeys[i]:
 		case <-s.stopChan:
 			break DistributeLoop
 		}

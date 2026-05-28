@@ -12,6 +12,7 @@ import (
 	"autogateway/internal/models"
 	"autogateway/internal/types"
 
+	"github.com/sirupsen/logrus"
 	"gorm.io/gorm"
 )
 
@@ -81,19 +82,28 @@ func IsSyncMerge(ctx context.Context) bool {
 	return v
 }
 
+// KeyPoolInvalidator 让 SyncService 在 mesh 合并 APIKey 后通知 keypool 把 redis store
+// 跟 db 重新对齐. 用接口避免直接 import keypool 包 (虽然 services 已经 import 了, 但
+// 用接口更易测试 + 表达意图). 由 keypool.KeyProvider.SyncGroupKeysFromDB 实现.
+type KeyPoolInvalidator interface {
+	SyncGroupKeysFromDB(groupID uint) error
+}
+
 // SyncService 负责多端数据加密封包、解密解包以及记录级智能合并业务
 type SyncService struct {
-	db            *gorm.DB
-	configManager types.ConfigManager
-	keypair       *NodeKeypairService
+	db                 *gorm.DB
+	configManager      types.ConfigManager
+	keypair            *NodeKeypairService
+	keypoolInvalidator KeyPoolInvalidator
 }
 
 // NewSyncService 构造函数，支持 dig 自动依赖注入
-func NewSyncService(db *gorm.DB, configManager types.ConfigManager, keypair *NodeKeypairService) *SyncService {
+func NewSyncService(db *gorm.DB, configManager types.ConfigManager, keypair *NodeKeypairService, keypoolInvalidator KeyPoolInvalidator) *SyncService {
 	return &SyncService{
-		db:            db,
-		configManager: configManager,
-		keypair:       keypair,
+		db:                 db,
+		configManager:      configManager,
+		keypair:            keypair,
+		keypoolInvalidator: keypoolInvalidator,
 	}
 }
 
@@ -177,13 +187,20 @@ func (s *SyncService) ExportPayload(ctx context.Context, since *time.Time) (*Syn
 
 // ProcessPayload 在单个事务中执行记录级最新写入生效（LWW per Record）智能合并。
 // 在 context 上挂 syncMergeKey 标记,GORM hook 见到后短路,避免合并触发回环 push。
+//
+// APIKey 合并后会收集"key store 受影响的 group_id 集合", 事务提交后通知 keypool
+// 把 redis 的 active_keys list + key:{id} hash 跟 db 重新对齐. 否则即使 db 软删,
+// 对端 SelectKey 仍然 rotate 出已删 key, 重启才剔除 (P9.4 修复点).
 func (s *SyncService) ProcessPayload(ctx context.Context, payload *SyncPayload) error {
 	if payload == nil {
 		return nil
 	}
 
 	ctx = context.WithValue(ctx, syncMergeKey{}, true)
-	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	// 收集 APIKey 合并里"需要让 keypool 重新对齐 store"的 group_id. 在事务外触发
+	// invalidate, 避免事务持有数据库锁的同时去等 redis IO.
+	affectedKeyGroups := make(map[uint]bool)
+	txErr := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// 1. 合并系统设置 (SystemSettings) — 按 setting_key 匹配, 不按 id.
 		//
 		// SystemSetting 的 id 是各端独立 autoincrement, 跨端没有意义; setting_key
@@ -211,7 +228,10 @@ func (s *SyncService) ProcessPayload(ctx context.Context, payload *SyncPayload) 
 					existing.SettingValue = incoming.SettingValue
 					existing.UpdatedAt = incoming.UpdatedAt
 					existing.DeletedAt = incoming.DeletedAt
-					if err := tx.Save(&existing).Error; err != nil {
+					// Unscoped: 跳过 GORM 默认 `deleted_at IS NULL` scope, 让对软删行
+					// 的覆盖 (复活 / 重新软删) 都能落地. 否则 Save by PK 在 existing
+					// 已软删时 no-op, sync 删除信号永远 land 不下.
+					if err := tx.Unscoped().Save(&existing).Error; err != nil {
 						return fmt.Errorf("failed to update system setting %s: %w", incoming.SettingKey, err)
 					}
 				}
@@ -244,7 +264,7 @@ func (s *SyncService) ProcessPayload(ctx context.Context, payload *SyncPayload) 
 				groupIDMap[incoming.ID] = existing.ID
 				if incoming.UpdatedAt.After(existing.UpdatedAt) {
 					incoming.ID = existing.ID // 保留本端 id, 不要让 Save 改主键
-					if err := tx.Save(&incoming).Error; err != nil {
+					if err := tx.Unscoped().Save(&incoming).Error; err != nil {
 						return fmt.Errorf("failed to update group %s: %w", incoming.Name, err)
 					}
 				}
@@ -281,7 +301,7 @@ func (s *SyncService) ProcessPayload(ctx context.Context, payload *SyncPayload) 
 			} else {
 				if incoming.UpdatedAt.After(existing.UpdatedAt) {
 					incoming.ID = existing.ID
-					if err := tx.Save(&incoming).Error; err != nil {
+					if err := tx.Unscoped().Save(&incoming).Error; err != nil {
 						return fmt.Errorf("failed to update subgroup assoc (g=%d sub=%d): %w",
 							incoming.GroupID, incoming.SubGroupID, err)
 					}
@@ -310,7 +330,7 @@ func (s *SyncService) ProcessPayload(ctx context.Context, payload *SyncPayload) 
 			} else {
 				if incoming.UpdatedAt.After(existing.UpdatedAt) {
 					incoming.ID = existing.ID
-					if err := tx.Save(&incoming).Error; err != nil {
+					if err := tx.Unscoped().Save(&incoming).Error; err != nil {
 						return fmt.Errorf("failed to update alias %s/%d/%s: %w",
 							incoming.Alias, incoming.GroupID, incoming.RealModel, err)
 					}
@@ -336,21 +356,44 @@ func (s *SyncService) ProcessPayload(ctx context.Context, payload *SyncPayload) 
 					if err := tx.Create(&incoming).Error; err != nil {
 						return fmt.Errorf("failed to create api key (group=%d): %w", incoming.GroupID, err)
 					}
+					// 新增 key (软删或活的都算 db 状态变化): 让 keypool 重对齐 store
+					affectedKeyGroups[incoming.GroupID] = true
 				} else {
 					return err
 				}
 			} else {
 				if incoming.UpdatedAt.After(existing.UpdatedAt) {
 					incoming.ID = existing.ID
-					if err := tx.Save(&incoming).Error; err != nil {
+					if err := tx.Unscoped().Save(&incoming).Error; err != nil {
 						return fmt.Errorf("failed to update api key %d: %w", existing.ID, err)
 					}
+					// 软删 / status 变化 / 复活 都会影响 active_keys 列表, 标记 group
+					// 让 keypool 在事务后重对齐. 这里保守标 — 任何更新都标, 避免漏判.
+					affectedKeyGroups[incoming.GroupID] = true
 				}
 			}
 		}
 
 		return nil
 	})
+	if txErr != nil {
+		return txErr
+	}
+
+	// 事务外 invalidate keypool store: 软删 key 从 active_keys 移除 + hash 清掉,
+	// 新增/复活 key 加回 active_keys. 失败仅记日志不阻断, 因为 db 已是真值,
+	// 下次启动 LoadKeysFromDB 也会兜底.
+	if s.keypoolInvalidator != nil {
+		for groupID := range affectedKeyGroups {
+			if err := s.keypoolInvalidator.SyncGroupKeysFromDB(groupID); err != nil {
+				// 不上抛: db 已经是真值, 下次启动 LoadKeysFromDB 会兜底重建.
+				// 但要记日志, 静默吞会让排查 "删了 key 对端 redis 没失效" 变盲找.
+				logrus.WithError(err).WithField("group_id", groupID).
+					Warn("sync: keypool store invalidate failed (db is truth, restart will reconcile)")
+			}
+		}
+	}
+	return nil
 }
 
 // EncryptPayloadFor 使用 nacl/box 把 payload 加密给指定 peer (用 peer 的 X25519 公钥).

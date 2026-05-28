@@ -384,7 +384,12 @@ func (ps *ProxyServer) executeRequestWithRetry(
 	aliasRouted404 := resp != nil && resp.StatusCode == http.StatusNotFound && ps.hasRoutingCandidate(c)
 	isRetryableHTTPError := shouldFailoverByStatus || aliasRouted404
 	if err != nil || isRetryableHTTPError {
-		if err != nil && app_errors.IsIgnorableError(err) {
+		// 双条件判定: 错误字符串匹配 ignorable list 不足以证明是客户端断连,
+		// 因为 Go HTTP client 内部用 context 实现 timeout, 上游慢/挂会返回
+		// "context canceled" 错被误判. 必须同时验证 c.Request.Context() 真被
+		// cancel (gin 在客户端断时 cancel request context), 才算客户端 abort.
+		// 否则全部当作上游失败计入 failure_count, 让失效 key 能正常被熔断.
+		if err != nil && app_errors.IsIgnorableError(err) && c.Request.Context().Err() != nil {
 			logrus.Debugf("Client-side ignorable error for key %s, aborting retries: %v", utils.MaskAPIKey(apiKey.KeyValue), err)
 			ps.logRequest(c, originalGroup, group, apiKey, startTime, 499, err, isStream, upstreamURL, channelHandler, bodyBytes, models.RequestTypeFinal)
 			return

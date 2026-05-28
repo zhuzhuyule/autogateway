@@ -23,7 +23,7 @@ type SystemSetting struct {
 	Description  string         `gorm:"type:varchar(512)" json:"description"`
 	CreatedAt    time.Time      `json:"created_at"`
 	UpdatedAt    time.Time      `json:"updated_at"`
-	DeletedAt    gorm.DeletedAt `gorm:"index" json:"-"`
+	DeletedAt    gorm.DeletedAt `gorm:"index" json:"deleted_at,omitempty"`
 }
 
 // GroupConfig 存储特定于分组的配置
@@ -59,7 +59,7 @@ type GroupSubGroup struct {
 	Weight     int            `gorm:"default:0" json:"weight"`
 	CreatedAt  time.Time      `json:"created_at"`
 	UpdatedAt  time.Time      `json:"updated_at"`
-	DeletedAt  gorm.DeletedAt `gorm:"index" json:"-"`
+	DeletedAt  gorm.DeletedAt `gorm:"index" json:"deleted_at,omitempty"`
 
 	// Lightweight association - only store necessary info for performance
 	SubGroupName string `gorm:"-" json:"sub_group_name,omitempty"`
@@ -148,7 +148,7 @@ type Group struct {
 	BlockedModels datatypes.JSON `gorm:"type:json" json:"blocked_models"`
 	CreatedAt     time.Time      `json:"created_at"`
 	UpdatedAt     time.Time      `json:"updated_at"`
-	DeletedAt     gorm.DeletedAt `gorm:"index" json:"-"`
+	DeletedAt     gorm.DeletedAt `gorm:"index" json:"deleted_at,omitempty"`
 
 	// For cache
 	ProxyKeysMap              map[string]struct{}        `gorm:"-" json:"-"`
@@ -178,7 +178,7 @@ type ModelAlias struct {
 	IsReserved bool           `gorm:"not null;default:false" json:"is_reserved"`
 	CreatedAt  time.Time      `json:"created_at"`
 	UpdatedAt  time.Time      `json:"updated_at"`
-	DeletedAt  gorm.DeletedAt `gorm:"index" json:"-"`
+	DeletedAt  gorm.DeletedAt `gorm:"index" json:"deleted_at,omitempty"`
 }
 
 // TableName forces the table name even if GORM pluralization changes.
@@ -197,7 +197,7 @@ type APIKey struct {
 	LastUsedAt   *time.Time     `gorm:"index:idx_api_keys_group_last_used_id,priority:2" json:"last_used_at"`
 	CreatedAt    time.Time      `json:"created_at"`
 	UpdatedAt    time.Time      `json:"updated_at"`
-	DeletedAt    gorm.DeletedAt `gorm:"index" json:"-"`
+	DeletedAt    gorm.DeletedAt `gorm:"index" json:"deleted_at,omitempty"`
 }
 
 // RequestType 请求类型常量

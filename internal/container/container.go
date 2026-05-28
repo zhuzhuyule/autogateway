@@ -109,6 +109,13 @@ func BuildContainer() (*dig.Container, error) {
 	}
 
 	// Sync Service
+	// 同样的桥接模式: *keypool.KeyProvider 暴露为 services.KeyPoolInvalidator,
+	// SyncService 在 ProcessPayload 合并 APIKey 后调它把 redis store 跟 db 对齐.
+	if err := container.Provide(func(p *keypool.KeyProvider) services.KeyPoolInvalidator {
+		return p
+	}); err != nil {
+		return nil, err
+	}
 	if err := container.Provide(services.NewSyncService); err != nil {
 		return nil, err
 	}

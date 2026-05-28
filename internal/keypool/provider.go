@@ -297,6 +297,60 @@ func (p *KeyProvider) LoadKeysFromDB() error {
 	return nil
 }
 
+// SyncGroupKeysFromDB 在 mesh sync 把 db 改了之后, 把该 group 的 redis store
+// 跟 db 的真值对齐. 保留运行时累计的 failure_count (active 状态的 key 不动 hash),
+// 只处理: 软删除 → 清 hash + 从 active_keys LRem; 状态变 invalid → LRem; 新增/
+// 状态恢复 active → 加回 active_keys + HSet hash.
+//
+// 不能用 LoadKeysFromDB (会刷掉所有 group 的 failure_count counter, 导致正常
+// 失败累计被回退), 也不能用 RemoveKeysFromStore (会 Delete 整个 active_keys
+// 列表). 这是一个精确的 per-group 同步, 只动有变化的 key.
+func (p *KeyProvider) SyncGroupKeysFromDB(groupID uint) error {
+	var allKeys []models.APIKey
+	if err := p.db.Unscoped().Where("group_id = ?", groupID).Find(&allKeys).Error; err != nil {
+		return fmt.Errorf("sync group %d: query keys: %w", groupID, err)
+	}
+
+	activeListKey := fmt.Sprintf("group:%d:active_keys", groupID)
+
+	for i := range allKeys {
+		k := &allKeys[i]
+		keyHashKey := fmt.Sprintf("key:%d", k.ID)
+
+		if k.DeletedAt.Valid {
+			// 软删除: 把 hash 删掉 + 从 active list 摘出去
+			_ = p.store.LRem(activeListKey, 0, k.ID)
+			_ = p.store.Delete(keyHashKey)
+			continue
+		}
+
+		if k.Status == models.KeyStatusInvalid {
+			// 失效: 从 active list 摘出 + 把 hash 的 status 字段刷成 invalid
+			_ = p.store.LRem(activeListKey, 0, k.ID)
+			_ = p.store.HSet(keyHashKey, map[string]any{"status": models.KeyStatusInvalid})
+			continue
+		}
+
+		// active: 确保 hash 存在 + 在 active list 里. 已存在的 hash 不动 (保护 failure_count).
+		existingHash, err := p.store.HGetAll(keyHashKey)
+		if err != nil || len(existingHash) == 0 {
+			// hash 不存在 → 新 key 同步过来, 建 hash + 加 active list
+			_ = p.store.HSet(keyHashKey, p.apiKeyToMap(k))
+			_ = p.store.LPush(activeListKey, k.ID)
+			continue
+		}
+		if existingHash["status"] != models.KeyStatusActive {
+			// hash 存在但 status 异常 (可能从 invalid 被对端 RestoreKeys 改回了): 修正
+			_ = p.store.HSet(keyHashKey, map[string]any{"status": models.KeyStatusActive})
+			// LRem 防重复后再 LPush (避免出现 active list 同 keyID 多条)
+			_ = p.store.LRem(activeListKey, 0, k.ID)
+			_ = p.store.LPush(activeListKey, k.ID)
+		}
+	}
+
+	return nil
+}
+
 // AddKeys 批量添加新的 Key 到池和数据库中。
 func (p *KeyProvider) AddKeys(groupID uint, keys []models.APIKey) error {
 	if len(keys) == 0 {
