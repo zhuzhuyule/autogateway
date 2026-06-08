@@ -3,6 +3,8 @@ package router_engine
 import (
 	"testing"
 	"time"
+
+	"autogateway/internal/failover"
 )
 
 // TestSWRRDistribution verifies that smooth weighted round-robin honors
@@ -48,13 +50,13 @@ func TestSWRREqualWeightOrder(t *testing.T) {
 func TestCooldownBumpAndReset(t *testing.T) {
 	s := NewSelector(nil)
 	c := Candidate{GroupID: 99, RealModel: "test"}
-	s.MarkResponse(c, 429)
+	s.MarkResponse(c, 429, "", 0)
 	cands := []Candidate{c, {AliasID: 7, GroupID: 100, RealModel: "fresh", Weight: 1, Priority: 100}}
 	alive := s.filterCooldown(cands)
 	if len(alive) != 1 || alive[0].RealModel != "fresh" {
 		t.Errorf("expected 'fresh' to survive cooldown filter, got %+v", alive)
 	}
-	s.MarkResponse(c, 200)
+	s.MarkResponse(c, 200, "", 0)
 	alive2 := s.filterCooldown(cands)
 	if len(alive2) != 2 {
 		t.Errorf("expected reset after 2xx; alive count = %d", len(alive2))
@@ -64,7 +66,7 @@ func TestCooldownBumpAndReset(t *testing.T) {
 func TestCooldownBumpsOnNon2xxStatus(t *testing.T) {
 	s := NewSelector(nil)
 	c := Candidate{GroupID: 99, RealModel: "test"}
-	s.MarkResponse(c, 500)
+	s.MarkResponse(c, 500, "", 0)
 	cands := []Candidate{c, {AliasID: 7, GroupID: 100, RealModel: "fresh", Weight: 1, Priority: 100}}
 
 	alive := s.filterCooldown(cands)
@@ -117,7 +119,7 @@ func tierAliasFor(s *Selector, tokens int) string {
 // cooldown after the configured wait elapses.
 func TestCooldownExpires(t *testing.T) {
 	c := newCooldownStore()
-	c.bump("k")
+	c.apply("k", failover.ClassServerError, 0, failover.DefaultCooldownPolicy())
 	now := time.Now()
 	if !c.isCooling("k", now) {
 		t.Fatalf("expected fresh bump to be cooling")
@@ -125,5 +127,33 @@ func TestCooldownExpires(t *testing.T) {
 	// Travel forward 6 minutes (past 5 min cap + jitter)
 	if c.isCooling("k", now.Add(6*time.Minute)) {
 		t.Fatalf("expected cooldown to expire after 6 minutes")
+	}
+}
+
+func TestMarkResponseTiering(t *testing.T) {
+	s := &Selector{
+		cooldown:  newCooldownStore(),
+		swrrState: newSWRRStateMap(),
+		settings:  DefaultSettings(),
+		policy:    failover.DefaultCooldownPolicy(),
+	}
+	c := Candidate{GroupID: 1, RealModel: "m"}
+	key := "1:m"
+	now := time.Now()
+
+	// per-day 429 → 长冷却（>1h）
+	s.MarkResponse(c, 429, "requests per day limit reached", 0)
+	if !s.cooldown.isCooling(key, now.Add(time.Hour)) {
+		t.Fatal("per-day 429 should cool >1h")
+	}
+	// 成功 → reset
+	s.MarkResponse(c, 200, "", 0)
+	if s.cooldown.isCooling(key, now) {
+		t.Fatal("200 should reset cooldown")
+	}
+	// 403 → ClassNone，不冷却
+	s.MarkResponse(c, 403, "invalid api key", 0)
+	if s.cooldown.isCooling(key, now) {
+		t.Fatal("403 should not set model-level cooldown")
 	}
 }

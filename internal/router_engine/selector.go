@@ -20,6 +20,7 @@ import (
 	"sync"
 	"time"
 
+	"autogateway/internal/failover"
 	"autogateway/internal/models"
 
 	"github.com/sirupsen/logrus"
@@ -85,6 +86,7 @@ type Selector struct {
 	cooldown  *cooldownStore
 	swrrState *swrrStateMap
 	settings  Settings
+	policy    failover.CooldownPolicy
 	mu        sync.RWMutex
 }
 
@@ -94,6 +96,7 @@ func NewSelector(db *gorm.DB) *Selector {
 		cooldown:  newCooldownStore(),
 		swrrState: newSWRRStateMap(),
 		settings:  DefaultSettings(),
+		policy:    failover.DefaultCooldownPolicy(),
 	}
 	s.loadSettingsFromDB()
 	return s
@@ -257,19 +260,19 @@ func (s *Selector) PickForAuto(ctx context.Context, estimatedTokens int) (*Candi
 	return s.PickByAlias(ctx, ReservedAlias(tier))
 }
 
-// MarkResponse feeds an upstream HTTP status back into the cooldown
-// machinery. Non-2xx/3xx responses start or extend a backoff window; anything
-// in 2xx/3xx clears the failure streak for that (group, model).
-func (s *Selector) MarkResponse(c Candidate, status int) {
+// MarkResponse 把上游响应反馈进冷却。parsedError 为上游错误文本（用于分类），
+// retryAfter 为 Retry-After 头解析值（0 表示无）。2xx/3xx 清除冷却。
+func (s *Selector) MarkResponse(c Candidate, status int, parsedError string, retryAfter time.Duration) {
 	if c.GroupID == 0 || c.RealModel == "" {
 		return
 	}
 	key := fmt.Sprintf("%d:%s", c.GroupID, c.RealModel)
 	if status >= 200 && status < 400 {
 		s.cooldown.reset(key)
-	} else if status >= 400 {
-		s.cooldown.bump(key)
+		return
 	}
+	class := failover.Classify(status, parsedError)
+	s.cooldown.apply(key, class, retryAfter, s.policy)
 }
 
 // ----- helpers -----
@@ -532,20 +535,21 @@ func (c *cooldownStore) isCooling(key string, now time.Time) bool {
 	return now.Before(e.until)
 }
 
-// bump pushes an existing entry's cooldown out exponentially: 60s, 120s,
-// 240s, 480s, capped at 5 minutes.
-func (c *cooldownStore) bump(key string) {
+// apply 按冷却性质设置冷却窗口；仅 ServerError 用 failures 做升级。
+// dur<=0（ClassNone）不设置冷却。
+func (c *cooldownStore) apply(key string, class failover.CooldownClass, retryAfter time.Duration, policy failover.CooldownPolicy) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	e := c.data[key]
-	e.failures++
-	wait := time.Duration(60<<min(e.failures-1, 4)) * time.Second
-	if wait > 5*time.Minute {
-		wait = 5 * time.Minute
+	dur, counts := policy.Decide(class, retryAfter, e.failures)
+	if dur <= 0 {
+		return
 	}
-	// Add ±10% jitter so we don't bunch up retries from many goroutines.
-	jit := time.Duration(rand.Int63n(int64(wait) / 5))
-	e.until = time.Now().Add(wait + jit)
+	if counts {
+		e.failures++
+	}
+	jit := time.Duration(rand.Int63n(int64(dur)/5 + 1))
+	e.until = time.Now().Add(dur + jit)
 	c.data[key] = e
 }
 
@@ -553,13 +557,6 @@ func (c *cooldownStore) reset(key string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	delete(c.data, key)
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
 
 // ===== SWRR per-alias state =====
