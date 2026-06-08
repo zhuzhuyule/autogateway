@@ -2,6 +2,8 @@ package router_engine
 
 import (
 	"bytes"
+	"crypto/sha1"
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -71,16 +73,27 @@ func Middleware(s *Selector, resolver AliasResolver) gin.HandlerFunc {
 			model = "auto"
 		}
 
+		sessionKey, isMultiTurn := parseSession(bodyBytes, c.Request.Header)
+		var stickyKey string
 		var picked *Candidate
-		switch {
-		case model == "auto":
-			est := estimateTokensFromBody(bodyBytes)
-			picked, err = s.PickForAuto(c.Request.Context(), est)
-		default:
-			// Try alias first, fall through to exact-name lookup.
-			picked, err = s.PickByAlias(c.Request.Context(), model)
-			if err != nil || picked == nil {
-				picked, err = s.PickByExactName(c.Request.Context(), model)
+		if isMultiTurn && sessionKey != "" {
+			stickyKey = stickyStoreKey(sessionKey, model)
+			if cand := s.GetSticky(stickyKey); cand != nil && s.IsCandidateAlive(c.Request.Context(), cand) {
+				picked = cand
+			}
+		}
+
+		if picked == nil {
+			switch {
+			case model == "auto":
+				est := estimateTokensFromBody(bodyBytes)
+				picked, err = s.PickForAuto(c.Request.Context(), est)
+			default:
+				// Try alias first, fall through to exact-name lookup.
+				picked, err = s.PickByAlias(c.Request.Context(), model)
+				if err != nil || picked == nil {
+					picked, err = s.PickByExactName(c.Request.Context(), model)
+				}
 			}
 		}
 		if err != nil || picked == nil {
@@ -138,6 +151,11 @@ func Middleware(s *Selector, resolver AliasResolver) gin.HandlerFunc {
 		c.Params = setParam(c.Params, "group_name", groupName)
 		c.Set("router_engine.candidate", picked)
 
+		// 刷新/写入粘性锁：多轮会话命中后，延长 TTL；首次多轮选出 picked 后也写入。
+		if stickyKey != "" {
+			s.SetSticky(stickyKey, picked)
+		}
+
 		// 如果原 model 与 picked.RealModel 不一致(alias 解析 / auto 智能路由),
 		// 改写 body 让上游收到真实模型名,避免 400。
 		if picked.RealModel != "" && picked.RealModel != model {
@@ -155,6 +173,64 @@ func Middleware(s *Selector, resolver AliasResolver) gin.HandlerFunc {
 			"weight":          picked.Weight,
 		}).Debug("router_engine: routed request")
 	}
+}
+
+// parseSession 提取会话标识与是否多轮。sessionKey 优先 X-Session-Id 头，
+// 否则取首条 user 消息内容的 SHA1。isMultiTurn = messages 含 assistant。
+func parseSession(bodyBytes []byte, header http.Header) (sessionKey string, isMultiTurn bool) {
+	if v := strings.TrimSpace(header.Get("X-Session-Id")); v != "" {
+		sessionKey = "hdr:" + v
+	}
+	var probe struct {
+		Messages []struct {
+			Role    string `json:"role"`
+			Content any    `json:"content"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal(bodyBytes, &probe); err != nil {
+		return sessionKey, false
+	}
+	firstUser := ""
+	for _, m := range probe.Messages {
+		if m.Role == "assistant" {
+			isMultiTurn = true
+		}
+		if firstUser == "" && m.Role == "user" {
+			firstUser = flattenContent(m.Content)
+		}
+	}
+	if sessionKey == "" && firstUser != "" {
+		sum := sha1.Sum([]byte(firstUser))
+		sessionKey = "msg:" + hex.EncodeToString(sum[:])
+	}
+	return sessionKey, isMultiTurn
+}
+
+// flattenContent 把 message content（string 或 array-of-blocks）拼成纯文本。
+func flattenContent(content any) string {
+	switch v := content.(type) {
+	case string:
+		return v
+	case []any:
+		var sb strings.Builder
+		for _, part := range v {
+			if pm, ok := part.(map[string]any); ok {
+				if t, _ := pm["type"].(string); t == "text" {
+					if s, _ := pm["text"].(string); s != "" {
+						sb.WriteString(s)
+					}
+				}
+			}
+		}
+		return sb.String()
+	}
+	return ""
+}
+
+// stickyStoreKey 由 sessionKey + requestedModel 派生稳定的 store key。
+func stickyStoreKey(sessionKey, requestedModel string) string {
+	sum := sha1.Sum([]byte(sessionKey + "|" + requestedModel))
+	return "sticky:" + hex.EncodeToString(sum[:])
 }
 
 // rewriteBodyModel 把 JSON body 里的 "model" 字段改成 newModel。
