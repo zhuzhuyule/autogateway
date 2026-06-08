@@ -3,6 +3,7 @@ import { keysApi } from "@/api/keys";
 import { detectFromText, type KeyDetection } from "@/data/keyDetector";
 import {
   FREE_PROVIDERS,
+  OFFICIAL_PROVIDERS,
   FREE_MODELS,
   bootstrapExposedModels,
   displayModelName,
@@ -15,7 +16,6 @@ import {
   FlashOutline,
   KeyOutline,
   OpenOutline,
-  PlayOutline,
 } from "@vicons/ionicons5";
 import { NIcon, NModal, useMessage } from "naive-ui";
 import { computed, ref, watch } from "vue";
@@ -46,8 +46,6 @@ const picked = ref<FreeProvider | null>(null);
 const groupName = ref("");
 const pasted = ref("");
 const submitting = ref(false);
-const testing = ref(false);
-const testResults = ref<{ ok: number; fail: number } | null>(null);
 
 // Model selection
 const showPaid = ref(false);
@@ -108,8 +106,6 @@ watch(
       groupName.value = "";
       pasted.value = "";
       submitting.value = false;
-      testing.value = false;
-      testResults.value = null;
       smartInput.value = "";
     }
   }
@@ -140,7 +136,6 @@ function close() {
 
 function pickProvider(p: FreeProvider) {
   picked.value = p;
-  testResults.value = null;
   // ensure unique group name
   let name = p.recommendedGroupName;
   if (props.existingGroupNames.includes(name)) {
@@ -332,40 +327,11 @@ async function ensureGroupExists(): Promise<Group> {
   return await keysApi.createGroup(submit);
 }
 
-async function testOnly() {
-  if (!picked.value || !pasted.value.trim()) {
-    return;
-  }
-  testing.value = true;
-  testResults.value = null;
-  try {
-    // we need a group_id to call testKeys; create the group first if needed
-    // since testKeys requires existing group, we create-then-test in one go
-    const g = await ensureGroupExists();
-    if (!g.id) {
-      throw new Error("group create returned no id");
-    }
-    const r = await keysApi.testKeys(g.id, pasted.value);
-    const ok = r.results.filter(x => x.is_valid).length;
-    const fail = r.results.length - ok;
-    testResults.value = { ok, fail };
-    if (ok > 0) {
-      message.success(t("v3.testResultMsg", { ok, fail }));
-    } else {
-      message.warning(t("v3.testResultMsg", { ok, fail }));
-    }
-    // emit success so parent refreshes group list (group already created)
-    emit("success", g);
-  } catch (e) {
-    console.error("test failed", e);
-    message.error(t("common.requestFailed"));
-  } finally {
-    testing.value = false;
-  }
-}
-
-async function testAndSave() {
-  if (!picked.value || !pasted.value.trim()) {
+// 创建分组. 粘了 keys 就一起入库(addKeysAsync 内部会异步验证), 没粘就只
+// 建空分组. "测试" 动作(配置可达性 / 模型可用性)留到分组详情页, 那里有
+// 完整上下文(base url / model 已落库 + key 列表), 测试才有意义.
+async function createGroup() {
+  if (!picked.value) {
     return;
   }
   submitting.value = true;
@@ -374,12 +340,14 @@ async function testAndSave() {
     if (!g.id) {
       throw new Error("group create returned no id");
     }
-    await keysApi.addKeysAsync(g.id, pasted.value);
+    if (pasted.value.trim()) {
+      await keysApi.addKeysAsync(g.id, pasted.value);
+    }
     message.success(t("common.operationSuccess"));
     emit("success", g);
     close();
   } catch (e) {
-    console.error("save failed", e);
+    console.error("create failed", e);
     message.error(t("common.requestFailed"));
   } finally {
     submitting.value = false;
@@ -530,29 +498,14 @@ async function testAndSave() {
             <span class="v3-intake__paste-hint">
               {{ t("v3.detectedKeys", { n: keyCountLabel }) }}
             </span>
-            <div v-if="testResults" class="mono" style="font-size: 11px; color: var(--v3-ink-2)">
-              <span style="color: var(--v3-ok)">{{ testResults.ok }} ok</span>
-              ·
-              <span :style="{ color: testResults.fail ? 'var(--v3-danger)' : 'var(--v3-ink-3)' }">
-                {{ testResults.fail }} fail
-              </span>
-            </div>
             <div style="margin-left: auto; display: flex; gap: 8px">
               <button
-                class="v3-btn"
-                :disabled="testing || submitting || !pasted.trim()"
-                @click="testOnly"
-              >
-                <n-icon :component="PlayOutline" :size="12" />
-                {{ testing ? t("v3.testing") : t("v3.testOnly") }}
-              </button>
-              <button
                 class="v3-btn v3-btn--accent"
-                :disabled="submitting || testing || !pasted.trim()"
-                @click="testAndSave"
+                :disabled="submitting"
+                @click="createGroup"
               >
                 <n-icon :component="CheckmarkOutline" :size="12" />
-                {{ submitting ? t("v3.saving") : t("v3.testAndSave") }}
+                {{ submitting ? t("v3.saving") : t("v3.createGroup") }}
               </button>
             </div>
           </div>
@@ -672,6 +625,91 @@ async function testAndSave() {
                 :class="x.cls"
               >{{ x.label }}</span>
               <span v-for="t in featTags(prov)" :key="t" class="v3-pc__tag">{{ t }}</span>
+            </div>
+            <div class="v3-pc__foot">
+              <button
+                class="v3-btn v3-btn--sm"
+                style="flex: 1; height: 26px; font-size: 11px"
+                @click.stop="pickProvider(prov)"
+              >
+                {{ picked?.id === prov.id ? t("v3.selected") : t("v3.useThis") }}
+              </button>
+              <a
+                :href="prov.signupUrl"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="v3-btn v3-btn--sm"
+                style="height: 26px; font-size: 11px"
+                @click.stop
+              >
+                <n-icon :component="OpenOutline" :size="10" />
+                {{ t("v3.getKey") }}
+              </a>
+            </div>
+          </div>
+        </div>
+
+        <!-- Official paid providers section (OpenAI / Anthropic / Gemini) -->
+        <div
+          style="
+            margin-top: 18px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 12px;
+          "
+        >
+          <div
+            style="
+              font: 500 11px/1 var(--v3-mono);
+              letter-spacing: 0.1em;
+              text-transform: uppercase;
+              color: var(--v3-ink-3);
+            "
+          >
+            {{ t("v3.officialProviders") }}
+          </div>
+          <div style="flex: 1; height: 1px; background: var(--v3-line)" />
+          <span class="v3-chip">{{ OFFICIAL_PROVIDERS.length }} {{ t("v3.officialProvidersAvailable") }}</span>
+        </div>
+        <div class="v3-pc-grid">
+          <div
+            v-for="prov in OFFICIAL_PROVIDERS"
+            :key="prov.id"
+            class="v3-pc"
+            :class="{ 'v3-pc--selected': picked?.id === prov.id }"
+            @click="pickProvider(prov)"
+          >
+            <div class="v3-pc__head">
+              <div class="v3-pc__logo-wrapper">
+                <ProviderLogo
+                  v-if="hasProviderLogo(prov.id) || hasProviderLogo(prov.name)"
+                  :hint="hasProviderLogo(prov.id) ? prov.id : prov.name"
+                  :size="24"
+                  style="border-radius: 5px"
+                />
+                <img
+                  v-else-if="faviconFor(prov.id) && !faviconErr[prov.id]"
+                  :src="faviconFor(prov.id)"
+                  alt=""
+                  @error="onFaviconErr(prov.id)"
+                  class="v3-pc__favicon"
+                />
+                <span v-else :class="pavClassFor(prov.id) + ' v3-pc__logo'">
+                  {{
+                    prov.name
+                      .replace(/[^A-Za-z0-9]/g, "")
+                      .slice(0, 2)
+                      .toUpperCase()
+                  }}
+                </span>
+              </div>
+              <div style="flex: 1; min-width: 0">
+                <div class="v3-pc__name">{{ prov.name }}</div>
+              </div>
+            </div>
+            <div class="v3-pc__tags">
+              <span class="v3-pc__tag">{{ prov.freeTier }}</span>
             </div>
             <div class="v3-pc__foot">
               <button

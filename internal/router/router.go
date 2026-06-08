@@ -295,7 +295,7 @@ func registerProxyRoutes(
 	// 1) 标准命名路由: /proxy/{group_name}/*
 	proxyGroup := router.Group("/proxy/:group_name")
 	proxyGroup.Use(middleware.ProxyRouteDispatcher(serverHandler))
-	proxyGroup.Use(middleware.ProxyAuth(groupManager))
+	proxyGroup.Use(middleware.ProxyAuth(groupManager, serverHandler.SettingsManager))
 	proxyGroup.Use(mw)
 	proxyGroup.Any("/*path", proxyServer.HandleProxy)
 
@@ -312,7 +312,7 @@ func registerProxyRoutes(
 		role := sc.Role
 		grp := router.Group(sc.Prefix)
 		grp.Use(injectSystemGroupName(groupManager, role))
-		grp.Use(middleware.ProxyAuth(groupManager))
+		grp.Use(middleware.ProxyAuth(groupManager, serverHandler.SettingsManager))
 		grp.Use(mw)
 		grp.Any("/*path", proxyServer.HandleProxy)
 	}

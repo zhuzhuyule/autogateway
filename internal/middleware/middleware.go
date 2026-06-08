@@ -150,7 +150,10 @@ func Auth(resolver AuthKeyResolver) gin.HandlerFunc {
 }
 
 // ProxyAuth
-func ProxyAuth(gm *services.GroupManager) gin.HandlerFunc {
+//
+// admin token 也放行 — 让 Playground / 内部测试场景能直接走 /proxy/:group_name
+// 不用配每个 group 的 proxy_key. admin 本就有全权, 加这条路径不增加攻击面.
+func ProxyAuth(gm *services.GroupManager, resolver AuthKeyResolver) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// Check key
 		key := extractAuthKey(c)
@@ -164,6 +167,13 @@ func ProxyAuth(gm *services.GroupManager) gin.HandlerFunc {
 		if err != nil {
 			response.Error(c, app_errors.NewAPIError(app_errors.ErrInternalServer, "Failed to retrieve proxy group"))
 			c.Abort()
+			return
+		}
+
+		// admin token 兜底放行 (Playground / 后台测试)
+		if expected := resolver.GetEffectiveAuthKey(); expected != "" &&
+			subtle.ConstantTimeCompare([]byte(key), []byte(expected)) == 1 {
+			c.Next()
 			return
 		}
 

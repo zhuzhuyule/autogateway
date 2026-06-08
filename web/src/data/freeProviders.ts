@@ -668,8 +668,79 @@ export const FREE_PROVIDERS: FreeProvider[] = [
   },
 ];
 
+// 官方付费 LLM provider 模板. 跟 FREE_PROVIDERS 分开维护, 避免污染"免费精选"
+// 语义. UI 上单独一个 section 展示. 复用 FreeProvider 结构是为了让 card
+// 渲染逻辑零修改 — freeTier 字段在这里语义重映射为"计费模式"短标签.
+export const OFFICIAL_PROVIDERS: FreeProvider[] = [
+  {
+    id: "openai",
+    name: "OpenAI",
+    freeTier: "Pay-as-you-go",
+    description: "GPT-4o / o1 / o3 系列, 官方付费 API",
+    signupUrl: "https://platform.openai.com/api-keys",
+    docsUrl: "https://platform.openai.com/docs",
+    channelType: "openai",
+    baseUrl: "https://api.openai.com/v1",
+    testModel: "gpt-4o-mini",
+    models: [
+      "gpt-4o",
+      "gpt-4o-mini",
+      "gpt-4-turbo",
+      "gpt-3.5-turbo",
+      "o1-preview",
+      "o1-mini",
+      "o3-mini",
+    ],
+    recommendedGroupName: "openai",
+    recommendedDisplayName: "OpenAI",
+    upstreamHosts: ["api.openai.com"],
+    verifiedAt: "2026-06",
+  },
+  {
+    id: "anthropic",
+    name: "Anthropic",
+    freeTier: "Pay-as-you-go",
+    description: "Claude 4.x 系列, 官方付费 API",
+    signupUrl: "https://console.anthropic.com/settings/keys",
+    docsUrl: "https://docs.anthropic.com",
+    channelType: "anthropic",
+    baseUrl: "https://api.anthropic.com",
+    testModel: "claude-haiku-4-5",
+    models: [
+      "claude-opus-4-7",
+      "claude-sonnet-4-6",
+      "claude-haiku-4-5",
+    ],
+    recommendedGroupName: "anthropic",
+    recommendedDisplayName: "Anthropic Claude",
+    upstreamHosts: ["api.anthropic.com"],
+    verifiedAt: "2026-06",
+  },
+  {
+    id: "gemini",
+    name: "Google Gemini",
+    freeTier: "Pay-as-you-go (含免费配额)",
+    description: "Gemini 2.x 系列官方 API, 也提供免费 tier",
+    signupUrl: "https://aistudio.google.com/app/apikey",
+    docsUrl: "https://ai.google.dev/docs",
+    channelType: "gemini",
+    baseUrl: "https://generativelanguage.googleapis.com/v1beta",
+    testModel: "gemini-1.5-flash",
+    models: [
+      "gemini-2.0-flash-exp",
+      "gemini-1.5-flash",
+      "gemini-1.5-flash-8b",
+      "gemini-1.5-pro",
+    ],
+    recommendedGroupName: "gemini",
+    recommendedDisplayName: "Google Gemini",
+    upstreamHosts: ["generativelanguage.googleapis.com"],
+    verifiedAt: "2026-06",
+  },
+];
+
 export function getProviderById(id: string): FreeProvider | undefined {
-  return FREE_PROVIDERS.find(p => p.id === id);
+  return FREE_PROVIDERS.find(p => p.id === id) || OFFICIAL_PROVIDERS.find(p => p.id === id);
 }
 
 function extractHost(url: string): string {

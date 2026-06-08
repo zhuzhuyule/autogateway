@@ -31,9 +31,15 @@ export default defineConfig(({ mode }) => {
       // curl/某些客户端走 127.0.0.1 直连 5173 会 "Connection refused". 显式
       // 监听 IPv4 + IPv6 双栈, 排除一切回环歧义.
       host: "0.0.0.0",
-      // 代理后端 API
+      // 代理后端 API + proxy 路径 (Playground 直调上游)
       proxy: {
         "/api": {
+          target: env.VITE_API_BASE_URL || "http://127.0.0.1:3001",
+          changeOrigin: true,
+        },
+        // Playground 走 /proxy/:group/v1/chat/completions, 也得代理过去,
+        // 否则前端直接打到 vite dev 自己, 返回 404 让人误以为是上游 404.
+        "/proxy": {
           target: env.VITE_API_BASE_URL || "http://127.0.0.1:3001",
           changeOrigin: true,
         },

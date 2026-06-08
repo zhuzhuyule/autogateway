@@ -12,6 +12,7 @@ import {
   CubeOutline,
   PulseOutline,
   GitNetworkOutline,
+  ChatbubbleEllipsesOutline,
   SettingsOutline,
   MenuOutline,
   CloseOutline,
@@ -48,6 +49,7 @@ const railItems = computed(() => [
   { name: "model-catalog", icon: CubeOutline, tip: t("nav.modelCatalog") },
   { name: "logs", icon: PulseOutline, tip: t("nav.logs") },
   { name: "sync", icon: GitNetworkOutline, tip: t("nav.sync") },
+  { name: "playground", icon: ChatbubbleEllipsesOutline, tip: t("nav.playground") },
 ]);
 
 const activeName = computed(() => route.name);

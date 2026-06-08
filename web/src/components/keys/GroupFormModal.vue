@@ -5,6 +5,7 @@ import { settingsApi } from "@/api/settings";
 import ProxyKeysInput from "@/components/common/ProxyKeysInput.vue";
 import {
   FREE_PROVIDERS,
+  OFFICIAL_PROVIDERS,
   bootstrapExposedModels,
   findProviderByUpstreams,
   type FreeProvider,
@@ -143,6 +144,9 @@ const userModifiedFields = ref({
 const providerSearch = ref("");
 const providerPanelExpanded = ref<string[]>(["picker"]);
 const usedProviderIds = ref<Set<string>>(new Set());
+// 所有现有 group 的 name 集合 — applyProvider 时检查重名找下一个空位,
+// 否则只看 usedProviderIds (= provider id) 检测不到 group name 占用情况.
+const usedGroupNames = ref<Set<string>>(new Set());
 
 // 上游真实模型列表(从 group.available_models 加载;可手动刷新).
 // 仅供 testModelOptions 下拉选项使用,UI 不再单独展示完整列表.
@@ -242,15 +246,24 @@ async function refreshUsedProviders() {
   try {
     const response = await getGroupList();
     const list =
-      (response as unknown as { data?: Array<{ upstreams?: Array<{ url?: string }> }> }).data || [];
+      (
+        response as unknown as {
+          data?: Array<{ name?: string; upstreams?: Array<{ url?: string }> }>;
+        }
+      ).data || [];
     const ids = new Set<string>();
+    const names = new Set<string>();
     for (const g of list) {
+      if (g.name) {
+        names.add(g.name);
+      }
       const matched = findProviderByUpstreams(g.upstreams || []);
       if (matched) {
         ids.add(matched.id);
       }
     }
     usedProviderIds.value = ids;
+    usedGroupNames.value = names;
   } catch {
     // 忽略,徽标仅做提示用
   }
@@ -259,22 +272,29 @@ async function refreshUsedProviders() {
 const showProviderPicker = computed(() => !props.group && formData.group_type !== "aggregate");
 
 function applyProvider(p: FreeProvider) {
-  const alreadyUsed = usedProviderIds.value.has(p.id);
+  // 同 provider 再来一次, 自动改名 -2 / -3 ... — 用 usedGroupNames 真名查重,
+  // 不再用 usedProviderIds (那只标"同 provider 已存在", 不知道具体 name 占了
+  // 哪些), 否则 openai-2 已存在时还是会被前端当 "没占用" 提交导致后端 DUP.
+  const taken = usedGroupNames.value;
+  let name = p.recommendedGroupName;
+  if (taken.has(name)) {
+    let i = 2;
+    while (taken.has(`${name}-${i}`)) {
+      i++;
+    }
+    name = `${name}-${i}`;
+  }
   formData.channel_type = p.channelType;
-  formData.name = alreadyUsed ? `${p.recommendedGroupName}-2` : p.recommendedGroupName;
+  formData.name = name;
   formData.display_name = p.recommendedDisplayName;
   formData.description = `${p.name} · ${p.freeTier}`;
-  formData.test_model = p.testModel;
+  // test_model 不强行预填 — 让用户从上游 /models 拉清单后自己选, 避免假
+  // 数据进入再用 picker 时找不到. 用户如果只是想试一下 template, 留空也行.
   formData.upstreams = [{ url: p.baseUrl, weight: 1 }];
   formData.validation_endpoint = "";
-  // 重置"用户已修改"标记,避免 channel_type watcher 又覆盖回 channel 默认值
-  userModifiedFields.value = { test_model: true, upstream: true };
+  // 标记 upstream 被用户视为"已配置", 防止 channel_type watcher 覆盖
+  userModifiedFields.value = { test_model: false, upstream: true };
   providerPanelExpanded.value = [];
-  if (alreadyUsed) {
-    message.warning(t("keys.providerAlreadyUsed", { name: p.name }));
-  } else {
-    message.success(t("keys.providerApplied", { name: p.name }));
-  }
 }
 
 // 根据渠道类型动态生成占位符提示
@@ -709,6 +729,23 @@ async function handleSubmit() {
       }
     });
 
+    // 新建模式: 提交前最后一次刷新 usedGroupNames, 自动 increment 重名 — 兜住
+    // applyProvider 预填后用户没改 + 后台又冒出同名 group 的 race.
+    if (!props.group?.id) {
+      await refreshUsedProviders();
+      const original = formData.name?.trim();
+      if (original && usedGroupNames.value.has(original)) {
+        const base = original.replace(/-\d+$/, "");
+        let i = original.match(/-(\d+)$/) ? Number(original.match(/-(\d+)$/)![1]) + 1 : 2;
+        while (usedGroupNames.value.has(`${base}-${i}`)) {
+          i++;
+        }
+        const next = `${base}-${i}`;
+        formData.name = next;
+        message.info(t("keys.groupNameAutoRenamed", { from: original, to: next }));
+      }
+    }
+
     await formRef.value?.validate();
 
     loading.value = true;
@@ -894,6 +931,53 @@ async function handleSubmit() {
                           "
                         >
                           {{ t(`keys.providerBadge_${p.badge.replace("-", "_")}`) }}
+                        </n-tag>
+                      </div>
+                    </div>
+                    <div class="provider-card-tier">{{ p.freeTier }}</div>
+                    <a
+                      :href="p.signupUrl"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      class="provider-card-signup"
+                      @click.stop
+                    >
+                      <n-icon :component="OpenOutline" />
+                      {{ t("keys.providerSignup") }}
+                    </a>
+                  </div>
+                </div>
+              </n-collapse-item>
+              <n-collapse-item name="official">
+                <template #header>
+                  <div class="provider-picker-header">
+                    <n-icon :component="RocketOutline" class="provider-picker-icon" />
+                    <span class="section-title" style="margin: 0">
+                      {{ t("v3.officialProviders") }}
+                    </span>
+                    <n-tag size="small" type="info" round style="margin-left: 8px">
+                      {{ OFFICIAL_PROVIDERS.length }} {{ t("v3.officialProvidersAvailable") }}
+                    </n-tag>
+                  </div>
+                </template>
+                <div class="provider-grid">
+                  <div
+                    v-for="p in OFFICIAL_PROVIDERS"
+                    :key="p.id"
+                    class="provider-card"
+                    :class="{ 'provider-card-used': usedProviderIds.has(p.id) }"
+                    @click="applyProvider(p)"
+                  >
+                    <div class="provider-card-head">
+                      <span class="provider-card-name">{{ p.name }}</span>
+                      <div class="provider-card-tags">
+                        <n-tag
+                          v-if="usedProviderIds.has(p.id)"
+                          size="tiny"
+                          type="success"
+                          :bordered="false"
+                        >
+                          {{ t("keys.providerAdded") }}
                         </n-tag>
                       </div>
                     </div>
