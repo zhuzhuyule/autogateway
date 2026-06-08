@@ -238,15 +238,15 @@ func TestSwrrFavorsReliable(t *testing.T) {
 	}
 	cands := []Candidate{good, bad}
 	goodCount := 0
-	for i := 0; i < 200; i++ {
+	for i := 0; i < 2000; i++ {
 		if s.swrr("k", cands).RealModel == "good" {
 			goodCount++
 		}
 	}
-	if goodCount < 120 {
-		t.Fatalf("good picked %d/200, want >120 (favor reliable)", goodCount)
+	if goodCount < 1200 {
+		t.Fatalf("good picked %d/2000, want >1200 (favor reliable)", goodCount)
 	}
-	if goodCount == 200 {
+	if goodCount == 2000 {
 		t.Fatal("bad should still be explored occasionally (Thompson)")
 	}
 }

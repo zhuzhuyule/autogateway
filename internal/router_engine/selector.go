@@ -419,7 +419,7 @@ func (s *Selector) MarkResponse(c Candidate, status int, parsedError string, ret
 	if c.GroupID == 0 || c.RealModel == "" {
 		return
 	}
-	key := fmt.Sprintf("%d:%s", c.GroupID, c.RealModel)
+	key := s.statKey(c)
 	if status >= 200 && status < 400 {
 		s.cooldown.reset(key)
 		s.recordStat(c, true, latency)
@@ -561,8 +561,7 @@ func (s *Selector) filterCooldown(cands []Candidate) []Candidate {
 	now := time.Now()
 	alive := make([]Candidate, 0, len(cands))
 	for _, c := range cands {
-		key := fmt.Sprintf("%d:%s", c.GroupID, c.RealModel)
-		if !s.cooldown.isCooling(key, now) {
+		if !s.cooldown.isCooling(s.statKey(c), now) {
 			alive = append(alive, c)
 		}
 	}

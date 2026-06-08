@@ -300,7 +300,7 @@ func (ps *ProxyServer) executeRequestWithRetry(
 	apiKey, err := ps.keyProvider.SelectKey(group.ID, ratelimit.Limits{RPM: cfg.RPMLimit, RPD: cfg.RPDLimit})
 	if err != nil {
 		logrus.Errorf("Failed to select a key for group %s on attempt %d: %v", group.Name, retryCount+1, err)
-		ps.markRoutingCandidate(c, http.StatusServiceUnavailable, "", 0, time.Since(startTime))
+		ps.markRoutingCandidate(c, http.StatusServiceUnavailable, "", 0, 0)
 		response.Error(c, app_errors.NewAPIError(app_errors.ErrNoKeysAvailable, err.Error()))
 		ps.logRequest(c, originalGroup, group, nil, startTime, http.StatusServiceUnavailable, err, isStream, "", channelHandler, bodyBytes, models.RequestTypeFinal)
 		return
@@ -427,7 +427,7 @@ func (ps *ProxyServer) executeRequestWithRetry(
 		if resp != nil {
 			raCand = parseRetryAfter(resp.Header)
 		}
-		ps.markRoutingCandidate(c, statusCode, parsedError, raCand, time.Since(startTime))
+		ps.markRoutingCandidate(c, statusCode, parsedError, raCand, 0)
 
 		// 使用解析后的错误信息更新密钥状态
 		ps.keyProvider.UpdateStatus(apiKey, group, false, parsedError)
