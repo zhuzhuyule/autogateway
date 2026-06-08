@@ -473,8 +473,10 @@ func (s *selector) recordResult(name string, success bool, statusCode int, parse
 		if class == failover.ClassNone {
 			return // 400/401/403 不进 sub-group 冷却
 		}
-		it.consecutiveFailures++
-		dur, _ := s.policy.Decide(class, retryAfter, it.consecutiveFailures-1)
+		dur, counts := s.policy.Decide(class, retryAfter, it.consecutiveFailures)
+		if counts {
+			it.consecutiveFailures++
+		}
 		if dur > 0 {
 			it.cooldownUntil = time.Now().Add(dur)
 		}
