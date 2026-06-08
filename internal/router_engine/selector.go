@@ -363,7 +363,7 @@ func (s *Selector) loadCandidates(ctx context.Context, alias string) ([]Candidat
 // unique group IDs. On query error we fall back to passing candidates through
 // (fail open), since gating routing is a UX guardrail not a security boundary.
 func (s *Selector) filterByExposed(ctx context.Context, cands []Candidate) []Candidate {
-	if len(cands) == 0 {
+	if len(cands) == 0 || s.db == nil {
 		return cands
 	}
 	idSet := make(map[uint]struct{}, len(cands))
