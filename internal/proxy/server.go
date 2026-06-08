@@ -458,6 +458,33 @@ func (ps *ProxyServer) executeRequestWithRetry(
 	// Check if this is a model list request (needs special handling)
 	if shouldInterceptModelList(c.Request.URL.Path, c.Request.Method) {
 		ps.handleModelListResponse(c, resp, group, channelHandler)
+	} else if isStream {
+		// #10 header-hold + #11 空/error 帧检测: 流式不提前发头, 推迟到 streamWithIntegrity
+		// 见到首个有效 chunk 才发 (resp.Header + c.Status 都在 streamWithIntegrity 内部).
+		// 200-but-empty / 首帧即 error 且未发头 → 走无感 failover (handleAttemptFailure).
+		isOpenAI := group.ChannelType == "openai" || group.ChannelType == "openai-response"
+		out := ps.streamWithIntegrity(c, resp, isOpenAI)
+		if out.failed && !out.wroteToClient {
+			// 还没向客户端发头 → 安全 failover. handleAttemptFailure 内部会 logRequest,
+			// 此处直接 return 不再走下方成功 logRequest, 避免双重记账.
+			ac := &attemptContext{
+				c:                  c,
+				channelHandler:     channelHandler,
+				originalGroup:      originalGroup,
+				group:              group,
+				apiKey:             apiKey,
+				bodyBytes:          bodyBytes,
+				isStream:           isStream,
+				startTime:          startTime,
+				retryCount:         retryCount,
+				attemptedSubGroups: attemptedSubGroups,
+				requestedModel:     requestedModel,
+				upstreamURL:        upstreamURL,
+			}
+			ps.handleAttemptFailure(ac, resp, out.statusCode, out.parsedError, out.parsedError)
+			return
+		}
+		// wroteToClient=true: 已发头 (即便后续有问题也不能 failover) → 走下方成功 logRequest.
 	} else {
 		for key, values := range resp.Header {
 			for _, value := range values {
@@ -465,12 +492,7 @@ func (ps *ProxyServer) executeRequestWithRetry(
 			}
 		}
 		c.Status(resp.StatusCode)
-
-		if isStream {
-			ps.handleStreamingResponse(c, resp)
-		} else {
-			ps.handleNormalResponse(c, resp)
-		}
+		ps.handleNormalResponse(c, resp)
 	}
 
 	ps.logRequest(c, originalGroup, group, apiKey, startTime, resp.StatusCode, nil, isStream, upstreamURL, channelHandler, bodyBytes, models.RequestTypeFinal)
