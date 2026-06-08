@@ -163,8 +163,17 @@ func (s *Selector) recordStat(c Candidate, success bool, latency time.Duration) 
 	}
 }
 
+// effWeightScale is the integer multiplier applied inside sampleEffectiveWeight
+// so that fractional Thompson/speed scores survive int conversion.
+// A scale of 100 gives ~1% granularity; with base Weight=1 the effective range
+// is [1, 100] per candidate, preserving meaningful differences for SWRR.
+const effWeightScale = 100
+
 // sampleEffectiveWeight calculates the effective weight for a candidate:
-// c.Weight × priorWeight × Thompson(Beta) × speedFactor. Minimum 1.
+// c.Weight × priorWeight × Thompson(Beta) × speedFactor × effWeightScale. Minimum 1.
+// When there is no recorded stat history (success+fail == 0), Thompson sampling
+// is skipped and the static weight is used directly (× effWeightScale), preserving
+// deterministic SWRR behaviour until real observations arrive.
 func (s *Selector) sampleEffectiveWeight(c Candidate) int {
 	prior := 1.0
 	if s.meta != nil {
@@ -177,7 +186,16 @@ func (s *Selector) sampleEffectiveWeight(c Candidate) int {
 		succ, fail, ewma = float64(st.success), float64(st.fail), st.latencyEWMA
 	}
 	s.statsMu.Unlock()
-	w := float64(c.Weight) * prior * sampleBeta(succ+1, fail+1) * speedFactor(ewma)
+	// No history yet: use static weight scaled up; avoids Beta(1,1) noise
+	// polluting SWRR before any real observation arrives.
+	if succ == 0 && fail == 0 {
+		iw := int(float64(c.Weight)*prior*effWeightScale + 0.5)
+		if iw < 1 {
+			return 1
+		}
+		return iw
+	}
+	w := float64(c.Weight) * prior * sampleBeta(succ+1, fail+1) * speedFactor(ewma) * effWeightScale
 	iw := int(w + 0.5)
 	if iw < 1 {
 		return 1
@@ -396,17 +414,20 @@ func (s *Selector) PickForAuto(ctx context.Context, estimatedTokens int) (*Candi
 
 // MarkResponse 把上游响应反馈进冷却。parsedError 为上游错误文本（用于分类），
 // retryAfter 为 Retry-After 头解析值（0 表示无）。2xx/3xx 清除冷却。
-func (s *Selector) MarkResponse(c Candidate, status int, parsedError string, retryAfter time.Duration) {
+// latency 为本次请求耗时，用于 Thompson 采样权重的速度因子。
+func (s *Selector) MarkResponse(c Candidate, status int, parsedError string, retryAfter time.Duration, latency time.Duration) {
 	if c.GroupID == 0 || c.RealModel == "" {
 		return
 	}
 	key := fmt.Sprintf("%d:%s", c.GroupID, c.RealModel)
 	if status >= 200 && status < 400 {
 		s.cooldown.reset(key)
+		s.recordStat(c, true, latency)
 		return
 	}
 	class := failover.Classify(status, parsedError)
 	s.cooldown.apply(key, class, retryAfter, s.policy)
+	s.recordStat(c, false, 0)
 }
 
 // ----- helpers -----
@@ -574,20 +595,24 @@ func (s *Selector) swrr(key string, cands []Candidate) *Candidate {
 		s.swrrState.set(key, state)
 	}
 
+	eff := make([]int, len(sorted))
 	total := 0
-	for _, c := range sorted {
-		total += c.Weight
+	for i := range sorted {
+		eff[i] = s.sampleEffectiveWeight(sorted[i])
+		total += eff[i]
 	}
 	if total <= 0 {
-		// Defensive: pick first.
-		c := sorted[0]
-		return &c
+		// Defensive: should not happen since sampleEffectiveWeight returns minimum 1.
+		total = len(sorted)
+		for i := range eff {
+			eff[i] = 1
+		}
 	}
 
 	bestIdx := -1
 	bestVal := 0
-	for i, c := range sorted {
-		state[i] += c.Weight
+	for i := range sorted {
+		state[i] += eff[i]
 		if bestIdx == -1 || state[i] > bestVal ||
 			(state[i] == bestVal && sorted[i].Priority < sorted[bestIdx].Priority) {
 			bestIdx = i

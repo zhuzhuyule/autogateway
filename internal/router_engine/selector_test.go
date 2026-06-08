@@ -52,13 +52,13 @@ func TestSWRREqualWeightOrder(t *testing.T) {
 func TestCooldownBumpAndReset(t *testing.T) {
 	s := NewSelector(nil, nil, nil)
 	c := Candidate{GroupID: 99, RealModel: "test"}
-	s.MarkResponse(c, 429, "", 0)
+	s.MarkResponse(c, 429, "", 0, 0)
 	cands := []Candidate{c, {AliasID: 7, GroupID: 100, RealModel: "fresh", Weight: 1, Priority: 100}}
 	alive := s.filterCooldown(cands)
 	if len(alive) != 1 || alive[0].RealModel != "fresh" {
 		t.Errorf("expected 'fresh' to survive cooldown filter, got %+v", alive)
 	}
-	s.MarkResponse(c, 200, "", 0)
+	s.MarkResponse(c, 200, "", 0, 0)
 	alive2 := s.filterCooldown(cands)
 	if len(alive2) != 2 {
 		t.Errorf("expected reset after 2xx; alive count = %d", len(alive2))
@@ -68,7 +68,7 @@ func TestCooldownBumpAndReset(t *testing.T) {
 func TestCooldownBumpsOnNon2xxStatus(t *testing.T) {
 	s := NewSelector(nil, nil, nil)
 	c := Candidate{GroupID: 99, RealModel: "test"}
-	s.MarkResponse(c, 500, "", 0)
+	s.MarkResponse(c, 500, "", 0, 0)
 	cands := []Candidate{c, {AliasID: 7, GroupID: 100, RealModel: "fresh", Weight: 1, Priority: 100}}
 
 	alive := s.filterCooldown(cands)
@@ -144,17 +144,17 @@ func TestMarkResponseTiering(t *testing.T) {
 	now := time.Now()
 
 	// per-day 429 → 长冷却（>1h）
-	s.MarkResponse(c, 429, "requests per day limit reached", 0)
+	s.MarkResponse(c, 429, "requests per day limit reached", 0, 0)
 	if !s.cooldown.isCooling(key, now.Add(time.Hour)) {
 		t.Fatal("per-day 429 should cool >1h")
 	}
 	// 成功 → reset
-	s.MarkResponse(c, 200, "", 0)
+	s.MarkResponse(c, 200, "", 0, 0)
 	if s.cooldown.isCooling(key, now) {
 		t.Fatal("200 should reset cooldown")
 	}
 	// 403 → ClassNone，不冷却
-	s.MarkResponse(c, 403, "invalid api key", 0)
+	s.MarkResponse(c, 403, "invalid api key", 0, 0)
 	if s.cooldown.isCooling(key, now) {
 		t.Fatal("403 should not set model-level cooldown")
 	}
@@ -219,5 +219,47 @@ func TestRecordStat(t *testing.T) {
 	}
 	if st.latencyEWMA <= 0 {
 		t.Fatal("latencyEWMA should be set after success")
+	}
+}
+
+func TestSwrrFavorsReliable(t *testing.T) {
+	s := &Selector{
+		cooldown:  newCooldownStore(),
+		swrrState: newSWRRStateMap(),
+		settings:  DefaultSettings(),
+		policy:    failover.DefaultCooldownPolicy(),
+		stats:     make(map[string]*candidateStat),
+	}
+	good := Candidate{GroupID: 1, RealModel: "good", Weight: 1, AliasID: 1}
+	bad := Candidate{GroupID: 2, RealModel: "bad", Weight: 1, AliasID: 2}
+	for i := 0; i < 50; i++ {
+		s.recordStat(good, true, 500*time.Millisecond)
+		s.recordStat(bad, false, 0)
+	}
+	cands := []Candidate{good, bad}
+	goodCount := 0
+	for i := 0; i < 200; i++ {
+		if s.swrr("k", cands).RealModel == "good" {
+			goodCount++
+		}
+	}
+	if goodCount < 120 {
+		t.Fatalf("good picked %d/200, want >120 (favor reliable)", goodCount)
+	}
+	if goodCount == 200 {
+		t.Fatal("bad should still be explored occasionally (Thompson)")
+	}
+}
+
+func TestMarkResponseRecordsStat(t *testing.T) {
+	s := &Selector{cooldown: newCooldownStore(), swrrState: newSWRRStateMap(), settings: DefaultSettings(), policy: failover.DefaultCooldownPolicy(), stats: make(map[string]*candidateStat)}
+	c := Candidate{GroupID: 1, RealModel: "m"}
+	s.MarkResponse(c, 200, "", 0, 800*time.Millisecond)
+	if s.stats["1:m"] == nil || s.stats["1:m"].success != 1 {
+		t.Fatal("MarkResponse(200) should record success")
+	}
+	s.MarkResponse(c, 500, "err", 0, 0)
+	if s.stats["1:m"].fail != 1 {
+		t.Fatal("MarkResponse(500) should record fail")
 	}
 }
