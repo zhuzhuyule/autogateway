@@ -309,6 +309,93 @@ func TestStreamWithIntegrity_NotTruncatedWithFinishReason(t *testing.T) {
 	}
 }
 
+// --- Task 13 新增测试：tool_calls finish_reason 补全 ---
+
+// TestStreamWithIntegrity_ToolCallsMissingFinishReason 验证:
+// OpenAI 流含 tool_calls delta 但结束无 finish_reason、无 [DONE]
+// → 客户端收到的字节里补上了 "finish_reason":"tool_calls" chunk.
+func TestStreamWithIntegrity_ToolCallsMissingFinishReason(t *testing.T) {
+	c, rec := newStreamCtx()
+	body := "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_abc\",\"type\":\"function\",\"function\":{\"name\":\"get_weather\",\"arguments\":\"\"}}]}}]}\n\n" +
+		"data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"{\\\"city\\\":\\\"Beijing\\\"}\"}}]}}]}\n\n"
+	out := streamWithIntegrity(c, fakeResp(http.StatusOK, body), true, 0)
+
+	if !out.wroteToClient {
+		t.Fatalf("expected wroteToClient=true, got %+v", out)
+	}
+	if out.truncated {
+		t.Fatalf("tool_calls补全后不应标记 truncated，got %+v", out)
+	}
+	bodyStr := rec.Body.String()
+	if !strings.Contains(bodyStr, `"finish_reason":"tool_calls"`) {
+		t.Fatalf("expected injected finish_reason:tool_calls chunk in body, got:\n%s", bodyStr)
+	}
+}
+
+// TestStreamWithIntegrity_ToolCallsAlreadyHasFinishReason 验证:
+// OpenAI 流有 tool_calls 且已有 finish_reason → 不重复补.
+// body 里 finish_reason 的出现次数与原流一致 (=1), 不额外新增.
+func TestStreamWithIntegrity_ToolCallsAlreadyHasFinishReason(t *testing.T) {
+	c, rec := newStreamCtx()
+	body := "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_xyz\",\"type\":\"function\",\"function\":{\"name\":\"foo\",\"arguments\":\"\"}}]}}]}\n\n" +
+		"data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\n" +
+		"data: [DONE]\n\n"
+	out := streamWithIntegrity(c, fakeResp(http.StatusOK, body), true, 0)
+
+	if !out.wroteToClient {
+		t.Fatalf("expected wroteToClient=true, got %+v", out)
+	}
+	if out.truncated {
+		t.Fatalf("stream with finish_reason should not be truncated, got %+v", out)
+	}
+	bodyStr := rec.Body.String()
+	// 原流已有 finish_reason:tool_calls，不应再追加补全 chunk（count == 1）.
+	count := strings.Count(bodyStr, `"finish_reason":"tool_calls"`)
+	if count != 1 {
+		t.Fatalf("expected exactly 1 occurrence of finish_reason:tool_calls, got %d in:\n%s", count, bodyStr)
+	}
+}
+
+// TestStreamWithIntegrity_PlainTextNoFinishReason 验证:
+// 纯正文流（无 tool_calls）→ 不补 finish_reason.
+func TestStreamWithIntegrity_PlainTextNoFinishReason(t *testing.T) {
+	c, rec := newStreamCtx()
+	body := "data: {\"choices\":[{\"delta\":{\"content\":\"hello\"}}]}\n\n" +
+		"data: {\"choices\":[{\"delta\":{\"content\":\" world\"}}]}\n\n"
+	out := streamWithIntegrity(c, fakeResp(http.StatusOK, body), true, 0)
+
+	if !out.wroteToClient {
+		t.Fatalf("expected wroteToClient=true, got %+v", out)
+	}
+	// 没有 tool_calls → 不补 finish_reason → 仍 truncated（无 [DONE]/finish_reason）.
+	if !out.truncated {
+		t.Fatalf("plain text without finish_reason should still be truncated, got %+v", out)
+	}
+	bodyStr := rec.Body.String()
+	if strings.Contains(bodyStr, `"finish_reason"`) {
+		t.Fatalf("plain text stream should NOT have injected finish_reason, got:\n%s", bodyStr)
+	}
+}
+
+// TestStreamWithIntegrity_NonOpenAINoFinishReason 验证:
+// 非 OpenAI 流含 tool_calls 字样 → 不补 finish_reason.
+func TestStreamWithIntegrity_NonOpenAINoFinishReason(t *testing.T) {
+	c, rec := newStreamCtx()
+	body := "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"id\":\"x\"}]}}]}\n\n"
+	out := streamWithIntegrity(c, fakeResp(http.StatusOK, body), false, 0)
+
+	if !out.wroteToClient {
+		t.Fatalf("expected wroteToClient=true, got %+v", out)
+	}
+	if out.truncated {
+		t.Fatalf("non-openai should not be truncated, got %+v", out)
+	}
+	bodyStr := rec.Body.String()
+	if strings.Contains(bodyStr, `"finish_reason"`) {
+		t.Fatalf("non-openai should NOT have injected finish_reason, got:\n%s", bodyStr)
+	}
+}
+
 // TestStreamWithIntegrity_NonOpenAINotTruncated 验证:
 // 非 OpenAI 流即便没有 [DONE] 也不标记 truncated.
 func TestStreamWithIntegrity_NonOpenAINotTruncated(t *testing.T) {

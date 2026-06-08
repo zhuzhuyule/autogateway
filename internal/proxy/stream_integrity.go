@@ -111,7 +111,34 @@ func flushAndStream(c *gin.Context, resp *http.Response, buffered *bytes.Buffer,
 
 	flusher, _ := c.Writer.(http.Flusher)
 
+	// 透传循环: 按行读取剩余上游流, 边读边写 (保持打字机体验).
+	// inactivity 超时: idleTimeout > 0 时, 若超过 idleTimeout 无数据到达则关闭 body 终止循环.
+	// 截断检测 (isOpenAI): 记录是否见到 [DONE] 或 finish_reason (非 null).
+	// tool_call 补全检测 (isOpenAI): 记录是否见到 tool_calls delta 但无 finish_reason,
+	// 若是则在流尾补发一个带 finish_reason:"tool_calls" 的 chunk.
+	var (
+		seenDone     bool
+		sawToolCalls bool // 见过含 tool_calls 的 delta 帧
+		sawFinish    bool // 见过 finish_reason 非 null 的帧
+		idleTimer    *time.Timer
+		idleExpired  bool
+	)
+
 	if buffered.Len() > 0 {
+		// 在写给客户端之前先扫描缓冲区 (含 header-hold 期间捕获的首帧).
+		if isOpenAI {
+			bufferedBytes := buffered.Bytes()
+			if !seenDone {
+				seenDone = scanForCompletion(bufferedBytes)
+			}
+			tc, fr := scanToolCallsAndFinish(bufferedBytes)
+			if tc {
+				sawToolCalls = true
+			}
+			if fr {
+				sawFinish = true
+			}
+		}
 		if _, err := c.Writer.Write(buffered.Bytes()); err != nil {
 			logUpstreamError("writing buffered stream to client", err)
 			return streamOutcome{wroteToClient: true, failed: true, statusCode: 0, parsedError: err.Error()}
@@ -120,15 +147,6 @@ func flushAndStream(c *gin.Context, resp *http.Response, buffered *bytes.Buffer,
 			flusher.Flush()
 		}
 	}
-
-	// 透传循环: 按行读取剩余上游流, 边读边写 (保持打字机体验).
-	// inactivity 超时: idleTimeout > 0 时, 若超过 idleTimeout 无数据到达则关闭 body 终止循环.
-	// 截断检测 (isOpenAI): 记录是否见到 [DONE] 或 finish_reason (非 null).
-	var (
-		seenDone    bool
-		idleTimer   *time.Timer
-		idleExpired bool
-	)
 
 	if idleTimeout > 0 {
 		idleTimer = time.AfterFunc(idleTimeout, func() {
@@ -149,9 +167,18 @@ func flushAndStream(c *gin.Context, resp *http.Response, buffered *bytes.Buffer,
 
 			chunk := buf[:n]
 
-			// 截断检测: 扫描本批次字节里的 SSE data 行.
+			// 截断检测 + tool_call 补全检测: 扫描本批次字节里的 SSE data 行.
 			if isOpenAI && !seenDone {
 				seenDone = scanForCompletion(chunk)
+			}
+			if isOpenAI && !sawFinish {
+				tc, fr := scanToolCallsAndFinish(chunk)
+				if tc {
+					sawToolCalls = true
+				}
+				if fr {
+					sawFinish = true
+				}
 			}
 
 			if _, werr := c.Writer.Write(chunk); werr != nil {
@@ -175,14 +202,31 @@ func flushAndStream(c *gin.Context, resp *http.Response, buffered *bytes.Buffer,
 		}
 	}
 
+	// tool_calls 补全: 若 OpenAI 流含 tool_calls delta 但结尾没有 finish_reason,
+	// 补发一个带 finish_reason:"tool_calls" 的 chunk, 避免 IDE 客户端 (Cursor/Cline)
+	// 因缺少 finish_reason 而解析失败.
+	if isOpenAI && sawToolCalls && !sawFinish {
+		const injectChunk = "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\n"
+		_, _ = c.Writer.Write([]byte(injectChunk))
+		if flusher != nil {
+			flusher.Flush()
+		}
+		logrus.Info("[stream] injected finish_reason:tool_calls chunk (upstream omitted it)")
+	}
+
 	if flusher != nil {
 		flusher.Flush()
 	}
 
 	outcome := streamOutcome{wroteToClient: true}
 	if isOpenAI && !seenDone {
-		outcome.truncated = true
-		logrus.Warn("[stream] upstream stream ended without [DONE] or finish_reason — possible truncation")
+		// 若补了 finish_reason (tool_calls 补全路径), 视为已规整, 不标 truncated.
+		if sawToolCalls && !sawFinish {
+			// 已补全, 不截断
+		} else {
+			outcome.truncated = true
+			logrus.Warn("[stream] upstream stream ended without [DONE] or finish_reason — possible truncation")
+		}
 	}
 	return outcome
 }
@@ -238,6 +282,51 @@ func parseDataLine(line []byte) []byte {
 		return nil
 	}
 	return payload
+}
+
+// scanToolCallsAndFinish 扫描一批 SSE 字节, 返回:
+//   - sawTC: 本批次含有非空 tool_calls 数组的 delta 帧
+//   - sawFR: 本批次含有 finish_reason 非 null 的帧
+//
+// 用于 flushAndStream 透传循环中的 tool_call 补全检测.
+func scanToolCallsAndFinish(chunk []byte) (sawTC, sawFR bool) {
+	lines := bytes.Split(chunk, []byte("\n"))
+	for _, line := range lines {
+		payload := parseDataLine(line)
+		if payload == nil || bytes.Equal(payload, []byte("[DONE]")) {
+			continue
+		}
+		if !sawFR && hasFinishReason(payload) {
+			sawFR = true
+		}
+		if !sawTC && hasToolCallsDelta(payload) {
+			sawTC = true
+		}
+		if sawTC && sawFR {
+			break
+		}
+	}
+	return
+}
+
+// hasToolCallsDelta 解析 SSE data payload, 检查 choices[*].delta.tool_calls 是否存在且非空.
+func hasToolCallsDelta(payload []byte) bool {
+	var frame struct {
+		Choices []struct {
+			Delta struct {
+				ToolCalls []json.RawMessage `json:"tool_calls"`
+			} `json:"delta"`
+		} `json:"choices"`
+	}
+	if err := json.Unmarshal(payload, &frame); err != nil {
+		return false
+	}
+	for _, ch := range frame.Choices {
+		if len(ch.Delta.ToolCalls) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // parseSSEError 解析单个 data 帧 payload. 若 JSON 里含 error 对象则 isErr=true,
