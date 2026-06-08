@@ -150,7 +150,7 @@ func TestMiddlewareIntegration_FirstTurnNoSticky(t *testing.T) {
 		nameByID: map[uint]string{groupID: "openai-prod"},
 		byName:   map[string]*models.Group{"openai-prod": {ID: groupID, Name: "openai-prod"}},
 	}
-	sel := NewSelector(db, st)
+	sel := NewSelector(db, st, nil)
 
 	body := chatBody("gpt-4o", false) // 首轮，无 assistant
 	runMiddleware(t, sel, res, body)
@@ -178,7 +178,7 @@ func TestMiddlewareIntegration_MultiTurnHitReturnsStickyCandidate(t *testing.T) 
 		nameByID: map[uint]string{groupID: "openai-prod"},
 		byName:   map[string]*models.Group{"openai-prod": {ID: groupID, Name: "openai-prod"}},
 	}
-	sel := NewSelector(db, st)
+	sel := NewSelector(db, st, nil)
 
 	// 预先手动写入 sticky（模拟上一轮已锁定）
 	body := chatBody("gpt-4o", true) // 多轮
@@ -243,7 +243,7 @@ func TestMiddlewareIntegration_StickyDeadCandidateFallback(t *testing.T) {
 			"dead-group":  &deadGroup,
 		},
 	}
-	sel := NewSelector(db, st)
+	sel := NewSelector(db, st, nil)
 
 	// 锁定指向 dead group 的 candidate
 	body := chatBody("gpt-4o", true)

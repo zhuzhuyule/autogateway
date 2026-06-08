@@ -26,6 +26,20 @@ import (
 	"gorm.io/gorm"
 )
 
+// registryMetaAdapter adapts *services.FreeModelsRegistry to router_engine.MetaProvider.
+type registryMetaAdapter struct{ reg *services.FreeModelsRegistry }
+
+func (a registryMetaAdapter) LookupMeta(modelID string) *router_engine.ModelMeta {
+	if a.reg == nil {
+		return nil
+	}
+	p, l, ok := a.reg.LookupMetaRaw(modelID)
+	if !ok {
+		return nil
+	}
+	return &router_engine.ModelMeta{PerformanceLevel: p, EstimatedLatency: l}
+}
+
 // BuildContainer creates a new dependency injection container and provides all the application's services.
 func BuildContainer() (*dig.Container, error) {
 	container := dig.New()
@@ -174,8 +188,8 @@ func BuildContainer() (*dig.Container, error) {
 	if err := container.Provide(handler.NewAliasSuggestionHandler); err != nil {
 		return nil, err
 	}
-	if err := container.Provide(func(db *gorm.DB, st store.Store) *router_engine.Selector {
-		return router_engine.NewSelector(db, st)
+	if err := container.Provide(func(db *gorm.DB, st store.Store, reg *services.FreeModelsRegistry) *router_engine.Selector {
+		return router_engine.NewSelector(db, st, registryMetaAdapter{reg: reg})
 	}); err != nil {
 		return nil, err
 	}

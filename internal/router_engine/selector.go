@@ -91,9 +91,12 @@ type Selector struct {
 	policy    failover.CooldownPolicy
 	store     store.Store
 	mu        sync.RWMutex
+	meta      MetaProvider
+	stats     map[string]*candidateStat
+	statsMu   sync.Mutex
 }
 
-func NewSelector(db *gorm.DB, st store.Store) *Selector {
+func NewSelector(db *gorm.DB, st store.Store, meta MetaProvider) *Selector {
 	s := &Selector{
 		db:        db,
 		cooldown:  newCooldownStore(),
@@ -101,9 +104,85 @@ func NewSelector(db *gorm.DB, st store.Store) *Selector {
 		settings:  DefaultSettings(),
 		policy:    failover.DefaultCooldownPolicy(),
 		store:     st,
+		meta:      meta,
+		stats:     make(map[string]*candidateStat),
 	}
 	s.loadSettingsFromDB()
 	return s
+}
+
+// candidateStat holds rolling success/failure counters and latency EWMA
+// for a single (groupID, realModel) candidate.
+type candidateStat struct {
+	success     int64
+	fail        int64
+	latencyEWMA float64 // ms, 0 = no sample yet
+}
+
+// statRollThreshold — when success+fail exceeds this, both counters are
+// halved so recent observations dominate (approximate exponential decay).
+const statRollThreshold = 200
+
+func (s *Selector) statKey(c Candidate) string {
+	return fmt.Sprintf("%d:%s", c.GroupID, c.RealModel)
+}
+
+// recordStat records one outcome for a candidate.
+// latency is only used when success=true; pass 0 for failures.
+func (s *Selector) recordStat(c Candidate, success bool, latency time.Duration) {
+	if c.GroupID == 0 || c.RealModel == "" {
+		return
+	}
+	s.statsMu.Lock()
+	defer s.statsMu.Unlock()
+	if s.stats == nil {
+		s.stats = make(map[string]*candidateStat)
+	}
+	k := s.statKey(c)
+	st := s.stats[k]
+	if st == nil {
+		st = &candidateStat{}
+		s.stats[k] = st
+	}
+	if success {
+		st.success++
+		ms := float64(latency) / 1e6 // ns → ms (preserves sub-millisecond values)
+		if ms > 0 {
+			if st.latencyEWMA == 0 {
+				st.latencyEWMA = ms
+			} else {
+				st.latencyEWMA = 0.3*ms + 0.7*st.latencyEWMA
+			}
+		}
+	} else {
+		st.fail++
+	}
+	if st.success+st.fail > statRollThreshold {
+		st.success /= 2
+		st.fail /= 2
+	}
+}
+
+// sampleEffectiveWeight calculates the effective weight for a candidate:
+// c.Weight × priorWeight × Thompson(Beta) × speedFactor. Minimum 1.
+func (s *Selector) sampleEffectiveWeight(c Candidate) int {
+	prior := 1.0
+	if s.meta != nil {
+		prior = priorWeight(s.meta.LookupMeta(c.RealModel))
+	}
+	s.statsMu.Lock()
+	st := s.stats[s.statKey(c)]
+	var succ, fail, ewma float64
+	if st != nil {
+		succ, fail, ewma = float64(st.success), float64(st.fail), st.latencyEWMA
+	}
+	s.statsMu.Unlock()
+	w := float64(c.Weight) * prior * sampleBeta(succ+1, fail+1) * speedFactor(ewma)
+	iw := int(w + 0.5)
+	if iw < 1 {
+		return 1
+	}
+	return iw
 }
 
 // StickyTTL 粘性会话锁定时长。

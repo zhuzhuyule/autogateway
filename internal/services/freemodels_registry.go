@@ -627,6 +627,20 @@ func (r *FreeModelsRegistry) SnapshotJSON() ([]byte, error) {
 	return json.Marshal(env)
 }
 
+// LookupMetaRaw returns the prior performance/latency fields for a model ID.
+// It queries byModelOnly (provider-agnostic) and returns the first match.
+// found=false when the registry has no entry for modelID.
+func (r *FreeModelsRegistry) LookupMetaRaw(modelID string) (perfLevel, estLatency string, found bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	list := r.byModelOnly[strings.ToLower(modelID)]
+	if len(list) == 0 {
+		return "", "", false
+	}
+	m := list[0]
+	return m.PerformanceLevel, m.EstimatedLatency, true
+}
+
 func provModKey(provider, modelID string) string {
 	return strings.ToLower(provider) + "/" + strings.ToLower(modelID)
 }

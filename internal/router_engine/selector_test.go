@@ -50,7 +50,7 @@ func TestSWRREqualWeightOrder(t *testing.T) {
 // TestCooldownBumpAndReset confirms 429 starts the cooldown and a 2xx
 // clears the failure streak.
 func TestCooldownBumpAndReset(t *testing.T) {
-	s := NewSelector(nil, nil)
+	s := NewSelector(nil, nil, nil)
 	c := Candidate{GroupID: 99, RealModel: "test"}
 	s.MarkResponse(c, 429, "", 0)
 	cands := []Candidate{c, {AliasID: 7, GroupID: 100, RealModel: "fresh", Weight: 1, Priority: 100}}
@@ -66,7 +66,7 @@ func TestCooldownBumpAndReset(t *testing.T) {
 }
 
 func TestCooldownBumpsOnNon2xxStatus(t *testing.T) {
-	s := NewSelector(nil, nil)
+	s := NewSelector(nil, nil, nil)
 	c := Candidate{GroupID: 99, RealModel: "test"}
 	s.MarkResponse(c, 500, "", 0)
 	cands := []Candidate{c, {AliasID: 7, GroupID: 100, RealModel: "fresh", Weight: 1, Priority: 100}}
@@ -79,7 +79,7 @@ func TestCooldownBumpsOnNon2xxStatus(t *testing.T) {
 
 // TestPickForAutoTierSelection exercises the token threshold logic.
 func TestPickForAutoTierSelection(t *testing.T) {
-	s := NewSelector(nil, nil)
+	s := NewSelector(nil, nil, nil)
 	cfg := Settings{Enabled: true, SimpleThreshold: 2000, ComplexThreshold: 8000}
 	s.UpdateSettings(cfg)
 	cases := []struct {
@@ -198,5 +198,26 @@ func TestIsCandidateAliveNil(t *testing.T) {
 	s := &Selector{cooldown: newCooldownStore(), swrrState: newSWRRStateMap(), settings: DefaultSettings(), policy: failover.DefaultCooldownPolicy(), store: store.NewMemoryStore()}
 	if s.IsCandidateAlive(context.Background(), nil) {
 		t.Fatal("nil candidate should not be alive")
+	}
+}
+
+func TestRecordStat(t *testing.T) {
+	s := &Selector{
+		cooldown:  newCooldownStore(),
+		swrrState: newSWRRStateMap(),
+		settings:  DefaultSettings(),
+		policy:    failover.DefaultCooldownPolicy(),
+		stats:     make(map[string]*candidateStat),
+	}
+	c := Candidate{GroupID: 1, RealModel: "m"}
+	s.recordStat(c, true, 1000)
+	s.recordStat(c, true, 2000)
+	s.recordStat(c, false, 0)
+	st := s.stats["1:m"]
+	if st == nil || st.success != 2 || st.fail != 1 {
+		t.Fatalf("stat = %+v, want success=2 fail=1", st)
+	}
+	if st.latencyEWMA <= 0 {
+		t.Fatal("latencyEWMA should be set after success")
 	}
 }
