@@ -37,6 +37,8 @@ type GroupConfig struct {
 	ProxyURL                     *string `json:"proxy_url,omitempty"`
 	MaxRetries                   *int    `json:"max_retries,omitempty"`
 	BlacklistThreshold           *int    `json:"blacklist_threshold,omitempty"`
+	RPMLimit                     *int    `json:"rpm_limit,omitempty"`
+	RPDLimit                     *int    `json:"rpd_limit,omitempty"`
 	FailoverStatusCodes          *string `json:"failover_status_codes,omitempty"`
 	KeyValidationIntervalMinutes *int    `json:"key_validation_interval_minutes,omitempty"`
 	KeyValidationConcurrency     *int    `json:"key_validation_concurrency,omitempty"`
