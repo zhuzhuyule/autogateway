@@ -411,6 +411,45 @@ func TestStreamWithIntegrity_NonOpenAINotTruncated(t *testing.T) {
 	}
 }
 
+// TestStreamWithIntegrity_UpstreamHeadersForwarded 验证 I1:
+// streamWithIntegrity 在写 SSE 头之前先把上游 resp.Header 转发给客户端.
+// 自定义头 (如 X-Request-Id) 应出现在 recorder header 中;
+// SSE 专用头 (Content-Type=text/event-stream) 应覆盖上游同名头.
+func TestStreamWithIntegrity_UpstreamHeadersForwarded(t *testing.T) {
+	c, rec := newStreamCtx()
+	body := "data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n" +
+		"data: [DONE]\n\n"
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{},
+		Body:       io.NopCloser(strings.NewReader(body)),
+	}
+	resp.Header.Set("X-Request-Id", "abc-123")
+	resp.Header.Set("Openai-Processing-Ms", "42")
+	// 设置一个上游 Content-Type，应被 SSE 专用头覆盖.
+	resp.Header.Set("Content-Type", "application/json")
+
+	out := streamWithIntegrity(c, resp, true, 0)
+	if out.failed {
+		t.Fatalf("valid stream should not fail, got %+v", out)
+	}
+	if !out.wroteToClient {
+		t.Fatalf("valid stream should write to client, got %+v", out)
+	}
+
+	// 上游自定义头应被透传.
+	if got := rec.Header().Get("X-Request-Id"); got != "abc-123" {
+		t.Errorf("X-Request-Id: got %q, want %q", got, "abc-123")
+	}
+	if got := rec.Header().Get("Openai-Processing-Ms"); got != "42" {
+		t.Errorf("Openai-Processing-Ms: got %q, want %q", got, "42")
+	}
+	// SSE 头应覆盖上游 Content-Type.
+	if got := rec.Header().Get("Content-Type"); got != "text/event-stream" {
+		t.Errorf("Content-Type: got %q, want %q (SSE header should override upstream)", got, "text/event-stream")
+	}
+}
+
 // TestStreamWithIntegrity_ZeroIdleTimeoutNoTimeout 验证:
 // idleTimeout=0 不启用超时 → 正常透传到 EOF, 不提前终止.
 func TestStreamWithIntegrity_ZeroIdleTimeoutNoTimeout(t *testing.T) {

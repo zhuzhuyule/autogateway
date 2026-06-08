@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"sync/atomic"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -103,6 +104,13 @@ func streamWithIntegrity(c *gin.Context, resp *http.Response, isOpenAI bool, idl
 // 再手写循环透传剩余上游字节 (含 inactivity 超时 + 截断检测).
 // 返回 wroteToClient=true.
 func flushAndStream(c *gin.Context, resp *http.Response, buffered *bytes.Buffer, reader *bufio.Reader, isOpenAI bool, idleTimeout time.Duration) streamOutcome {
+	// I1: 先转发上游响应头 (x-request-id, openai-*, x-ratelimit-* 等), 再用 SSE 专用头覆盖同名字段.
+	for k, vals := range resp.Header {
+		for _, v := range vals {
+			c.Header(k, v)
+		}
+	}
+	// SSE 专用头 (覆盖上游同名头).
 	c.Header("Content-Type", "text/event-stream")
 	c.Header("Cache-Control", "no-cache")
 	c.Header("Connection", "keep-alive")
@@ -121,7 +129,8 @@ func flushAndStream(c *gin.Context, resp *http.Response, buffered *bytes.Buffer,
 		sawToolCalls bool // 见过含 tool_calls 的 delta 帧
 		sawFinish    bool // 见过 finish_reason 非 null 的帧
 		idleTimer    *time.Timer
-		idleExpired  bool
+		// M1: atomic.Bool 避免 AfterFunc goroutine 与主循环的数据竞争.
+		idleExpired atomic.Bool
 	)
 
 	if buffered.Len() > 0 {
@@ -150,7 +159,9 @@ func flushAndStream(c *gin.Context, resp *http.Response, buffered *bytes.Buffer,
 
 	if idleTimeout > 0 {
 		idleTimer = time.AfterFunc(idleTimeout, func() {
-			idleExpired = true
+			// M1/M2: Store via atomic — AfterFunc goroutine 与主循环并发安全.
+			// 超时竞态已知且可接受：最坏是流提前正常终止.
+			idleExpired.Store(true)
 			resp.Body.Close()
 		})
 		defer idleTimer.Stop()
@@ -161,6 +172,7 @@ func flushAndStream(c *gin.Context, resp *http.Response, buffered *bytes.Buffer,
 		n, err := reader.Read(buf)
 		if n > 0 {
 			// 成功读到数据 — 重置 idle 计时器.
+			// M2: Reset 与 AfterFunc 存在竞态, 已知且可接受: 最坏是流提前正常终止.
 			if idleTimer != nil {
 				idleTimer.Reset(idleTimeout)
 			}
@@ -192,7 +204,7 @@ func flushAndStream(c *gin.Context, resp *http.Response, buffered *bytes.Buffer,
 
 		if err != nil {
 			if err != io.EOF {
-				if idleExpired {
+				if idleExpired.Load() {
 					logrus.Warnf("[stream] inactivity timeout (%v) reached, stream forcefully closed", idleTimeout)
 				} else {
 					logUpstreamError("reading stream from upstream", err)
