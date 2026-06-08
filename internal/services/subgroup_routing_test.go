@@ -3,6 +3,7 @@ package services
 import (
 	"testing"
 
+	"autogateway/internal/failover"
 	"autogateway/internal/store"
 )
 
@@ -42,6 +43,7 @@ func newTestSelector(items []subGroupItem) *selector {
 		groupName: "test-aggregate",
 		subGroups: items,
 		store:     st,
+		policy:    failover.DefaultCooldownPolicy(),
 	}
 }
 

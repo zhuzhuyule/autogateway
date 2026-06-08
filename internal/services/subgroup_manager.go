@@ -6,22 +6,13 @@ import (
 	"sync"
 	"time"
 
+	"autogateway/internal/failover"
 	"autogateway/internal/models"
 	"autogateway/internal/store"
 
 	"github.com/sirupsen/logrus"
 )
 
-// 子分组熔断器参数:连续 N 次失败 → 冷却 D 秒,期间 SWRR 跳过该子分组.
-// 全部子分组都在冷却 → 仍然挑一个最早恢复的(graceful degrade).
-const (
-	subGroupBreakerThreshold = 3
-	subGroupBreakerCooldown  = 30 * time.Second
-	// P5.1: 429 (rate limit) 跟 5xx (服务故障) 性质不同 -- 不算 consecutive
-	// failure, 直接进 cooldown. 默认 60s, 上游给了 Retry-After 用真值.
-	rateLimitDefaultCooldown = 60 * time.Second
-	rateLimitMaxCooldown     = 10 * time.Minute
-)
 
 // SubGroupManager manages weighted round-robin selection for all aggregate groups
 type SubGroupManager struct {
@@ -162,7 +153,7 @@ func (m *SubGroupManager) RecordLatency(aggregateGroupID uint, subGroupName stri
 // statusCode 是上游 HTTP 响应码 (success=true 时忽略). P5.1: 429 走专项路径
 // (不算 consecutive failure, 直接 cooldown), 5xx/network 错误走老熔断逻辑.
 // retryAfter 是 Retry-After 头解析出的秒数 (429 时用); 0 表示用默认 cooldown.
-func (m *SubGroupManager) RecordSubGroupResult(aggregateGroupID uint, subGroupName string, success bool, statusCode int, retryAfter time.Duration) {
+func (m *SubGroupManager) RecordSubGroupResult(aggregateGroupID uint, subGroupName string, success bool, statusCode int, parsedError string, retryAfter time.Duration) {
 	if subGroupName == "" {
 		return
 	}
@@ -172,7 +163,7 @@ func (m *SubGroupManager) RecordSubGroupResult(aggregateGroupID uint, subGroupNa
 	if !ok || sel == nil {
 		return
 	}
-	sel.recordResult(subGroupName, success, statusCode, retryAfter)
+	sel.recordResult(subGroupName, success, statusCode, parsedError, retryAfter)
 }
 
 // SelectSubGroupForModelExcluding 与 SelectSubGroupForModel 类似,但额外排除 attempted 集合中的子分组.
@@ -303,6 +294,7 @@ func (m *SubGroupManager) createSelector(group *models.Group) *selector {
 		groupName: group.Name,
 		subGroups: items,
 		store:     m.store,
+		policy:    failover.DefaultCooldownPolicy(),
 	}
 }
 
@@ -332,6 +324,7 @@ type selector struct {
 	subGroups []subGroupItem
 	store     store.Store
 	mu        sync.Mutex
+	policy    failover.CooldownPolicy
 }
 
 // selectNext uses weighted round-robin algorithm to select a sub-group with active keys
@@ -454,8 +447,8 @@ func (s *selector) selectAmong(pred func(*subGroupItem) bool) string {
 
 // recordResult 记录一次该子分组上游请求的最终成败,驱动熔断器开关.
 // 调用方不需要持有 selector.mu;此方法内部加锁.
-// statusCode + retryAfter 用于 P5.1: 区分 429 (rate limit) vs 5xx (服务故障).
-func (s *selector) recordResult(name string, success bool, statusCode int, retryAfter time.Duration) {
+// statusCode + parsedError + retryAfter 通过 failover.Classify/Decide 统一决策冷却时长.
+func (s *selector) recordResult(name string, success bool, statusCode int, parsedError string, retryAfter time.Duration) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for i := range s.subGroups {
@@ -475,40 +468,22 @@ func (s *selector) recordResult(name string, success bool, statusCode int, retry
 			return
 		}
 
-		// P5.1: 429 (rate limit) 是配额耗尽不是服务故障 -- 直接进 cooldown,
-		// 不算 consecutive failure (避免触发 5xx 的 3-次失败长熔断).
-		// cooldown 时长按 Retry-After 头优先, 没头用默认 60s. clamp 到 10 分钟避免恶意值.
-		if statusCode == 429 {
-			cooldown := rateLimitDefaultCooldown
-			if retryAfter > 0 {
-				cooldown = retryAfter
-				if cooldown > rateLimitMaxCooldown {
-					cooldown = rateLimitMaxCooldown
-				}
-			}
-			it.cooldownUntil = time.Now().Add(cooldown)
-			logrus.WithFields(logrus.Fields{
-				"aggregate_group":  s.groupName,
-				"sub_group":        it.name,
-				"cooldown_seconds": int(cooldown.Seconds()),
-				"reason":           "429 rate limit",
-				"retry_after_hdr":  retryAfter > 0,
-			}).Info("Sub-group rate-limited, cooling down")
-			return
+		// 失败：按错误性质分类决定冷却
+		class := failover.Classify(statusCode, parsedError)
+		if class == failover.ClassNone {
+			return // 400/401/403 不进 sub-group 冷却
 		}
-
-		// 5xx / network error: 老熔断逻辑 (consecutive failures + 30s cooldown)
 		it.consecutiveFailures++
-		if it.consecutiveFailures >= subGroupBreakerThreshold {
-			it.cooldownUntil = time.Now().Add(subGroupBreakerCooldown)
-			logrus.WithFields(logrus.Fields{
-				"aggregate_group":  s.groupName,
-				"sub_group":        it.name,
-				"failures":         it.consecutiveFailures,
-				"cooldown_seconds": int(subGroupBreakerCooldown.Seconds()),
-				"status_code":      statusCode,
-			}).Warn("Sub-group circuit breaker tripped")
+		dur, _ := s.policy.Decide(class, retryAfter, it.consecutiveFailures-1)
+		if dur > 0 {
+			it.cooldownUntil = time.Now().Add(dur)
 		}
+		logrus.WithFields(logrus.Fields{
+			"sub_group":        name,
+			"class":            int(class),
+			"status_code":      statusCode,
+			"cooldown_seconds": int(dur.Seconds()),
+		}).Debug("sub-group cooldown applied")
 		return
 	}
 }
