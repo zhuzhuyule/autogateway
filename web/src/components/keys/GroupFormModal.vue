@@ -292,6 +292,15 @@ function applyProvider(p: FreeProvider) {
   // 数据进入再用 picker 时找不到. 用户如果只是想试一下 template, 留空也行.
   formData.upstreams = [{ url: p.baseUrl, weight: 1 }];
   formData.validation_endpoint = "";
+  // 按 provider 免费档预填速率上限 configItems (有值才注入)
+  const rateConfigItems: ConfigItem[] = [];
+  if (p.rpmLimit !== undefined && p.rpmLimit > 0) {
+    rateConfigItems.push({ key: "rpm_limit", value: p.rpmLimit });
+  }
+  if (p.rpdLimit !== undefined && p.rpdLimit > 0) {
+    rateConfigItems.push({ key: "rpd_limit", value: p.rpdLimit });
+  }
+  formData.configItems = rateConfigItems;
   // 标记 upstream 被用户视为"已配置", 防止 channel_type watcher 覆盖
   userModifiedFields.value = { test_model: false, upstream: true };
   providerPanelExpanded.value = [];

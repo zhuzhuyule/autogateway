@@ -300,6 +300,14 @@ async function ensureGroupExists(): Promise<Group> {
   }
   const p = picked.value;
   const testModel = selectedModel.value || p.testModel;
+  // 按 provider 免费档预填速率上限(有值才注入，0=不限流)
+  const providerConfig: Record<string, number> = {};
+  if (p.rpmLimit !== undefined && p.rpmLimit > 0) {
+    providerConfig.rpm_limit = p.rpmLimit;
+  }
+  if (p.rpdLimit !== undefined && p.rpdLimit > 0) {
+    providerConfig.rpd_limit = p.rpdLimit;
+  }
   const submit: Partial<Group> = {
     name: groupName.value || p.recommendedGroupName,
     display_name: p.recommendedDisplayName,
@@ -312,7 +320,7 @@ async function ensureGroupExists(): Promise<Group> {
     param_overrides: {},
     model_redirect_rules: {},
     model_redirect_strict: false,
-    config: {},
+    config: providerConfig,
     header_rules: [],
     proxy_keys: "",
     // 默认 specified + 自动暴露已知免费模型 (含用户选的 testModel)

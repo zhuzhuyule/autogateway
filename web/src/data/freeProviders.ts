@@ -52,6 +52,10 @@ export interface FreeProvider {
   rpm?: string;
   /** 每天请求数,e.g. "1500/day" — 与 freeTier 冗余时省略 */
   rpd?: string;
+  /** 免费档每分钟请求上限，创建分组时预填到分组配置；不确定则不填 */
+  rpmLimit?: number;
+  /** 免费档每天请求上限，创建分组时预填到分组配置；不确定则不填 */
+  rpdLimit?: number;
   /** 并发数,e.g. "5 并发" */
   concurrent?: string;
   /** 上下文窗口,e.g. "1M", "256K" */
@@ -100,6 +104,8 @@ export const FREE_PROVIDERS: FreeProvider[] = [
     upstreamHosts: ["api.groq.com"],
     badge: "fast",
     rpm: "30 RPM",
+    rpmLimit: 30,
+    rpdLimit: 14400,
     context: "128K",
     verifiedAt: "2026-04",
   },
@@ -119,6 +125,7 @@ export const FREE_PROVIDERS: FreeProvider[] = [
     upstreamHosts: ["api.cerebras.ai"],
     badge: "fast",
     rpm: "30 RPM",
+    rpmLimit: 30,
     context: "128K",
     verifiedAt: "2026-04",
   },
@@ -149,6 +156,8 @@ export const FREE_PROVIDERS: FreeProvider[] = [
     badge: "multi-model",
     rpm: "20 RPM",
     rpd: "50/day",
+    rpmLimit: 20,
+    rpdLimit: 50,
     freeFromMeta: meta => {
       if (typeof meta !== "object" || meta === null) {
         return null;
@@ -256,6 +265,8 @@ export const FREE_PROVIDERS: FreeProvider[] = [
     badge: "high-quota",
     rpm: "15 RPM",
     rpd: "1500/day",
+    rpmLimit: 15,
+    rpdLimit: 1500,
     context: "1M",
     verifiedAt: "2026-04",
   },
@@ -275,6 +286,7 @@ export const FREE_PROVIDERS: FreeProvider[] = [
     upstreamHosts: ["api.cohere.ai"],
     rpm: "20 RPM",
     rpd: "1K/month",
+    rpmLimit: 20,
     verifiedAt: "2026-04",
   },
   {
@@ -304,6 +316,8 @@ export const FREE_PROVIDERS: FreeProvider[] = [
     badge: "multi-model",
     rpm: "10 RPM",
     rpd: "150/day",
+    rpmLimit: 10,
+    rpdLimit: 150,
     verifiedAt: "2026-04",
   },
   {
@@ -428,6 +442,7 @@ export const FREE_PROVIDERS: FreeProvider[] = [
     recommendedGroupName: "modelscope",
     recommendedDisplayName: "ModelScope",
     upstreamHosts: ["api-inference.modelscope.cn"],
+    rpdLimit: 2000,
     verifiedAt: "2026-04",
   },
   {
