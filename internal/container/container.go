@@ -174,8 +174,8 @@ func BuildContainer() (*dig.Container, error) {
 	if err := container.Provide(handler.NewAliasSuggestionHandler); err != nil {
 		return nil, err
 	}
-	if err := container.Provide(func(db *gorm.DB) *router_engine.Selector {
-		return router_engine.NewSelector(db)
+	if err := container.Provide(func(db *gorm.DB, st store.Store) *router_engine.Selector {
+		return router_engine.NewSelector(db, st)
 	}); err != nil {
 		return nil, err
 	}

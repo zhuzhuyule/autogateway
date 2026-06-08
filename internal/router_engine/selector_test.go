@@ -1,10 +1,12 @@
 package router_engine
 
 import (
+	"context"
 	"testing"
 	"time"
 
 	"autogateway/internal/failover"
+	"autogateway/internal/store"
 )
 
 // TestSWRRDistribution verifies that smooth weighted round-robin honors
@@ -48,7 +50,7 @@ func TestSWRREqualWeightOrder(t *testing.T) {
 // TestCooldownBumpAndReset confirms 429 starts the cooldown and a 2xx
 // clears the failure streak.
 func TestCooldownBumpAndReset(t *testing.T) {
-	s := NewSelector(nil)
+	s := NewSelector(nil, nil)
 	c := Candidate{GroupID: 99, RealModel: "test"}
 	s.MarkResponse(c, 429, "", 0)
 	cands := []Candidate{c, {AliasID: 7, GroupID: 100, RealModel: "fresh", Weight: 1, Priority: 100}}
@@ -64,7 +66,7 @@ func TestCooldownBumpAndReset(t *testing.T) {
 }
 
 func TestCooldownBumpsOnNon2xxStatus(t *testing.T) {
-	s := NewSelector(nil)
+	s := NewSelector(nil, nil)
 	c := Candidate{GroupID: 99, RealModel: "test"}
 	s.MarkResponse(c, 500, "", 0)
 	cands := []Candidate{c, {AliasID: 7, GroupID: 100, RealModel: "fresh", Weight: 1, Priority: 100}}
@@ -77,7 +79,7 @@ func TestCooldownBumpsOnNon2xxStatus(t *testing.T) {
 
 // TestPickForAutoTierSelection exercises the token threshold logic.
 func TestPickForAutoTierSelection(t *testing.T) {
-	s := NewSelector(nil)
+	s := NewSelector(nil, nil)
 	cfg := Settings{Enabled: true, SimpleThreshold: 2000, ComplexThreshold: 8000}
 	s.UpdateSettings(cfg)
 	cases := []struct {
@@ -155,5 +157,46 @@ func TestMarkResponseTiering(t *testing.T) {
 	s.MarkResponse(c, 403, "invalid api key", 0)
 	if s.cooldown.isCooling(key, now) {
 		t.Fatal("403 should not set model-level cooldown")
+	}
+}
+
+func TestStickyGetSet(t *testing.T) {
+	st := store.NewMemoryStore()
+	s := &Selector{
+		cooldown:  newCooldownStore(),
+		swrrState: newSWRRStateMap(),
+		settings:  DefaultSettings(),
+		policy:    failover.DefaultCooldownPolicy(),
+		store:     st,
+	}
+	if got := s.GetSticky("k"); got != nil {
+		t.Fatal("absent sticky should be nil")
+	}
+	c := &Candidate{GroupID: 3, RealModel: "m", Alias: "a", Weight: 2}
+	s.SetSticky("k", c)
+	got := s.GetSticky("k")
+	if got == nil || got.GroupID != 3 || got.RealModel != "m" {
+		t.Fatalf("GetSticky = %+v, want GroupID=3 RealModel=m", got)
+	}
+}
+
+func TestStickyNilStoreNoop(t *testing.T) {
+	s := &Selector{
+		cooldown:  newCooldownStore(),
+		swrrState: newSWRRStateMap(),
+		settings:  DefaultSettings(),
+		policy:    failover.DefaultCooldownPolicy(),
+		store:     nil,
+	}
+	s.SetSticky("k", &Candidate{GroupID: 1})
+	if got := s.GetSticky("k"); got != nil {
+		t.Fatal("nil store GetSticky should be nil")
+	}
+}
+
+func TestIsCandidateAliveNil(t *testing.T) {
+	s := &Selector{cooldown: newCooldownStore(), swrrState: newSWRRStateMap(), settings: DefaultSettings(), policy: failover.DefaultCooldownPolicy(), store: store.NewMemoryStore()}
+	if s.IsCandidateAlive(context.Background(), nil) {
+		t.Fatal("nil candidate should not be alive")
 	}
 }

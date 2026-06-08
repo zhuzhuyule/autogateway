@@ -14,6 +14,7 @@ package router_engine
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math/rand"
 	"strconv"
@@ -22,6 +23,7 @@ import (
 
 	"autogateway/internal/failover"
 	"autogateway/internal/models"
+	"autogateway/internal/store"
 
 	"github.com/sirupsen/logrus"
 	"gorm.io/gorm"
@@ -87,19 +89,72 @@ type Selector struct {
 	swrrState *swrrStateMap
 	settings  Settings
 	policy    failover.CooldownPolicy
+	store     store.Store
 	mu        sync.RWMutex
 }
 
-func NewSelector(db *gorm.DB) *Selector {
+func NewSelector(db *gorm.DB, st store.Store) *Selector {
 	s := &Selector{
 		db:        db,
 		cooldown:  newCooldownStore(),
 		swrrState: newSWRRStateMap(),
 		settings:  DefaultSettings(),
 		policy:    failover.DefaultCooldownPolicy(),
+		store:     st,
 	}
 	s.loadSettingsFromDB()
 	return s
+}
+
+// StickyTTL 粘性会话锁定时长。
+const StickyTTL = 30 * time.Minute
+
+// GetSticky 读取并反序列化粘性 candidate；不存在/解析失败/store 为 nil → nil。
+func (s *Selector) GetSticky(storeKey string) *Candidate {
+	if s.store == nil {
+		return nil
+	}
+	b, err := s.store.Get(storeKey)
+	if err != nil || len(b) == 0 {
+		return nil
+	}
+	var c Candidate
+	if err := json.Unmarshal(b, &c); err != nil {
+		return nil
+	}
+	return &c
+}
+
+// SetSticky 序列化并写入粘性 candidate，TTL StickyTTL；store 为 nil/序列化失败 → no-op。
+func (s *Selector) SetSticky(storeKey string, c *Candidate) {
+	if s.store == nil || c == nil {
+		return
+	}
+	b, err := json.Marshal(c)
+	if err != nil {
+		return
+	}
+	if err := s.store.Set(storeKey, b, StickyTTL); err != nil {
+		logrus.WithError(err).Debug("sticky SetSticky failed")
+	}
+}
+
+// IsCandidateAlive 校验 candidate 当前是否仍可用：有 active key、不在 cooldown、未被 exposed/blocked 拦。
+func (s *Selector) IsCandidateAlive(ctx context.Context, c *Candidate) bool {
+	if c == nil {
+		return false
+	}
+	cands := []Candidate{*c}
+	if cands = s.filterByActiveKeys(ctx, cands); len(cands) == 0 {
+		return false
+	}
+	if cands = s.filterByExposed(ctx, cands); len(cands) == 0 {
+		return false
+	}
+	if cands = s.filterCooldown(cands); len(cands) == 0 {
+		return false
+	}
+	return true
 }
 
 func (s *Selector) UpdateSettings(cfg Settings) {
