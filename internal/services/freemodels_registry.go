@@ -186,6 +186,7 @@ type FreeModelsRegistry struct {
 	envelope       freeModelsEnvelope
 	byProvMod      map[string]*FreeModelMeta    // key: "<provider>/<lower-modelId>"
 	byModelOnly    map[string][]*FreeModelMeta
+	byModelNorm    map[string][]*FreeModelMeta  // key: normalizeModelID(modelId) — LookupMetaRaw fallback
 	byFamily       map[string][]*FreeModelMeta  // key: lower(modelFamily) — P4 智能路由用
 	byHost         map[string]string            // host (lowercase) → providerId
 	providerByName map[string]*FreeProviderMeta // providerId → meta
@@ -197,6 +198,7 @@ func NewFreeModelsRegistry() *FreeModelsRegistry {
 	return &FreeModelsRegistry{
 		byProvMod:      make(map[string]*FreeModelMeta),
 		byModelOnly:    make(map[string][]*FreeModelMeta),
+		byModelNorm:    make(map[string][]*FreeModelMeta),
 		byFamily:       make(map[string][]*FreeModelMeta),
 		byHost:         make(map[string]string),
 		providerByName: make(map[string]*FreeProviderMeta),
@@ -376,15 +378,21 @@ func parseUpstream(body []byte) (freeModelsEnvelope, error) {
 
 func (r *FreeModelsRegistry) replaceIndex(env freeModelsEnvelope) {
 	// freeTier / isFree / freeKind normalize 已在 parseUpstream 完成,
-	// 这里只负责建索引. 新 schema 下 m.ModelID 已经是 raw API id (上游
-	// FreeModels 端已经统一剥掉 "<provider>/" 前缀), 不需要双索引.
+	// 这里只负责建索引. 新 schema 下 m.ModelID 通常是 raw API id, 但部分
+	// provider (google: "models/gemini-*", nvidia: "nvidia/*") 仍带内部前缀.
+	// byModelOnly 保留原始键不变 (IsFree/Lookup 等多处依赖); byModelNorm 额外
+	// 存一份去前缀归一化键, 仅供 LookupMetaRaw 做 fallback.
 	byProvMod := make(map[string]*FreeModelMeta, len(env.Models))
 	byModelOnly := make(map[string][]*FreeModelMeta)
+	byModelNorm := make(map[string][]*FreeModelMeta)
 	byFamily := make(map[string][]*FreeModelMeta)
 	for i := range env.Models {
 		m := &env.Models[i]
 		byProvMod[provModKey(m.Provider, m.ModelID)] = m
-		byModelOnly[strings.ToLower(m.ModelID)] = append(byModelOnly[strings.ToLower(m.ModelID)], m)
+		lk := strings.ToLower(m.ModelID)
+		byModelOnly[lk] = append(byModelOnly[lk], m)
+		nk := normalizeModelID(m.ModelID)
+		byModelNorm[nk] = append(byModelNorm[nk], m)
 		if m.ModelFamily != "" {
 			fk := strings.ToLower(m.ModelFamily)
 			byFamily[fk] = append(byFamily[fk], m)
@@ -408,6 +416,7 @@ func (r *FreeModelsRegistry) replaceIndex(env freeModelsEnvelope) {
 	r.envelope = env
 	r.byProvMod = byProvMod
 	r.byModelOnly = byModelOnly
+	r.byModelNorm = byModelNorm
 	r.byFamily = byFamily
 	r.byHost = byHost
 	r.providerByName = providerByName
@@ -628,17 +637,36 @@ func (r *FreeModelsRegistry) SnapshotJSON() ([]byte, error) {
 }
 
 // LookupMetaRaw returns the prior performance/latency fields for a model ID.
-// It queries byModelOnly (provider-agnostic) and returns the first match.
-// found=false when the registry has no entry for modelID.
+// It first queries byModelOnly (exact lower-case key). On miss it falls back
+// to byModelNorm (normalizeModelID key) to handle callers that pass a
+// prefix-stripped RealModel such as "gemini-2.5-flash" when the registry
+// stores "models/gemini-2.5-flash", or "llama-3.1-nemotron-ultra-253b-v1"
+// when the registry stores "nvidia/llama-3.1-nemotron-ultra-253b-v1".
+// found=false when neither index has an entry for modelID.
 func (r *FreeModelsRegistry) LookupMetaRaw(modelID string) (perfLevel, estLatency string, found bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	list := r.byModelOnly[strings.ToLower(modelID)]
 	if len(list) == 0 {
+		list = r.byModelNorm[normalizeModelID(modelID)] // fallback: 去前缀归一化
+	}
+	if len(list) == 0 {
 		return "", "", false
 	}
 	m := list[0]
 	return m.PerformanceLevel, m.EstimatedLatency, true
+}
+
+// normalizeModelID 去掉 "models/" 前缀并取最后一段（去 provider 内部前缀），小写。
+// 用于 LookupMetaRaw 的 fallback 匹配（registry 的 google/nvidia 等 id 带前缀，
+// 而路由用的 RealModel 通常无前缀）。
+func normalizeModelID(id string) string {
+	s := strings.ToLower(strings.TrimSpace(id))
+	s = strings.TrimPrefix(s, "models/")
+	if i := strings.LastIndex(s, "/"); i >= 0 {
+		s = s[i+1:]
+	}
+	return s
 }
 
 func provModKey(provider, modelID string) string {
