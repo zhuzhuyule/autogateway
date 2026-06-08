@@ -405,7 +405,11 @@ var sizeRe = regexp.MustCompile(`^[0-9]+(?:\.[0-9]+)?[bm]$`)
 
 // datelikeRe matches release-date / version markers tacked onto the end:
 // "20240620", "2025-09", "09-2025", "v3", "rev2", etc.
-var datelikeRe = regexp.MustCompile(`^(?:[0-9]{6,8}|[0-9]{4}|[vr][0-9]+|rev[0-9]+)$`)
+//
+// 只匹配 v-version (v3) 和 rev (rev2), 不匹配 r-style 系列代号 (r1):
+// DeepSeek-R1 (推理) 与 DeepSeek-V3 (通用) 是不同模型系列, r1 是 family
+// 标识的一部分而非版本号, 不能被剥离 (否则 dedup 误把两者归同 family).
+var datelikeRe = regexp.MustCompile(`^(?:[0-9]{6,8}|[0-9]{4}|v[0-9]+|rev[0-9]+)$`)
 
 // deriveFamily computes a coarse family key from a bare model id by
 // stripping provider prefix, parenthesised tails, ":free"-style qualifiers,
