@@ -163,6 +163,8 @@ var MessagesEnUS = map[string]string{
 	"config.idle_conn_timeout_desc":       "Timeout (seconds) for idle connections in the HTTP client.",
 	"config.response_header_timeout":      "Response Header Timeout (seconds)",
 	"config.response_header_timeout_desc": "Maximum time (seconds) to wait for response headers from upstream services.",
+	"config.stream_idle_timeout":          "Stream Idle Timeout (s)",
+	"config.stream_idle_timeout_desc":     "Disconnect a stream after this many seconds with no data; 0 disables.",
 	"config.max_idle_conns":               "Max Idle Connections",
 	"config.max_idle_conns_desc":          "Maximum number of idle connections allowed in the HTTP client connection pool.",
 	"config.max_idle_conns_per_host":      "Max Idle Connections Per Host",

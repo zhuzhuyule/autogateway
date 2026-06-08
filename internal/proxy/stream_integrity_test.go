@@ -5,7 +5,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -32,7 +34,7 @@ func TestStreamWithIntegrity_ValidOpenAIFirstChunk(t *testing.T) {
 	c, rec := newStreamCtx()
 	body := "data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n" +
 		"data: [DONE]\n\n"
-	out := streamWithIntegrity(c, fakeResp(http.StatusOK, body), true)
+	out := streamWithIntegrity(c, fakeResp(http.StatusOK, body), true, 0)
 
 	if out.failed {
 		t.Fatalf("valid first chunk should not fail, got %+v", out)
@@ -50,7 +52,7 @@ func TestStreamWithIntegrity_ValidOpenAIFirstChunk(t *testing.T) {
 
 func TestStreamWithIntegrity_EmptyStream(t *testing.T) {
 	c, rec := newStreamCtx()
-	out := streamWithIntegrity(c, fakeResp(http.StatusOK, ""), true)
+	out := streamWithIntegrity(c, fakeResp(http.StatusOK, ""), true, 0)
 
 	if !out.failed {
 		t.Fatalf("empty stream should fail, got %+v", out)
@@ -69,7 +71,7 @@ func TestStreamWithIntegrity_EmptyStream(t *testing.T) {
 func TestStreamWithIntegrity_ErrorFrame(t *testing.T) {
 	c, rec := newStreamCtx()
 	body := "data: {\"error\":{\"message\":\"rate limited\",\"code\":429}}\n\n"
-	out := streamWithIntegrity(c, fakeResp(http.StatusOK, body), true)
+	out := streamWithIntegrity(c, fakeResp(http.StatusOK, body), true, 0)
 
 	if !out.failed {
 		t.Fatalf("error frame should fail, got %+v", out)
@@ -92,7 +94,7 @@ func TestStreamWithIntegrity_NonOpenAIPassthrough(t *testing.T) {
 	c, rec := newStreamCtx()
 	// 即便 payload 长得像 error 帧, 非 OpenAI 也不解析 → 透传.
 	body := "data: {\"error\":{\"message\":\"rate limited\",\"code\":429}}\n\n"
-	out := streamWithIntegrity(c, fakeResp(http.StatusOK, body), false)
+	out := streamWithIntegrity(c, fakeResp(http.StatusOK, body), false, 0)
 
 	if out.failed {
 		t.Fatalf("non-openai with data should not fail, got %+v", out)
@@ -107,7 +109,7 @@ func TestStreamWithIntegrity_NonOpenAIPassthrough(t *testing.T) {
 
 func TestStreamWithIntegrity_NonOpenAIEmptyStream(t *testing.T) {
 	c, _ := newStreamCtx()
-	out := streamWithIntegrity(c, fakeResp(http.StatusOK, ""), false)
+	out := streamWithIntegrity(c, fakeResp(http.StatusOK, ""), false, 0)
 
 	if !out.failed {
 		t.Fatalf("non-openai empty stream should fail, got %+v", out)
@@ -119,11 +121,11 @@ func TestStreamWithIntegrity_NonOpenAIEmptyStream(t *testing.T) {
 
 func TestParseSSEError(t *testing.T) {
 	tests := []struct {
-		name      string
-		payload   string
-		wantErr   bool
-		wantCode  int
-		wantMsg   string
+		name     string
+		payload  string
+		wantErr  bool
+		wantCode int
+		wantMsg  string
 	}{
 		{"error with numeric code", `{"error":{"message":"rate limited","code":429}}`, true, 429, "rate limited"},
 		{"error without code", `{"error":{"message":"boom"}}`, true, http.StatusBadGateway, "boom"},
@@ -146,5 +148,201 @@ func TestParseSSEError(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// --- Task 3 新增测试 ---
+
+// blockingReader 是一个自定义 io.ReadCloser:
+// 先返回 firstData, 然后阻塞直到 Close() 被调用或 blockFor 超时.
+// 用于测试 inactivity 超时场景 (time.AfterFunc 关闭 body 后 Read 应立即返回错误).
+type blockingReader struct {
+	mu        sync.Mutex
+	first     []byte
+	firstSent bool
+	rest      []byte
+	blockFor  time.Duration
+	closeCh   chan struct{}
+	closeOnce sync.Once
+}
+
+func newBlockingReader(first, rest string, blockFor time.Duration) *blockingReader {
+	return &blockingReader{
+		first:    []byte(first),
+		rest:     []byte(rest),
+		blockFor: blockFor,
+		closeCh:  make(chan struct{}),
+	}
+}
+
+func (r *blockingReader) Read(p []byte) (int, error) {
+	r.mu.Lock()
+	select {
+	case <-r.closeCh:
+		r.mu.Unlock()
+		return 0, io.ErrClosedPipe
+	default:
+	}
+	if !r.firstSent && len(r.first) > 0 {
+		n := copy(p, r.first)
+		r.first = r.first[n:]
+		if len(r.first) == 0 {
+			r.firstSent = true
+		}
+		r.mu.Unlock()
+		return n, nil
+	}
+	r.mu.Unlock()
+
+	// 阻塞模拟 inactivity — 等待 Close() 信号或 blockFor 超时 (后者兜底).
+	timer := time.NewTimer(r.blockFor)
+	defer timer.Stop()
+	select {
+	case <-r.closeCh:
+		return 0, io.ErrClosedPipe
+	case <-timer.C:
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if len(r.rest) > 0 {
+		n := copy(p, r.rest)
+		r.rest = r.rest[n:]
+		return n, nil
+	}
+	return 0, io.EOF
+}
+
+func (r *blockingReader) Close() error {
+	r.closeOnce.Do(func() {
+		close(r.closeCh)
+	})
+	return nil
+}
+
+// TestStreamWithIntegrity_InactivityTimeout 验证:
+// 有效首帧已写客户端后, 后续 Read 阻塞超过 idleTimeout → 流终止,
+// wroteToClient=true, 不 panic.
+func TestStreamWithIntegrity_InactivityTimeout(t *testing.T) {
+	c, rec := newStreamCtx()
+
+	// 首帧: 有效 SSE data 行 (已换行)
+	firstData := "data: {\"choices\":[{\"delta\":{\"content\":\"hello\"}}]}\n\n"
+	// blockFor 大于 idleTimeout, 模拟挂死.
+	br := newBlockingReader(firstData, "", 5*time.Second)
+
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{},
+		Body:       br,
+	}
+
+	idleTimeout := 100 * time.Millisecond
+	start := time.Now()
+	out := streamWithIntegrity(c, resp, true, idleTimeout)
+	elapsed := time.Since(start)
+
+	// 已写客户端 (首帧已发)
+	if !out.wroteToClient {
+		t.Fatalf("expected wroteToClient=true after valid first frame, got %+v", out)
+	}
+	// 不应标记 failed (已写客户端场景 failed 无意义)
+	// 但不 panic 才是关键断言 — 能到这里即通过.
+
+	// 超时应在约 idleTimeout 内触发 (宽松：< 3s)
+	if elapsed > 3*time.Second {
+		t.Fatalf("inactivity timeout took too long: %v (expected ~%v)", elapsed, idleTimeout)
+	}
+
+	// 首帧数据已透传给客户端
+	if !strings.Contains(rec.Body.String(), "hello") {
+		t.Fatalf("expected forwarded first frame in recorder, got %q", rec.Body.String())
+	}
+}
+
+// TestStreamWithIntegrity_TruncatedOpenAI 验证:
+// 有有效首帧但无 [DONE] 也无 finish_reason → outcome.truncated=true.
+func TestStreamWithIntegrity_TruncatedOpenAI(t *testing.T) {
+	c, _ := newStreamCtx()
+	// 有 data 帧, 但没有 [DONE] 也没有 finish_reason.
+	body := "data: {\"choices\":[{\"delta\":{\"content\":\"hello\"}}]}\n\n" +
+		"data: {\"choices\":[{\"delta\":{\"content\":\" world\"}}]}\n\n"
+	out := streamWithIntegrity(c, fakeResp(http.StatusOK, body), true, 0)
+
+	if !out.wroteToClient {
+		t.Fatalf("expected wroteToClient=true, got %+v", out)
+	}
+	if !out.truncated {
+		t.Fatalf("expected truncated=true (no [DONE]/finish_reason), got %+v", out)
+	}
+}
+
+// TestStreamWithIntegrity_NotTruncatedWithDONE 验证:
+// 有 [DONE] → truncated=false.
+func TestStreamWithIntegrity_NotTruncatedWithDONE(t *testing.T) {
+	c, _ := newStreamCtx()
+	body := "data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n" +
+		"data: [DONE]\n\n"
+	out := streamWithIntegrity(c, fakeResp(http.StatusOK, body), true, 0)
+
+	if !out.wroteToClient {
+		t.Fatalf("expected wroteToClient=true, got %+v", out)
+	}
+	if out.truncated {
+		t.Fatalf("expected truncated=false (has [DONE]), got %+v", out)
+	}
+}
+
+// TestStreamWithIntegrity_NotTruncatedWithFinishReason 验证:
+// 有 finish_reason (非 null) → truncated=false.
+func TestStreamWithIntegrity_NotTruncatedWithFinishReason(t *testing.T) {
+	c, _ := newStreamCtx()
+	body := "data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n" +
+		"data: {\"choices\":[{\"finish_reason\":\"stop\",\"delta\":{}}]}\n\n"
+	out := streamWithIntegrity(c, fakeResp(http.StatusOK, body), true, 0)
+
+	if !out.wroteToClient {
+		t.Fatalf("expected wroteToClient=true, got %+v", out)
+	}
+	if out.truncated {
+		t.Fatalf("expected truncated=false (has finish_reason), got %+v", out)
+	}
+}
+
+// TestStreamWithIntegrity_NonOpenAINotTruncated 验证:
+// 非 OpenAI 流即便没有 [DONE] 也不标记 truncated.
+func TestStreamWithIntegrity_NonOpenAINotTruncated(t *testing.T) {
+	c, _ := newStreamCtx()
+	body := "data: some custom payload\n\n"
+	out := streamWithIntegrity(c, fakeResp(http.StatusOK, body), false, 0)
+
+	if !out.wroteToClient {
+		t.Fatalf("expected wroteToClient=true, got %+v", out)
+	}
+	if out.truncated {
+		t.Fatalf("expected truncated=false for non-openai, got %+v", out)
+	}
+}
+
+// TestStreamWithIntegrity_ZeroIdleTimeoutNoTimeout 验证:
+// idleTimeout=0 不启用超时 → 正常透传到 EOF, 不提前终止.
+func TestStreamWithIntegrity_ZeroIdleTimeoutNoTimeout(t *testing.T) {
+	c, rec := newStreamCtx()
+	body := "data: {\"choices\":[{\"delta\":{\"content\":\"a\"}}]}\n\n" +
+		"data: [DONE]\n\n"
+	// idleTimeout=0 should not trigger any timeout
+	out := streamWithIntegrity(c, fakeResp(http.StatusOK, body), true, 0)
+
+	if out.failed {
+		t.Fatalf("zero idleTimeout should not fail, got %+v", out)
+	}
+	if !out.wroteToClient {
+		t.Fatalf("zero idleTimeout should complete normally, got %+v", out)
+	}
+	if out.truncated {
+		t.Fatalf("stream with [DONE] should not be truncated, got %+v", out)
+	}
+	if !strings.Contains(rec.Body.String(), "[DONE]") {
+		t.Fatalf("expected [DONE] in recorder body, got %q", rec.Body.String())
 	}
 }

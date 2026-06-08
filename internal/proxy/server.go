@@ -463,7 +463,7 @@ func (ps *ProxyServer) executeRequestWithRetry(
 		// 见到首个有效 chunk 才发 (resp.Header + c.Status 都在 streamWithIntegrity 内部).
 		// 200-but-empty / 首帧即 error 且未发头 → 走无感 failover (handleAttemptFailure).
 		isOpenAI := group.ChannelType == "openai" || group.ChannelType == "openai-response"
-		out := ps.streamWithIntegrity(c, resp, isOpenAI)
+		out := ps.streamWithIntegrity(c, resp, isOpenAI, time.Duration(group.EffectiveConfig.StreamIdleTimeout)*time.Second)
 		if out.failed && !out.wroteToClient {
 			// 还没向客户端发头 → 安全 failover. handleAttemptFailure 内部会 logRequest,
 			// 此处直接 return 不再走下方成功 logRequest, 避免双重记账.

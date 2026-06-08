@@ -163,6 +163,8 @@ var MessagesZhCN = map[string]string{
 	"config.idle_conn_timeout_desc":       "HTTP 客户端中空闲连接的超时时间（秒）。",
 	"config.response_header_timeout":      "响应头超时（秒）",
 	"config.response_header_timeout_desc": "等待上游服务响应头的最长时间（秒）。",
+	"config.stream_idle_timeout":          "流式空闲超时（秒）",
+	"config.stream_idle_timeout_desc":     "流式响应多久无数据视为挂死并断开，0=不启用。",
 	"config.max_idle_conns":               "最大空闲连接数",
 	"config.max_idle_conns_desc":          "HTTP 客户端连接池中允许的最大空闲连接总数。",
 	"config.max_idle_conns_per_host":      "每主机最大空闲连接数",

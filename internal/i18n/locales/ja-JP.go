@@ -163,6 +163,8 @@ var MessagesJaJP = map[string]string{
 	"config.idle_conn_timeout_desc":       "HTTPクライアントのアイドル接続のタイムアウト（秒）。",
 	"config.response_header_timeout":      "レスポンスヘッダータイムアウト（秒）",
 	"config.response_header_timeout_desc": "上流サービスからのレスポンスヘッダーを待つ最大時間（秒）。",
+	"config.stream_idle_timeout":          "ストリームアイドルタイムアウト（秒）",
+	"config.stream_idle_timeout_desc":     "ストリームレスポンスでデータが届かない状態がこの秒数続いた場合に切断します。0 で無効。",
 	"config.max_idle_conns":               "最大アイドル接続数",
 	"config.max_idle_conns_desc":          "HTTPクライアント接続プールで許可される最大アイドル接続総数。",
 	"config.max_idle_conns_per_host":      "ホストごとの最大アイドル接続数",

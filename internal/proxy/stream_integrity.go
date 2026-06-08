@@ -6,8 +6,10 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/sirupsen/logrus"
 )
 
 // firstChunkBufCap 是 header-hold 阶段缓冲上游字节的上限. 在见到首个有效
@@ -23,21 +25,22 @@ type streamOutcome struct {
 	failed        bool   // 本次转发是否失败 (空流 / error 帧 / 读错误)
 	statusCode    int    // failover 用的状态码 (0 = 网络/读错误)
 	parsedError   string // failover 用的错误信息
+	truncated     bool   // 流已写给客户端但未正常终止 (无 [DONE]/finish_reason)
 }
 
 // streamWithIntegrity 是 ProxyServer 上的方法封装, 供 server.go 成功块调用.
 // 实际逻辑在包级 streamWithIntegrity 自由函数里 (无需 ps 状态, 便于单测).
-func (ps *ProxyServer) streamWithIntegrity(c *gin.Context, resp *http.Response, isOpenAI bool) streamOutcome {
-	return streamWithIntegrity(c, resp, isOpenAI)
+func (ps *ProxyServer) streamWithIntegrity(c *gin.Context, resp *http.Response, isOpenAI bool, idleTimeout time.Duration) streamOutcome {
+	return streamWithIntegrity(c, resp, isOpenAI, idleTimeout)
 }
 
-// streamWithIntegrity 实现 #10 header-hold + #11 空/error 帧检测:
+// streamWithIntegrity 实现 #10 header-hold + #11 空/error 帧检测 + #12 inactivity 超时 + 截断检测:
 // 推迟发头, 缓冲到首个有效 data 帧才发头透传. 在发头前命中空流或 (OpenAI)
 // error 帧 → 返回 failed 且 wroteToClient=false, 让调用方走无感 failover.
 //
-// 本任务 (Task2) 仅做 header-hold + 首帧检测, 透传剩余字节用 io.Copy;
-// 超时/截断 (#12) 与 toolcall 完整性 (#13) 留给后续任务.
-func streamWithIntegrity(c *gin.Context, resp *http.Response, isOpenAI bool) streamOutcome {
+// idleTimeout > 0 时, 流中若超过 idleTimeout 无数据到达则关闭 body 并终止透传.
+// isOpenAI 时, 透传结束若未见到 [DONE] 或 finish_reason 则标记 truncated=true.
+func streamWithIntegrity(c *gin.Context, resp *http.Response, isOpenAI bool, idleTimeout time.Duration) streamOutcome {
 	reader := bufio.NewReader(resp.Body)
 
 	// buffered 缓存 header-hold 期间已从上游读出的全部原始字节, 一旦放行需
@@ -64,7 +67,7 @@ func streamWithIntegrity(c *gin.Context, resp *http.Response, isOpenAI bool) str
 					}
 				}
 				// 有效首帧 → 发头并放行透传.
-				return flushAndCopy(c, resp, &buffered, reader)
+				return flushAndStream(c, resp, &buffered, reader, isOpenAI, idleTimeout)
 			}
 		}
 
@@ -78,7 +81,7 @@ func streamWithIntegrity(c *gin.Context, resp *http.Response, isOpenAI bool) str
 
 		// 防止上游只发无效行 (注释/空行) 把缓冲撑爆: 超过上限就当作"确有数据"放行.
 		if buffered.Len() >= firstChunkBufCap {
-			return flushAndCopy(c, resp, &buffered, reader)
+			return flushAndStream(c, resp, &buffered, reader, isOpenAI, idleTimeout)
 		}
 	}
 
@@ -93,12 +96,13 @@ func streamWithIntegrity(c *gin.Context, resp *http.Response, isOpenAI bool) str
 	}
 	// 非 OpenAI 等场景: 有字节但没有可识别的 data 帧. 仍视为"有数据"放行透传,
 	// 避免误杀 (上游可能用非 OpenAI 的帧格式).
-	return flushAndCopy(c, resp, &buffered, reader)
+	return flushAndStream(c, resp, &buffered, reader, isOpenAI, idleTimeout)
 }
 
-// flushAndCopy 设置 SSE 响应头, 发 c.Status, 写已缓冲字节并 flush, 再 io.Copy
-// 透传剩余上游字节. 返回 wroteToClient=true.
-func flushAndCopy(c *gin.Context, resp *http.Response, buffered *bytes.Buffer, reader *bufio.Reader) streamOutcome {
+// flushAndStream 设置 SSE 响应头, 发 c.Status, 写已缓冲字节并 flush,
+// 再手写循环透传剩余上游字节 (含 inactivity 超时 + 截断检测).
+// 返回 wroteToClient=true.
+func flushAndStream(c *gin.Context, resp *http.Response, buffered *bytes.Buffer, reader *bufio.Reader, isOpenAI bool, idleTimeout time.Duration) streamOutcome {
 	c.Header("Content-Type", "text/event-stream")
 	c.Header("Cache-Control", "no-cache")
 	c.Header("Connection", "keep-alive")
@@ -117,14 +121,109 @@ func flushAndCopy(c *gin.Context, resp *http.Response, buffered *bytes.Buffer, r
 		}
 	}
 
-	// Task3/4 再加超时/截断/toolcall, 本任务先 io.Copy 透传剩余.
-	if _, err := io.Copy(c.Writer, reader); err != nil {
-		logUpstreamError("copying remaining stream to client", err)
+	// 透传循环: 按行读取剩余上游流, 边读边写 (保持打字机体验).
+	// inactivity 超时: idleTimeout > 0 时, 若超过 idleTimeout 无数据到达则关闭 body 终止循环.
+	// 截断检测 (isOpenAI): 记录是否见到 [DONE] 或 finish_reason (非 null).
+	var (
+		seenDone    bool
+		idleTimer   *time.Timer
+		idleExpired bool
+	)
+
+	if idleTimeout > 0 {
+		idleTimer = time.AfterFunc(idleTimeout, func() {
+			idleExpired = true
+			resp.Body.Close()
+		})
+		defer idleTimer.Stop()
 	}
+
+	buf := make([]byte, 32*1024)
+	for {
+		n, err := reader.Read(buf)
+		if n > 0 {
+			// 成功读到数据 — 重置 idle 计时器.
+			if idleTimer != nil {
+				idleTimer.Reset(idleTimeout)
+			}
+
+			chunk := buf[:n]
+
+			// 截断检测: 扫描本批次字节里的 SSE data 行.
+			if isOpenAI && !seenDone {
+				seenDone = scanForCompletion(chunk)
+			}
+
+			if _, werr := c.Writer.Write(chunk); werr != nil {
+				logUpstreamError("writing stream chunk to client", werr)
+				break
+			}
+			if flusher != nil {
+				flusher.Flush()
+			}
+		}
+
+		if err != nil {
+			if err != io.EOF {
+				if idleExpired {
+					logrus.Warnf("[stream] inactivity timeout (%v) reached, stream forcefully closed", idleTimeout)
+				} else {
+					logUpstreamError("reading stream from upstream", err)
+				}
+			}
+			break
+		}
+	}
+
 	if flusher != nil {
 		flusher.Flush()
 	}
-	return streamOutcome{wroteToClient: true}
+
+	outcome := streamOutcome{wroteToClient: true}
+	if isOpenAI && !seenDone {
+		outcome.truncated = true
+		logrus.Warn("[stream] upstream stream ended without [DONE] or finish_reason — possible truncation")
+	}
+	return outcome
+}
+
+// scanForCompletion 检查一批 SSE 字节里是否含有流正常结束的信号:
+//   - data: [DONE]
+//   - JSON 帧中 finish_reason 字段值非 null (e.g. "stop","length","tool_calls")
+func scanForCompletion(chunk []byte) bool {
+	// 按行扫描.
+	lines := bytes.Split(chunk, []byte("\n"))
+	for _, line := range lines {
+		payload := parseDataLine(line)
+		if payload == nil {
+			continue
+		}
+		if bytes.Equal(payload, []byte("[DONE]")) {
+			return true
+		}
+		if hasFinishReason(payload) {
+			return true
+		}
+	}
+	return false
+}
+
+// hasFinishReason 解析 SSE data payload, 检查 choices[*].finish_reason 是否非 null.
+func hasFinishReason(payload []byte) bool {
+	var frame struct {
+		Choices []struct {
+			FinishReason *string `json:"finish_reason"`
+		} `json:"choices"`
+	}
+	if err := json.Unmarshal(payload, &frame); err != nil {
+		return false
+	}
+	for _, ch := range frame.Choices {
+		if ch.FinishReason != nil {
+			return true
+		}
+	}
+	return false
 }
 
 // parseDataLine 从一行 SSE 文本提取 data payload. 非 data 行 (注释 ":"、
