@@ -7,6 +7,7 @@ import (
 	"autogateway/internal/config"
 	"autogateway/internal/encryption"
 	"autogateway/internal/models"
+	"autogateway/internal/ratelimit"
 	"autogateway/internal/utils"
 	"time"
 
@@ -165,7 +166,7 @@ func (s *KeyValidator) TestModelConnectivity(group *models.Group, modelName stri
 		return nil, fmt.Errorf("model name is required")
 	}
 
-	apiKey, err := s.keypoolProvider.SelectKey(group.ID)
+	apiKey, err := s.keypoolProvider.SelectKey(group.ID, ratelimit.Limits{})
 	if err != nil {
 		return nil, err
 	}

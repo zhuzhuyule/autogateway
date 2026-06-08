@@ -7,6 +7,7 @@ import (
 	"autogateway/internal/encryption"
 	app_errors "autogateway/internal/errors"
 	"autogateway/internal/models"
+	"autogateway/internal/ratelimit"
 	"autogateway/internal/store"
 	"math/rand"
 	"strconv"
@@ -22,20 +23,22 @@ type KeyProvider struct {
 	store           store.Store
 	settingsManager *config.SystemSettingsManager
 	encryptionSvc   encryption.Service
+	ledger          *ratelimit.Ledger
 }
 
 // NewProvider 创建一个新的 KeyProvider 实例。
-func NewProvider(db *gorm.DB, store store.Store, settingsManager *config.SystemSettingsManager, encryptionSvc encryption.Service) *KeyProvider {
+func NewProvider(db *gorm.DB, store store.Store, settingsManager *config.SystemSettingsManager, encryptionSvc encryption.Service, ledger *ratelimit.Ledger) *KeyProvider {
 	return &KeyProvider{
 		db:              db,
 		store:           store,
 		settingsManager: settingsManager,
 		encryptionSvc:   encryptionSvc,
+		ledger:          ledger,
 	}
 }
 
 // SelectKey 为指定的分组原子性地选择并轮换一个可用的 APIKey。
-func (p *KeyProvider) SelectKey(groupID uint) (*models.APIKey, error) {
+func (p *KeyProvider) SelectKey(groupID uint, limits ratelimit.Limits) (*models.APIKey, error) {
 	activeKeysListKey := fmt.Sprintf("group:%d:active_keys", groupID)
 	// 防御性最大跳过次数. 正常路径一发命中, 这是 store/db desync 兜底.
 	// 设 16 而不是无限循环, 避免上层 bug 让 SelectKey 卡死.
@@ -86,6 +89,16 @@ func (p *KeyProvider) SelectKey(groupID uint) (*models.APIKey, error) {
 			continue
 		}
 
+		// 速率账本准入：当前窗口已达上限 → 跳过选下一个（不 LRem，额度会恢复）
+		if p.ledger != nil && !limits.IsZero() {
+			ok, err := p.ledger.Allow(groupID, uint(keyID), limits)
+			if err != nil {
+				logrus.WithError(err).Warn("ratelimit Allow failed, fail-open")
+			} else if !ok {
+				continue
+			}
+		}
+
 		// 3. Manually unmarshal the map into an APIKey struct
 		failureCount, _ := strconv.ParseInt(keyDetails["failure_count"], 10, 64)
 		createdAt, _ := strconv.ParseInt(keyDetails["created_at"], 10, 64)
@@ -100,6 +113,12 @@ func (p *KeyProvider) SelectKey(groupID uint) (*models.APIKey, error) {
 				"error": err,
 			}).Debug("Failed to decrypt key value, using as-is for backward compatibility")
 			decryptedKeyValue = encryptedKeyValue
+		}
+
+		if p.ledger != nil && !limits.IsZero() {
+			if err := p.ledger.Record(groupID, uint(keyID), limits); err != nil {
+				logrus.WithError(err).Warn("ratelimit Record failed")
+			}
 		}
 
 		return &models.APIKey{

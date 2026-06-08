@@ -14,6 +14,7 @@ import (
 	"autogateway/internal/httpclient"
 	"autogateway/internal/keypool"
 	"autogateway/internal/proxy"
+	"autogateway/internal/ratelimit"
 	"autogateway/internal/router"
 	"autogateway/internal/router_engine"
 	"autogateway/internal/services"
@@ -96,6 +97,9 @@ func BuildContainer() (*dig.Container, error) {
 		return nil, err
 	}
 	if err := container.Provide(services.NewAggregateGroupService); err != nil {
+		return nil, err
+	}
+	if err := container.Provide(ratelimit.NewLedger); err != nil {
 		return nil, err
 	}
 	if err := container.Provide(keypool.NewProvider); err != nil {

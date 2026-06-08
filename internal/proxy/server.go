@@ -18,6 +18,7 @@ import (
 	app_errors "autogateway/internal/errors"
 	"autogateway/internal/keypool"
 	"autogateway/internal/models"
+	"autogateway/internal/ratelimit"
 	"autogateway/internal/response"
 	"autogateway/internal/router_engine"
 	"autogateway/internal/services"
@@ -293,7 +294,7 @@ func (ps *ProxyServer) executeRequestWithRetry(
 ) {
 	cfg := group.EffectiveConfig
 
-	apiKey, err := ps.keyProvider.SelectKey(group.ID)
+	apiKey, err := ps.keyProvider.SelectKey(group.ID, ratelimit.Limits{RPM: cfg.RPMLimit, RPD: cfg.RPDLimit})
 	if err != nil {
 		logrus.Errorf("Failed to select a key for group %s on attempt %d: %v", group.Name, retryCount+1, err)
 		ps.markRoutingCandidate(c, http.StatusServiceUnavailable, "", 0)
