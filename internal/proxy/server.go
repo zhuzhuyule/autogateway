@@ -434,6 +434,10 @@ func (ps *ProxyServer) executeRequestWithRetry(
 			originalGroup.GroupType == "aggregate" &&
 			!c.Writer.Written() // 已经向客户端写过数据(stream first byte)就不能再切
 
+		// 防双重记账: canFailover 路径在记账点 A 记录失败后设为 true,
+		// isLastAttempt 路径(记账点 B)检查此标志避免对同一次物理失败二次计入.
+		recordedSubGroupFailure := false
+
 		if canFailover {
 			if attemptedSubGroups == nil {
 				attemptedSubGroups = make(map[string]bool)
@@ -445,6 +449,7 @@ func (ps *ProxyServer) executeRequestWithRetry(
 				retryAfter = parseRetryAfter(resp.Header)
 			}
 			ps.subGroupManager.RecordSubGroupResult(originalGroup.ID, group.Name, false, statusCode, parsedError, retryAfter)
+			recordedSubGroupFailure = true
 
 			// P4 智能路由 candidate pool 优先: 如果入口解析了 candidates,
 			// fallback 从池里取下一个 (跟 SubGroupManager 老路径互斥).
@@ -512,7 +517,7 @@ func (ps *ProxyServer) executeRequestWithRetry(
 		// 如果是最后一次尝试,直接返回错误,不再递归
 		if isLastAttempt {
 			// 该子分组的最终失败 → 通知熔断器(failover 路径已记录,不会重复:这里走的是 standard 直连或 aggregate 全部 sub-group 都尝试过)
-			if originalGroup.GroupType == "aggregate" && group.Name != originalGroup.Name {
+			if originalGroup.GroupType == "aggregate" && group.Name != originalGroup.Name && !recordedSubGroupFailure {
 				var retryAfter time.Duration
 				if resp != nil {
 					retryAfter = parseRetryAfter(resp.Header)
