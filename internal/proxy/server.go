@@ -294,6 +294,9 @@ func (ps *ProxyServer) executeRequestWithRetry(
 ) {
 	cfg := group.EffectiveConfig
 
+	// 速率账本: 每次 failover 进入本函数都会对所选 key 预占一次额度 (Record).
+	// 跨 N 个 key 的 failover 会预占 N 次 — 这是"预占"模型的预期行为 (每把 key
+	// 确实各收到一次请求尝试), 偏保守不会少计, 符合"保守不超限"目标.
 	apiKey, err := ps.keyProvider.SelectKey(group.ID, ratelimit.Limits{RPM: cfg.RPMLimit, RPD: cfg.RPDLimit})
 	if err != nil {
 		logrus.Errorf("Failed to select a key for group %s on attempt %d: %v", group.Name, retryCount+1, err)
