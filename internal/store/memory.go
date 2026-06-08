@@ -13,10 +13,17 @@ type memoryStoreItem struct {
 	expiresAt int64 // Unix-nano timestamp. 0 for no expiry.
 }
 
+// counterEntry holds a counter value and its expiration time.
+type counterEntry struct {
+	val      int64
+	expireAt time.Time // zero value = no expiry
+}
+
 // MemoryStore is an in-memory key-value store that is safe for concurrent use.
 type MemoryStore struct {
 	mu            sync.RWMutex
 	data          map[string]any
+	counters      map[string]*counterEntry
 	muSubscribers sync.RWMutex
 	subscribers   map[string]map[chan *Message]struct{}
 }
@@ -25,6 +32,7 @@ type MemoryStore struct {
 func NewMemoryStore() *MemoryStore {
 	s := &MemoryStore{
 		data:        make(map[string]any),
+		counters:    make(map[string]*counterEntry),
 		subscribers: make(map[string]map[chan *Message]struct{}),
 	}
 	return s
@@ -215,6 +223,39 @@ func (s *MemoryStore) HIncrBy(key, field string, incr int64) (int64, error) {
 	hash[field] = strconv.FormatInt(newVal, 10)
 
 	return newVal, nil
+}
+
+// --- Counter operations (fixed-window primitives) ---
+
+// IncrWithTTL atomically increments the integer counter for key and returns
+// the new value. If the key does not exist or has expired, it is reset to 0
+// first and the provided ttl is applied to the new entry.
+func (s *MemoryStore) IncrWithTTL(key string, ttl time.Duration) (int64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := time.Now()
+	e := s.counters[key]
+	if e == nil || (!e.expireAt.IsZero() && now.After(e.expireAt)) {
+		e = &counterEntry{val: 0}
+		if ttl > 0 {
+			e.expireAt = now.Add(ttl)
+		}
+		s.counters[key] = e
+	}
+	e.val++
+	return e.val, nil
+}
+
+// GetInt returns the current counter value for key.
+// Returns (0, nil) if the key does not exist or has expired.
+func (s *MemoryStore) GetInt(key string) (int64, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	e := s.counters[key]
+	if e == nil || (!e.expireAt.IsZero() && time.Now().After(e.expireAt)) {
+		return 0, nil
+	}
+	return e.val, nil
 }
 
 // --- LIST operations ---
@@ -457,6 +498,7 @@ func (s *MemoryStore) Clear() error {
 
 	// Clear all data
 	s.data = make(map[string]any)
+	s.counters = make(map[string]*counterEntry)
 
 	return nil
 }

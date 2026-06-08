@@ -100,6 +100,37 @@ func (s *RedisStore) HIncrBy(key, field string, incr int64) (int64, error) {
 	return s.client.HIncrBy(context.Background(), s.prefixKey(key), field, incr).Result()
 }
 
+// --- Counter operations (fixed-window primitives) ---
+
+// incrTTLScript: INCR, then on first creation (result==1) set PEXPIRE atomically.
+var incrTTLScript = redis.NewScript(`
+local v = redis.call('INCR', KEYS[1])
+if v == 1 then
+  redis.call('PEXPIRE', KEYS[1], ARGV[1])
+end
+return v
+`)
+
+// IncrWithTTL atomically increments the integer counter for key and returns
+// the new value. The ttl is applied only when the key is newly created (INCR
+// result == 1), preserving an existing window's expiry on subsequent calls.
+func (s *RedisStore) IncrWithTTL(key string, ttl time.Duration) (int64, error) {
+	return incrTTLScript.Run(context.Background(), s.client, []string{s.prefixKey(key)}, ttl.Milliseconds()).Int64()
+}
+
+// GetInt returns the current counter value for key.
+// Returns (0, nil) if the key does not exist.
+func (s *RedisStore) GetInt(key string) (int64, error) {
+	v, err := s.client.Get(context.Background(), s.prefixKey(key)).Int64()
+	if err != nil {
+		if errors.Is(err, redis.Nil) {
+			return 0, nil
+		}
+		return 0, err
+	}
+	return v, nil
+}
+
 // --- LIST operations ---
 
 func (s *RedisStore) LPush(key string, values ...any) error {

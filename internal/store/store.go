@@ -40,6 +40,12 @@ type Store interface {
 	// SetNX sets a key-value pair if the key does not already exist.
 	SetNX(key string, value []byte, ttl time.Duration) (bool, error)
 
+	// IncrWithTTL 原子自增 key 的整数值并返回结果；仅当本次新建（结果==1）时设 ttl。
+	IncrWithTTL(key string, ttl time.Duration) (int64, error)
+
+	// GetInt 读取 key 的整数计数；key 不存在返回 (0, nil)。
+	GetInt(key string) (int64, error)
+
 	// HASH operations
 	HSet(key string, values map[string]any) error
 	HGetAll(key string) (map[string]string, error)
