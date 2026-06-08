@@ -296,7 +296,7 @@ func (ps *ProxyServer) executeRequestWithRetry(
 	apiKey, err := ps.keyProvider.SelectKey(group.ID)
 	if err != nil {
 		logrus.Errorf("Failed to select a key for group %s on attempt %d: %v", group.Name, retryCount+1, err)
-		ps.markRoutingCandidate(c, http.StatusServiceUnavailable)
+		ps.markRoutingCandidate(c, http.StatusServiceUnavailable, "", 0)
 		response.Error(c, app_errors.NewAPIError(app_errors.ErrNoKeysAvailable, err.Error()))
 		ps.logRequest(c, originalGroup, group, nil, startTime, http.StatusServiceUnavailable, err, isStream, "", channelHandler, bodyBytes, models.RequestTypeFinal)
 		return
@@ -419,7 +419,11 @@ func (ps *ProxyServer) executeRequestWithRetry(
 			logrus.Debugf("Request failed with status %d (attempt %d/%d) for key %s. Parsed Error: %s", statusCode, retryCount+1, cfg.MaxRetries, utils.MaskAPIKey(apiKey.KeyValue), parsedError)
 		}
 
-		ps.markRoutingCandidate(c, statusCode)
+		var raCand time.Duration
+		if resp != nil {
+			raCand = parseRetryAfter(resp.Header)
+		}
+		ps.markRoutingCandidate(c, statusCode, parsedError, raCand)
 
 		// 使用解析后的错误信息更新密钥状态
 		ps.keyProvider.UpdateStatus(apiKey, group, false, parsedError)
@@ -440,7 +444,7 @@ func (ps *ProxyServer) executeRequestWithRetry(
 			if resp != nil {
 				retryAfter = parseRetryAfter(resp.Header)
 			}
-			ps.subGroupManager.RecordSubGroupResult(originalGroup.ID, group.Name, false, statusCode, retryAfter)
+			ps.subGroupManager.RecordSubGroupResult(originalGroup.ID, group.Name, false, statusCode, parsedError, retryAfter)
 
 			// P4 智能路由 candidate pool 优先: 如果入口解析了 candidates,
 			// fallback 从池里取下一个 (跟 SubGroupManager 老路径互斥).
@@ -513,7 +517,7 @@ func (ps *ProxyServer) executeRequestWithRetry(
 				if resp != nil {
 					retryAfter = parseRetryAfter(resp.Header)
 				}
-				ps.subGroupManager.RecordSubGroupResult(originalGroup.ID, group.Name, false, statusCode, retryAfter)
+				ps.subGroupManager.RecordSubGroupResult(originalGroup.ID, group.Name, false, statusCode, parsedError, retryAfter)
 			}
 			var errorJSON map[string]any
 			if err := json.Unmarshal([]byte(errorMessage), &errorJSON); err == nil {
@@ -530,12 +534,12 @@ func (ps *ProxyServer) executeRequestWithRetry(
 
 	// ps.keyProvider.UpdateStatus(apiKey, group, true) // 请求成功不再重置成功次数，减少IO消耗
 	logrus.Debugf("Request for group %s succeeded on attempt %d with key %s", group.Name, retryCount+1, utils.MaskAPIKey(apiKey.KeyValue))
-	ps.markRoutingCandidate(c, resp.StatusCode)
+	ps.markRoutingCandidate(c, resp.StatusCode, "", 0)
 
 	// 通知熔断器:该子分组本次请求成功(若是聚合请求)
 	// P5.3: 同步 record latency, 让 selectByWeight 按 EWMA 减权慢的 sub-group.
 	if originalGroup.GroupType == "aggregate" && group.Name != originalGroup.Name {
-		ps.subGroupManager.RecordSubGroupResult(originalGroup.ID, group.Name, true, resp.StatusCode, 0)
+		ps.subGroupManager.RecordSubGroupResult(originalGroup.ID, group.Name, true, resp.StatusCode, "", 0)
 		ps.subGroupManager.RecordLatency(originalGroup.ID, group.Name, time.Since(startTime))
 	}
 
@@ -560,7 +564,7 @@ func (ps *ProxyServer) executeRequestWithRetry(
 	ps.logRequest(c, originalGroup, group, apiKey, startTime, resp.StatusCode, nil, isStream, upstreamURL, channelHandler, bodyBytes, models.RequestTypeFinal)
 }
 
-func (ps *ProxyServer) markRoutingCandidate(c *gin.Context, statusCode int) {
+func (ps *ProxyServer) markRoutingCandidate(c *gin.Context, statusCode int, parsedError string, retryAfter time.Duration) {
 	if ps.selector == nil {
 		return
 	}
@@ -572,7 +576,7 @@ func (ps *ProxyServer) markRoutingCandidate(c *gin.Context, statusCode int) {
 	if !ok || candidate == nil {
 		return
 	}
-	ps.selector.MarkResponse(*candidate, statusCode)
+	ps.selector.MarkResponse(*candidate, statusCode, parsedError, retryAfter)
 }
 
 func (ps *ProxyServer) hasRoutingCandidate(c *gin.Context) bool {
