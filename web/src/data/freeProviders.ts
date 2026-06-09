@@ -23,6 +23,8 @@ export interface FreeModel {
   modelId: string; // 上游真实模型 ID
   tier: ModelTier;
   notes?: string; // 限速/特性等
+  /** 开发者验证过稳定可用, 在 UI 标 ⭐推荐; 仅标确有把握的 */
+  recommended?: boolean;
 }
 
 export interface FreeProvider {
@@ -37,6 +39,18 @@ export interface FreeProvider {
   testModel: string;
   models: string[];
   paidModels?: string[];
+  /**
+   * 图像生成模型 (走 /v1/images/generations). 跟 chat models 分开管理:
+   * Playground send() 按 modalityOf() 分流, image 模型用 prompt → image URL
+   * 而非 chat completions. 在上游 Registry capabilities 给出前的本地兜底.
+   */
+  imageModels?: string[];
+  /**
+   * 视频生成模型 (走 /v1/videos/* 或厂商专有端点, 通常异步).
+   * 当前 v1 Playground 不支持视频回放, 但保留数据以便 modalityOf() 识别 +
+   * picker 展示模态标签.
+   */
+  videoModels?: string[];
   /**
    * 上游用 obfuscated model ID(讯飞:xop35qwen2b 这类),但管理后台想给用户
    * 看人类友好的名字(Qwen3.5-2B)。这里只放映射 — `models` / `paidModels` /
@@ -448,29 +462,22 @@ export const FREE_PROVIDERS: FreeProvider[] = [
   {
     id: "longcat",
     name: "美团 LongCat",
-    freeTier: "Flash-Lite 50M · 其余共享 500K tokens/day",
-    description: "美团长文本模型,Chat/Thinking/Lite/Omni 多档,OpenAI+Anthropic 兼容",
+    freeTier: "内测免费",
+    description: "美团 Agentic 旗舰长文本模型, OpenAI+Anthropic 兼容",
     signupUrl: "https://longcat.chat/platform",
     docsUrl: "https://longcat.chat/platform/docs/zh/",
     channelType: "openai",
     baseUrl: "https://api.longcat.chat/openai/v1",
     // 模型 ID 是 PascalCase (官方文档 longcat.chat/platform/docs/zh/)
-    testModel: "LongCat-Flash-Lite",
-    models: [
-      "LongCat-Flash-Lite",
-      "LongCat-Flash-Chat",
-      "LongCat-Flash-Thinking",
-      "LongCat-Flash-Thinking-2601",
-      "LongCat-Flash-Omni-2603",
-      "LongCat-Flash-Chat-2602-Exp",
-      "LongCat-2.0-Preview",
-    ],
+    // 2026-06: 平台下架 Flash 全系列, 仅剩 LongCat-2.0-Preview
+    testModel: "LongCat-2.0-Preview",
+    models: ["LongCat-2.0-Preview"],
     recommendedGroupName: "longcat",
     recommendedDisplayName: "美团 LongCat",
     upstreamHosts: ["api.longcat.chat"],
     badge: "high-quota",
     staticModels: true,
-    verifiedAt: "2026-04",
+    verifiedAt: "2026-06",
   },
   {
     id: "xingchen",
@@ -681,6 +688,44 @@ export const FREE_PROVIDERS: FreeProvider[] = [
     upstreamHosts: ["api.kilo.ai"],
     verifiedAt: "2026-04",
   },
+  {
+    id: "agnes",
+    name: "Agnes AI",
+    freeTier: "免费 AI Gateway, 注册即用",
+    description: "Sapiens AI 聚合网关, Agnes Flash 文本对话",
+    signupUrl: "https://platform.agnes-ai.com/settings/apiKeys",
+    docsUrl: "https://agnes-ai.com/doc/quickstart",
+    channelType: "openai",
+    baseUrl: "https://apihub.agnes-ai.com/v1",
+    testModel: "agnes-1.5-flash",
+    // 仅列 chat 类 (agnes-image-* / agnes-video-* 走单独生成接口, 非 chat completions)
+    models: ["agnes-1.5-flash", "agnes-2.0-flash"],
+    imageModels: ["agnes-image-2.0-flash", "agnes-image-2.1-flash"],
+    videoModels: ["agnes-video-v2.0"],
+    recommendedGroupName: "agnes",
+    recommendedDisplayName: "Agnes AI",
+    upstreamHosts: ["apihub.agnes-ai.com"],
+    badge: "multi-model",
+    verifiedAt: "2026-06",
+  },
+  {
+    id: "sensenova",
+    name: "商汤 SenseNova",
+    freeTier: "每模型 5h/1500 次 (特殊模型除外) · 最多 20 API Key",
+    description: "商汤日日新 Token Plan, 原生多模态 + Cowork-Skills 办公特化",
+    signupUrl: "https://platform.sensenova.cn/console/keys",
+    docsUrl: "https://platform.sensenova.cn/docs",
+    channelType: "openai",
+    // Token Plan 免费档独立 host, 跟付费 api.sensenova.cn 区分
+    baseUrl: "https://token.sensenova.cn/v1",
+    testModel: "sensenova-6.7-flash-lite",
+    models: ["sensenova-6.7-flash-lite", "sensenova-u1-fast", "deepseek-v4-flash"],
+    recommendedGroupName: "sensenova",
+    recommendedDisplayName: "商汤 SenseNova",
+    upstreamHosts: ["token.sensenova.cn", "api.sensenova.cn"],
+    badge: "multi-model",
+    verifiedAt: "2026-06",
+  },
 ];
 
 // 官方付费 LLM provider 模板. 跟 FREE_PROVIDERS 分开维护, 避免污染"免费精选"
@@ -848,7 +893,7 @@ export function findProviderByUpstreams(
 export const FREE_MODELS: FreeModel[] = [
   // Groq
   { providerId: "groq", modelId: "llama-3.1-8b-instant", tier: "fast", notes: "极速小模型" },
-  { providerId: "groq", modelId: "llama-3.3-70b-versatile", tier: "balanced", notes: "日常主力" },
+  { providerId: "groq", modelId: "llama-3.3-70b-versatile", tier: "balanced", notes: "日常主力", recommended: true },
   {
     providerId: "groq",
     modelId: "llama-4-scout-17b-16e-instruct",
@@ -862,14 +907,14 @@ export const FREE_MODELS: FreeModel[] = [
     notes: "多模态旗舰",
   },
   { providerId: "groq", modelId: "qwen3-32b", tier: "balanced" },
-  { providerId: "groq", modelId: "gpt-oss-120b", tier: "max", notes: "OpenAI 开源 120B" },
+  { providerId: "groq", modelId: "gpt-oss-120b", tier: "max", notes: "OpenAI 开源 120B", recommended: true },
   { providerId: "groq", modelId: "kimi-k2-instruct", tier: "max", notes: "262K 上下文" },
   { providerId: "groq", modelId: "deepseek-r1-distill-70b", tier: "max", notes: "推理增强" },
 
   // Cerebras
   { providerId: "cerebras", modelId: "llama3.1-8b", tier: "fast" },
-  { providerId: "cerebras", modelId: "llama-3.3-70b", tier: "balanced" },
-  { providerId: "cerebras", modelId: "gpt-oss-120b", tier: "max", notes: "OpenAI 开源 120B" },
+  { providerId: "cerebras", modelId: "llama-3.3-70b", tier: "balanced", recommended: true },
+  { providerId: "cerebras", modelId: "gpt-oss-120b", tier: "max", notes: "OpenAI 开源 120B", recommended: true },
   {
     providerId: "cerebras",
     modelId: "qwen-3-235b-a22b-instruct-2507",
@@ -884,8 +929,9 @@ export const FREE_MODELS: FreeModel[] = [
     modelId: "deepseek/deepseek-r1-0528:free",
     tier: "max",
     notes: "推理增强",
+    recommended: true,
   },
-  { providerId: "openrouter", modelId: "deepseek/deepseek-chat-v3-0324:free", tier: "balanced" },
+  { providerId: "openrouter", modelId: "deepseek/deepseek-chat-v3-0324:free", tier: "balanced", recommended: true },
   { providerId: "openrouter", modelId: "qwen/qwen3.6-plus:free", tier: "max", notes: "1M 上下文" },
   {
     providerId: "openrouter",
@@ -913,6 +959,7 @@ export const FREE_MODELS: FreeModel[] = [
     providerId: "together",
     modelId: "meta-llama/Llama-3.3-70B-Instruct-Turbo-Free",
     tier: "balanced",
+    recommended: true,
   },
   {
     providerId: "together",
@@ -926,6 +973,7 @@ export const FREE_MODELS: FreeModel[] = [
     providerId: "cloudflare",
     modelId: "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
     tier: "balanced",
+    recommended: true,
   },
   { providerId: "cloudflare", modelId: "@cf/meta/llama-3.1-8b-instruct-fp8-fast", tier: "fast" },
   {
@@ -945,6 +993,7 @@ export const FREE_MODELS: FreeModel[] = [
     modelId: "@cf/deepseek-ai/deepseek-r1-distill-qwen-32b",
     tier: "max",
     notes: "推理增强",
+    recommended: true,
   },
 
   // Mistral Experimental
@@ -953,6 +1002,7 @@ export const FREE_MODELS: FreeModel[] = [
     modelId: "mistral-small-latest",
     tier: "fast",
     notes: "Mistral Small 4",
+    recommended: true,
   },
   {
     providerId: "mistral",
@@ -960,7 +1010,7 @@ export const FREE_MODELS: FreeModel[] = [
     tier: "balanced",
     notes: "Mistral Medium 3",
   },
-  { providerId: "mistral", modelId: "mistral-large-latest", tier: "max", notes: "Mistral Large 3" },
+  { providerId: "mistral", modelId: "mistral-large-latest", tier: "max", notes: "Mistral Large 3", recommended: true },
   { providerId: "mistral", modelId: "open-mistral-nemo", tier: "fast" },
   { providerId: "mistral", modelId: "codestral-latest", tier: "balanced", notes: "代码专用" },
   { providerId: "mistral", modelId: "pixtral-large-latest", tier: "max", notes: "视觉多模态" },
@@ -971,25 +1021,27 @@ export const FREE_MODELS: FreeModel[] = [
     modelId: "gemini-2.5-flash",
     tier: "balanced",
     notes: "原生多模态,1M 上下文",
+    recommended: true,
   },
   {
     providerId: "google",
     modelId: "gemini-2.5-flash-lite",
     tier: "fast",
     notes: "1M 上下文",
+    recommended: true,
   },
   { providerId: "google", modelId: "gemini-2.0-flash", tier: "fast", notes: "原生多模态" },
 
   // Cohere
   { providerId: "cohere", modelId: "command-r7b-12-2024", tier: "fast" },
   { providerId: "cohere", modelId: "command-r-08-2024", tier: "balanced" },
-  { providerId: "cohere", modelId: "command-r-plus-08-2024", tier: "max" },
+  { providerId: "cohere", modelId: "command-r-plus-08-2024", tier: "max", recommended: true },
 
   // GitHub Models (Azure 托管)
   { providerId: "github-models", modelId: "gpt-4.1-mini", tier: "fast" },
-  { providerId: "github-models", modelId: "gpt-4.1", tier: "balanced", notes: "1M 上下文" },
+  { providerId: "github-models", modelId: "gpt-4.1", tier: "balanced", notes: "1M 上下文", recommended: true },
   { providerId: "github-models", modelId: "gpt-4o", tier: "balanced", notes: "多模态" },
-  { providerId: "github-models", modelId: "o4-mini", tier: "max", notes: "推理模型" },
+  { providerId: "github-models", modelId: "o4-mini", tier: "max", notes: "推理模型", recommended: true },
   { providerId: "github-models", modelId: "DeepSeek-R1", tier: "max", notes: "推理增强" },
   {
     providerId: "github-models",
@@ -1008,31 +1060,32 @@ export const FREE_MODELS: FreeModel[] = [
 
   // Hugging Face Router
   { providerId: "huggingface", modelId: "meta-llama/Llama-3.1-8B-Instruct", tier: "fast" },
-  { providerId: "huggingface", modelId: "Qwen/Qwen2.5-72B-Instruct", tier: "balanced" },
+  { providerId: "huggingface", modelId: "Qwen/Qwen2.5-72B-Instruct", tier: "balanced", recommended: true },
   { providerId: "huggingface", modelId: "mistralai/Mistral-7B-Instruct-v0.3", tier: "fast" },
   { providerId: "huggingface", modelId: "microsoft/Phi-3.5-mini-instruct", tier: "fast" },
 
   // Zhipu AI (GLM)
-  { providerId: "bigmodel", modelId: "GLM-4-Flash", tier: "fast", notes: "免费旗舰" },
+  { providerId: "bigmodel", modelId: "GLM-4-Flash", tier: "fast", notes: "免费旗舰", recommended: true },
   { providerId: "bigmodel", modelId: "GLM-4V-Flash", tier: "fast", notes: "视觉+文本" },
   { providerId: "bigmodel", modelId: "GLM-Z1-Flash", tier: "balanced", notes: "推理增强" },
 
   // NVIDIA NIM
-  { providerId: "nvidia", modelId: "deepseek-ai/deepseek-r1", tier: "max", notes: "推理增强" },
+  { providerId: "nvidia", modelId: "deepseek-ai/deepseek-r1", tier: "max", notes: "推理增强", recommended: true },
   { providerId: "nvidia", modelId: "nvidia/llama-3.1-nemotron-ultra-253b-v1", tier: "max" },
-  { providerId: "nvidia", modelId: "nvidia/nemotron-3-super-120b-a12b", tier: "max" },
+  { providerId: "nvidia", modelId: "nvidia/nemotron-3-super-120b-a12b", tier: "max", recommended: true },
   { providerId: "nvidia", modelId: "nvidia/nemotron-3-nano-30b-a3b", tier: "balanced" },
   { providerId: "nvidia", modelId: "meta/llama-3.1-405b-instruct", tier: "max" },
   { providerId: "nvidia", modelId: "qwen/qwen2.5-72b-instruct", tier: "balanced" },
   { providerId: "nvidia", modelId: "google/gemma-4-31b", tier: "balanced" },
 
   // SiliconFlow
-  { providerId: "siliconflow", modelId: "Qwen/Qwen3-8B", tier: "fast" },
+  { providerId: "siliconflow", modelId: "Qwen/Qwen3-8B", tier: "fast", recommended: true },
   {
     providerId: "siliconflow",
     modelId: "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B",
     tier: "balanced",
     notes: "推理增强",
+    recommended: true,
   },
   {
     providerId: "siliconflow",
@@ -1049,14 +1102,14 @@ export const FREE_MODELS: FreeModel[] = [
   },
 
   // LLM7.io
-  { providerId: "llm7", modelId: "deepseek-r1-0528", tier: "max", notes: "推理增强" },
-  { providerId: "llm7", modelId: "deepseek-v3-0324", tier: "balanced" },
+  { providerId: "llm7", modelId: "deepseek-r1-0528", tier: "max", notes: "推理增强", recommended: true },
+  { providerId: "llm7", modelId: "deepseek-v3-0324", tier: "balanced", recommended: true },
   { providerId: "llm7", modelId: "gemini-2.5-flash-lite", tier: "fast" },
   { providerId: "llm7", modelId: "gpt-4o-mini", tier: "fast" },
   { providerId: "llm7", modelId: "qwen2.5-coder-32b", tier: "balanced", notes: "代码专用" },
 
   // ModelScope
-  { providerId: "modelscope", modelId: "Qwen/Qwen3.5-35B-A3B", tier: "max", notes: "视觉+文本" },
+  { providerId: "modelscope", modelId: "Qwen/Qwen3.5-35B-A3B", tier: "max", notes: "视觉+文本", recommended: true },
   { providerId: "modelscope", modelId: "Qwen/Qwen3.5-27B", tier: "balanced" },
 
   // Kilo Code
@@ -1070,51 +1123,16 @@ export const FREE_MODELS: FreeModel[] = [
   },
 
   // SambaNova Cloud (registry: ofind 2026-05; trial-credits $5/3mo, latency < 1s)
-  { providerId: "sambanova", modelId: "Meta-Llama-3.3-70B-Instruct", tier: "balanced", notes: "70B · 高速推理" },
+  { providerId: "sambanova", modelId: "Meta-Llama-3.3-70B-Instruct", tier: "balanced", notes: "70B · 高速推理", recommended: true },
   { providerId: "sambanova", modelId: "Llama-4-Maverick-17B-128E-Instruct", tier: "max", notes: "多模态旗舰" },
   { providerId: "sambanova", modelId: "DeepSeek-V3.1", tier: "max" },
-  { providerId: "sambanova", modelId: "DeepSeek-V3.2", tier: "max" },
+  { providerId: "sambanova", modelId: "DeepSeek-V3.2", tier: "max", recommended: true },
   { providerId: "sambanova", modelId: "MiniMax-M2.7", tier: "balanced" },
-  { providerId: "sambanova", modelId: "gpt-oss-120b", tier: "max", notes: "OpenAI 开源 120B" },
+  { providerId: "sambanova", modelId: "gpt-oss-120b", tier: "max", notes: "OpenAI 开源 120B", recommended: true },
   { providerId: "sambanova", modelId: "gemma-3-12b-it", tier: "fast" },
 
   // 美团 LongCat (PascalCase IDs, 官方文档校对)
-  {
-    providerId: "longcat",
-    modelId: "LongCat-Flash-Lite",
-    tier: "fast",
-    notes: "5000万 tokens/day 独立免费",
-  },
-  {
-    providerId: "longcat",
-    modelId: "LongCat-Flash-Chat",
-    tier: "balanced",
-    notes: "高性能通用对话",
-  },
-  {
-    providerId: "longcat",
-    modelId: "LongCat-Flash-Thinking",
-    tier: "max",
-    notes: "深度思考(已升级到 -2601)",
-  },
-  {
-    providerId: "longcat",
-    modelId: "LongCat-Flash-Thinking-2601",
-    tier: "max",
-    notes: "深度思考升级版",
-  },
-  {
-    providerId: "longcat",
-    modelId: "LongCat-Flash-Omni-2603",
-    tier: "max",
-    notes: "多模态,仅 OpenAI 格式",
-  },
-  {
-    providerId: "longcat",
-    modelId: "LongCat-Flash-Chat-2602-Exp",
-    tier: "balanced",
-    notes: "实验版,仅 OpenAI 格式",
-  },
+  // 2026-06: 平台下架 Flash 全系列, 仅剩 LongCat-2.0-Preview
   {
     providerId: "longcat",
     modelId: "LongCat-2.0-Preview",
@@ -1156,11 +1174,21 @@ export const FREE_MODELS: FreeModel[] = [
   { providerId: "gitee", modelId: "GLM-4-9B-0414", tier: "fast", notes: "智谱 9B" },
   { providerId: "gitee", modelId: "glm-4-9b-chat", tier: "fast", notes: "智谱 9B chat" },
 
+  // Agnes AI (Sapiens AI 聚合网关, 仅 chat 类; image/video 走单独接口不在此列)
+  { providerId: "agnes", modelId: "agnes-1.5-flash", tier: "fast", notes: "默认对话" },
+  { providerId: "agnes", modelId: "agnes-2.0-flash", tier: "balanced", notes: "新版对话" },
+
+  // 商汤 SenseNova (Token Plan 公测期, 2026-06 复核)
+  // 通用配额 5h/1500 次, deepseek-v4-flash 等"特殊模型"另算, 见官方文档
+  { providerId: "sensenova", modelId: "sensenova-6.7-flash-lite", tier: "fast", notes: "办公轻量" },
+  { providerId: "sensenova", modelId: "sensenova-u1-fast", tier: "balanced", notes: "原生多模态" },
+  { providerId: "sensenova", modelId: "deepseek-v4-flash", tier: "max", notes: "256K 上下文" },
+
   // AIHubMix
   { providerId: "aihubmix", modelId: "gpt-4o-mini", tier: "fast" },
-  { providerId: "aihubmix", modelId: "gpt-4o", tier: "balanced", notes: "多模态" },
+  { providerId: "aihubmix", modelId: "gpt-4o", tier: "balanced", notes: "多模态", recommended: true },
   { providerId: "aihubmix", modelId: "claude-opus-4-7", tier: "max" },
-  { providerId: "aihubmix", modelId: "gemini-2.0-flash", tier: "fast" },
+  { providerId: "aihubmix", modelId: "gemini-2.0-flash", tier: "fast", recommended: true },
   { providerId: "aihubmix", modelId: "deepseek-v4-flash", tier: "fast" },
   { providerId: "aihubmix", modelId: "deepseek-r1", tier: "max", notes: "推理增强" },
 ];
@@ -1216,6 +1244,24 @@ export function isFree(
   // 不再用 :free 后缀启发式 / pricing=0 推断 / 静态表 — 全部移除以符合
   // 用户契约: "Free 标志的判定完全取决于该模型是否出现在我们的 free models 列表中".
   return isFreeFromRegistry(providerId, modelId);
+}
+
+// recommendedModelIds 返回推荐模型 id 集合; 给定 providerId 则只取该 provider 的。
+export function recommendedModelIds(providerId?: string): Set<string> {
+  const s = new Set<string>();
+  for (const m of FREE_MODELS) {
+    if (m.recommended && (!providerId || m.providerId === providerId)) {
+      s.add(m.modelId);
+    }
+  }
+  return s;
+}
+
+// isRecommended 单点判定 (UI 徽标用)。
+export function isRecommended(providerId: string, modelId: string): boolean {
+  return FREE_MODELS.some(
+    (m) => m.recommended && m.providerId === providerId && m.modelId === modelId,
+  );
 }
 
 /**
@@ -1286,3 +1332,59 @@ const GLOBAL_MODEL_NAMES: Record<string, string> = (() => {
   }
   return out;
 })();
+
+// ============================================================================
+// 模态识别 — Playground 按返回值决定走 chat / image / video 哪个端点
+// ============================================================================
+
+export type Modality = "chat" | "image" | "video";
+
+/**
+ * 判定 model 的模态. 优先级:
+ *   1. FreeModels Registry capabilities (image-generation / video-generation / chat)
+ *   2. 本地 freeProviders.ts 的 imageModels / videoModels 数组
+ *   3. model id 启发式 (含 image / dalle / sd / flux / video / sora 等关键字)
+ *   4. 默认 "chat"
+ *
+ * 调用方传 capabilities 是为了让 Registry 数据未到位时 (e.g. 加载中) 也能
+ * 用本地兜底, 而不是强依赖 Registry.
+ */
+export function modalityOf(
+  providerId: string | undefined,
+  modelId: string,
+  capabilities?: string[]
+): Modality {
+  if (!modelId) {
+    return "chat";
+  }
+  if (capabilities && capabilities.length > 0) {
+    if (capabilities.includes("image-generation")) {
+      return "image";
+    }
+    if (capabilities.includes("video-generation")) {
+      return "video";
+    }
+    // 显式 chat / text-generation 优先于启发式
+    if (capabilities.includes("chat") || capabilities.includes("text-generation")) {
+      return "chat";
+    }
+  }
+  if (providerId) {
+    const p = getProviderById(providerId);
+    if (p?.imageModels?.includes(modelId)) {
+      return "image";
+    }
+    if (p?.videoModels?.includes(modelId)) {
+      return "video";
+    }
+  }
+  // id 启发式 — 用 word boundary 避免误伤 (e.g. "chimage" 这种不该命中)
+  const lower = modelId.toLowerCase();
+  if (/(?:^|[/_-])(image|img|dalle|sd|sdxl|flux|imagen)(?:[/_-]|$)/.test(lower)) {
+    return "image";
+  }
+  if (/(?:^|[/_-])(video|sora|svd|veo|gen-?3)(?:[/_-]|$)/.test(lower)) {
+    return "video";
+  }
+  return "chat";
+}
