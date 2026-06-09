@@ -15,14 +15,16 @@
 
 1. 在 `FREE_MODELS` 标记一批「推荐」模型（开发者验证稳定可用）。
 2. UI 给推荐模型加 ⭐徽标，Model Catalog 加「仅推荐」筛选。
-3. 新建 group 时可优先暴露推荐模型（默认行为可控，不限制 available_models 全集）。
+3. 创建流程 / 分组详情的模型列表也带 ⭐（**纯展示标记**）。
+
+**范围限定：本期只做「展示标记 + 筛选」，不改任何创建 group 的 `exposed_models`/`available_models` 默认逻辑**（用户决策）。
 
 ## 非目标（YAGNI）
 
+- **不改创建 group 的 exposed 默认逻辑** —— 推荐仅作 ⭐ 展示标记，`bootstrapExposedModels` 不动。
 - 轨道二「投票数据展示」（RequestLog 聚合 + 排行）—— 后续单独 spec。
 - 自动推荐（成功率高自动升推荐）—— 后续。
 - 后端 / DB 改动 —— 推荐是 `freeProviders.ts` 的前端静态元数据，不进 DB。
-- auto 路由分档强制只用推荐 —— 本期只影响创建时的 exposed 默认值，不改路由逻辑。
 
 ## 设计
 
@@ -41,45 +43,33 @@ export function isRecommended(providerId: string, modelId: string): boolean
 ### 2. UI：⭐徽标 + 筛选
 
 - **Model Catalog**（`views/ModelCatalog.vue`）：推荐模型显示 ⭐ 徽标；新增「仅推荐」筛选 pill（与现有 free-only / tier filter 同款交互）。
-- **创建流程 / 分组详情**（`V3NewGroupFlow.vue` / `V3GroupDetail.vue` 的模型列表）：推荐模型带 ⭐。
+- **创建流程 / 分组详情**（`V3NewGroupFlow.vue` / `V3GroupDetail.vue` 的模型列表）：推荐模型带 ⭐（纯展示）。
 - 复用现有 badge 组件风格（`common/SpeedBadge.vue` 等），不新造设计语言。
 
-### 3. 创建 group：默认优先推荐
+### 3. 不改创建逻辑
 
-`bootstrapExposedModels` 增强（不破坏现有签名，加可选参数）：
-```ts
-export function bootstrapExposedModels(
-  provider: FreeProvider | undefined,
-  selectedTestModel?: string,
-  recommendedOnly?: boolean,   // 新增：true 时只返回推荐子集
-): string[]
-```
-- `recommendedOnly` 为 true 且该 provider 有推荐模型 → 只返回推荐子集（+ selectedTestModel）。
-- 否则保持现有逻辑（全部判免费的）。
-- `available_models` **不变**（仍全集，能调全部）；只影响 `exposed_models` 默认值。
-- 创建流程 UI 加一个开关「仅暴露推荐模型」（默认开 or 关，见下决策），开 → 传 `recommendedOnly=true`。用户随时可在分组配置里改 exposed。
-
-> 默认开关取「默认开启（仅推荐）」：契合「开箱即用、保证可用」的目标；用户想要全部时一键关掉。
+`bootstrapExposedModels` 与创建 group 的 `exposed_models`/`available_models` 逻辑**完全不动**。推荐只是叠加在模型上的 ⭐ 展示标记 + 筛选维度。
 
 ## 错误处理 / 边界
 
-- provider 无任何推荐模型时，`recommendedOnly=true` 回退为现有全集逻辑（不返回空 exposed，避免 group 无可用模型）。
 - registry 动态模型不在推荐清单里 → 不带 ⭐，正常显示（推荐是叠加标记，非过滤）。
+- 「仅推荐」筛选下若结果为空 → 正常显示空态（不报错）。
 
 ## 测试
 
 - 前端类型检查 `npm run type-check` 通过。
-- `recommendedModelIds`/`isRecommended`/`bootstrapExposedModels(recommendedOnly)` 若项目有前端单测框架则补表驱动用例；无则人工核对 + 类型保证。
-- 人工核对：FREE_MODELS 标记语法正确；ModelCatalog 筛选/徽标渲染；创建流程开关生效（exposed 随开关变化）。
+- `recommendedModelIds`/`isRecommended` 若项目有前端单测框架则补表驱动用例；无则人工核对 + 类型保证。
+- 人工核对：FREE_MODELS 标记语法正确；ModelCatalog 筛选/徽标渲染。
 
 ## 验收标准
 
 - `npm run build`（前端）无类型错误；`go build ./...` 不受影响（纯前端）。
 - FREE_MODELS 里推荐模型带 ⭐，Model Catalog「仅推荐」筛选可用。
-- 新建 group「仅暴露推荐模型」开关默认开 → exposed_models 为推荐子集；关 → 全集；available_models 始终全集。
-- 无推荐模型的 provider 不会因开关变成空 exposed。
+- 创建流程/分组详情模型列表对推荐模型展示 ⭐。
+- 创建 group 的 exposed_models/available_models 行为**与改造前完全一致**（零回归）。
 
 ## 影响面
 
-- 改 `web/src/data/freeProviders.ts`（FreeModel 加字段 + FREE_MODELS 标记 + helper + bootstrapExposedModels）、`web/src/views/ModelCatalog.vue`（徽标+筛选）、`web/src/components/v3/V3NewGroupFlow.vue`（开关+传参）、可能 `V3GroupDetail.vue`（徽标）。
+- 改 `web/src/data/freeProviders.ts`（FreeModel 加 `recommended` 字段 + FREE_MODELS 标记 + `isRecommended`/`recommendedModelIds` helper）、`web/src/views/ModelCatalog.vue`（徽标+筛选）、模型列表展示处（`V3NewGroupFlow.vue`/`V3GroupDetail.vue` 的 ⭐ 展示）。
+- **不动** `bootstrapExposedModels` 及任何创建逻辑。
 - 无后端、无 DB、无 i18n（徽标文案少量，按现有 locale 模式加）。
