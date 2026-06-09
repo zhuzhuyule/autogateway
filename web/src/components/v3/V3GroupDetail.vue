@@ -7,7 +7,7 @@ import GroupCopyModal from "@/components/keys/GroupCopyModal.vue";
 import GroupFormModal from "@/components/keys/GroupFormModal.vue";
 import ModelAliasModal from "@/components/keys/ModelAliasModal.vue";
 import V3SubGroupTable from "@/components/v3/V3SubGroupTable.vue";
-import { findFreeModel, findProviderByUpstreams, isFree } from "@/data/freeProviders";
+import { findFreeModel, findProviderByUpstreams, isFree, isRecommended } from "@/data/freeProviders";
 import type { APIKey, Group, GroupStatsResponse, KeyStatus, SubGroupInfo } from "@/types/models";
 import { appState, triggerSyncOperationRefresh } from "@/utils/app-state";
 import { copy as copyToClipboard } from "@/utils/clipboard";
@@ -841,6 +841,13 @@ function isFreeModel(modelId: string): boolean {
   return isFree(matchedProvider.value?.id, modelId) === true;
 }
 
+// ⭐推荐徽标：仅在能确定 providerId 时判定，aggregate 无单一 provider → false
+function isRecommendedModel(modelId: string): boolean {
+  const pid = matchedProvider.value?.id;
+  if (!pid) return false;
+  return isRecommended(pid, modelId);
+}
+
 // 注: freeVariantFor 已被简化的 FreeBadge 替代 (v3.free 单一显示),
 // 但 isFreeModel 仍用于过滤 (free/paid 列表). 保留下行 export 给可能的
 // 其它消费者; 当前文件内部不再调用 (避免 TS6133 unused 错).
@@ -849,11 +856,84 @@ function isFreeModel(modelId: string): boolean {
 // 调用 POST /api/groups/:id/test-model, 后端用一个活跃 key 跑一次最小载荷的
 // ValidateKey (aggregate 会先解析到 sub-group). 测试不会标记 key invalid.
 const testingModels = ref<Set<string>>(new Set());
-type ModelTestState = { ok: boolean; ms: number; statusCode: number; error?: string; resolved?: string; viaAgg?: boolean };
+type ModelTestState = {
+  ok: boolean;
+  ms: number;
+  statusCode: number;
+  error?: string;
+  resolved?: string;
+  viaAgg?: boolean;
+  // localStorage 持久化时间戳, 让 hover tooltip 能显示 "5 分钟前测过"
+  testedAt?: number;
+};
 const modelTestResults = ref<Record<string, ModelTestState>>({});
+
+// localStorage key: 按 group_id 隔离, 切换分组互不干扰
+function testResultsKey(gid: number | undefined): string {
+  return `model_test_results_${gid ?? "none"}`;
+}
+
+// 切换 group 时从 localStorage 读上次结果. 没数据就空 map, 用户重测.
+watch(
+  () => props.group?.id,
+  (newId) => {
+    if (!newId) {
+      modelTestResults.value = {};
+      return;
+    }
+    try {
+      const raw = localStorage.getItem(testResultsKey(newId));
+      modelTestResults.value = raw ? (JSON.parse(raw) as Record<string, ModelTestState>) : {};
+    } catch {
+      modelTestResults.value = {};
+    }
+  },
+  { immediate: true },
+);
+
+function persistTestResults() {
+  const gid = props.group?.id;
+  if (!gid) {
+    return;
+  }
+  try {
+    localStorage.setItem(testResultsKey(gid), JSON.stringify(modelTestResults.value));
+  } catch {
+    /* quota / private mode — silent */
+  }
+}
 
 function modelTestState(modelId: string): ModelTestState | undefined {
   return modelTestResults.value[modelId];
+}
+
+// hover tooltip 文本: 成功/失败 + 耗时 + 状态码 + error + 多久前
+function modelTestTooltip(modelId: string): string {
+  const s = modelTestResults.value[modelId];
+  if (!s) {
+    return t("v3.testModel");
+  }
+  const parts: string[] = [];
+  parts.push(s.ok ? "✓ OK" : "✗ FAIL");
+  if (s.statusCode) {
+    parts.push(`HTTP ${s.statusCode}`);
+  }
+  parts.push(`${s.ms}ms`);
+  if (s.error) {
+    parts.push(s.error);
+  }
+  if (s.testedAt) {
+    const ago = Date.now() - s.testedAt;
+    const min = Math.round(ago / 60000);
+    if (min < 1) {
+      parts.push(t("v3.testJustNow"));
+    } else if (min < 60) {
+      parts.push(t("v3.testMinAgo", { n: min }));
+    } else {
+      parts.push(t("v3.testHourAgo", { n: Math.round(min / 60) }));
+    }
+  }
+  return parts.join(" · ");
 }
 
 async function testModel(modelId: string) {
@@ -875,8 +955,10 @@ async function testModel(modelId: string) {
         error: res.is_valid ? undefined : res.error || `HTTP ${res.status_code}`,
         resolved: res.resolved_group,
         viaAgg: res.is_via_aggregate,
+        testedAt: Date.now(),
       },
     };
+    persistTestResults();
     if (res.is_valid) {
       message.success(t("v3.modelTestOk", { model: modelId, ms: res.duration_ms }));
     } else {
@@ -886,8 +968,9 @@ async function testModel(modelId: string) {
     const err = (e as Error).message || String(e);
     modelTestResults.value = {
       ...modelTestResults.value,
-      [modelId]: { ok: false, ms: 0, statusCode: 0, error: err },
+      [modelId]: { ok: false, ms: 0, statusCode: 0, error: err, testedAt: Date.now() },
     };
+    persistTestResults();
     message.error(err);
   } finally {
     testingModels.value.delete(modelId);
@@ -2139,7 +2222,18 @@ const filterCounts = computed(() => ({
                   style="flex: 1; min-width: 0"
                   :title="t('v3.modelClickToCopy') || '点击复制 model ID'"
                   @click.stop="copyModelId(modelId)"
-                >{{ modelId }} <FreeBadge v-if="isFreeModel(modelId)" /></code>
+                >{{ modelId }} <FreeBadge v-if="isFreeModel(modelId)" /><span v-if="isRecommendedModel(modelId)" style="font-size: 10px; margin-left: 2px" title="推荐">⭐</span></code>
+                <span
+                  v-if="testingModels.has(modelId)"
+                  class="v5-modelcard__dot v5-modelcard__dot--testing"
+                  :title="t('v3.testModelTesting')"
+                />
+                <span
+                  v-else-if="modelTestState(modelId)"
+                  class="v5-modelcard__dot"
+                  :class="modelTestState(modelId)?.ok ? 'v5-modelcard__dot--ok' : 'v5-modelcard__dot--bad'"
+                  :title="modelTestTooltip(modelId)"
+                />
               </div>
               <div class="v5-modelcard__row" style="margin-top: 6px; align-items: center; gap: 6px">
                 <!-- P8.3: 测试按钮挪到 row 2 第一位, 默认位置可见可点 -->
@@ -2152,10 +2246,14 @@ const filterCounts = computed(() => ({
                         'v5-modelcard__test--ok': modelTestState(modelId)?.ok === true,
                         'v5-modelcard__test--bad': modelTestState(modelId)?.ok === false,
                       }"
+                      :title="modelTestTooltip(modelId)"
                       :disabled="testingModels.has(modelId)"
                       @click.stop="testModel(modelId)"
                     >
-                      <n-icon :component="testingModels.has(modelId) ? RefreshOutline : PulseOutline" :size="12" />
+                      <span v-if="testingModels.has(modelId)" class="v5-dots" aria-label="testing">
+                        <span></span><span></span><span></span>
+                      </span>
+                      <n-icon v-else :component="PulseOutline" :size="12" />
                     </button>
                   </template>
                   <template v-if="testingModels.has(modelId)">{{ t("v3.testModelTesting") }}</template>
@@ -2224,7 +2322,18 @@ const filterCounts = computed(() => ({
                   style="flex: 1; min-width: 0"
                   :title="t('v3.modelClickToCopy') || '点击复制 model ID'"
                   @click.stop="copyModelId(modelId)"
-                >{{ modelId }} <FreeBadge v-if="isFreeModel(modelId)" /></code>
+                >{{ modelId }} <FreeBadge v-if="isFreeModel(modelId)" /><span v-if="isRecommendedModel(modelId)" style="font-size: 10px; margin-left: 2px" title="推荐">⭐</span></code>
+                <span
+                  v-if="testingModels.has(modelId)"
+                  class="v5-modelcard__dot v5-modelcard__dot--testing"
+                  :title="t('v3.testModelTesting')"
+                />
+                <span
+                  v-else-if="modelTestState(modelId)"
+                  class="v5-modelcard__dot"
+                  :class="modelTestState(modelId)?.ok ? 'v5-modelcard__dot--ok' : 'v5-modelcard__dot--bad'"
+                  :title="modelTestTooltip(modelId)"
+                />
               </div>
               <div class="v5-modelcard__row" style="margin-top: 6px; align-items: center; gap: 6px">
                 <!-- P8.3: 测试按钮挪到 row 2 第一位, 默认位置可见可点 -->
@@ -2237,10 +2346,14 @@ const filterCounts = computed(() => ({
                         'v5-modelcard__test--ok': modelTestState(modelId)?.ok === true,
                         'v5-modelcard__test--bad': modelTestState(modelId)?.ok === false,
                       }"
+                      :title="modelTestTooltip(modelId)"
                       :disabled="testingModels.has(modelId)"
                       @click.stop="testModel(modelId)"
                     >
-                      <n-icon :component="testingModels.has(modelId) ? RefreshOutline : PulseOutline" :size="12" />
+                      <span v-if="testingModels.has(modelId)" class="v5-dots" aria-label="testing">
+                        <span></span><span></span><span></span>
+                      </span>
+                      <n-icon v-else :component="PulseOutline" :size="12" />
                     </button>
                   </template>
                   <template v-if="testingModels.has(modelId)">{{ t("v3.testModelTesting") }}</template>
@@ -2299,7 +2412,18 @@ const filterCounts = computed(() => ({
                   style="flex: 1; min-width: 0"
                   :title="t('v3.modelClickToCopy') || '点击复制 model ID'"
                   @click.stop="copyModelId(modelId)"
-                >{{ modelId }} <FreeBadge v-if="isFreeModel(modelId)" /></code>
+                >{{ modelId }} <FreeBadge v-if="isFreeModel(modelId)" /><span v-if="isRecommendedModel(modelId)" style="font-size: 10px; margin-left: 2px" title="推荐">⭐</span></code>
+                <span
+                  v-if="testingModels.has(modelId)"
+                  class="v5-modelcard__dot v5-modelcard__dot--testing"
+                  :title="t('v3.testModelTesting')"
+                />
+                <span
+                  v-else-if="modelTestState(modelId)"
+                  class="v5-modelcard__dot"
+                  :class="modelTestState(modelId)?.ok ? 'v5-modelcard__dot--ok' : 'v5-modelcard__dot--bad'"
+                  :title="modelTestTooltip(modelId)"
+                />
               </div>
               <div class="v5-modelcard__row" style="margin-top: 6px; align-items: center; gap: 6px">
                 <!-- P8.3: 测试按钮挪到 row 2 第一位, 默认位置可见可点 -->
@@ -2312,10 +2436,14 @@ const filterCounts = computed(() => ({
                         'v5-modelcard__test--ok': modelTestState(modelId)?.ok === true,
                         'v5-modelcard__test--bad': modelTestState(modelId)?.ok === false,
                       }"
+                      :title="modelTestTooltip(modelId)"
                       :disabled="testingModels.has(modelId)"
                       @click.stop="testModel(modelId)"
                     >
-                      <n-icon :component="testingModels.has(modelId) ? RefreshOutline : PulseOutline" :size="12" />
+                      <span v-if="testingModels.has(modelId)" class="v5-dots" aria-label="testing">
+                        <span></span><span></span><span></span>
+                      </span>
+                      <n-icon v-else :component="PulseOutline" :size="12" />
                     </button>
                   </template>
                   <template v-if="testingModels.has(modelId)">{{ t("v3.testModelTesting") }}</template>

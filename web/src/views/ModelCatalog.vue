@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { findFreeModel, findProviderByUpstreams, isFree, FREE_PROVIDERS, type ModelTier } from "@/data/freeProviders";
+import { findFreeModel, findProviderByUpstreams, isFree, isRecommended, FREE_PROVIDERS, type ModelTier } from "@/data/freeProviders";
 import { freeModelsRef, getFreeStatus, lookupRegistry } from "@/api/freemodels";
 import { keysApi } from "@/api/keys";
 import { getModelTimings, type ModelTiming } from "@/api/dashboard";
@@ -43,6 +43,8 @@ interface AugmentedItem extends ModelItem {
   description: string;
   /** 上游 free_quota.notes — 限速 / 配额 / 体验额度的人类描述. 缺时空串. */
   freeQuotaNote: string;
+  /** 是否在推荐清单里 (FREE_MODELS.recommended === true). */
+  isRecommended: boolean;
 }
 
 /**
@@ -142,6 +144,7 @@ const tierFilter = ref<ModelTier | "all">("all");
 const providerFilter = ref<string | "all">("all");
 const freeOnly = ref(false);
 const configuredOnly = ref(false);
+const recommendedOnly = ref(false);
 
 const authHeader = computed(() => {
   const k = localStorage.getItem("authKey");
@@ -268,6 +271,7 @@ const augmented = computed<AugmentedItem[]>(() =>
       speed: (reg?.speed as "fast" | "balanced" | "slow" | null) || null,
       description: reg?.description || "",
       freeQuotaNote: reg?.freeQuota?.notes || "",
+      isRecommended: providerId ? isRecommended(providerId, row.id) : false,
     };
   })
 );
@@ -288,6 +292,9 @@ const filtered = computed<AugmentedItem[]>(() => {
         return false;
       }
       if (configuredOnly.value && !row.configured) {
+        return false;
+      }
+      if (recommendedOnly.value && !row.isRecommended) {
         return false;
       }
       if (tierFilter.value !== "all" && row.tier !== tierFilter.value) {
@@ -453,6 +460,13 @@ async function fetchCatalog() {
       >
         {{ t("modelcatalog.onlyConfigured") || "已配置" }}
       </span>
+      <span
+        class="v3-pill"
+        :class="{ 'v3-pill--active': recommendedOnly }"
+        @click="recommendedOnly = !recommendedOnly"
+      >
+        ⭐ {{ t("modelcatalog.onlyRecommended") || "仅推荐" }}
+      </span>
       <span style="color: var(--v3-line); margin: 0 4px">|</span>
       <span
         class="v3-pill"
@@ -513,7 +527,7 @@ async function fetchCatalog() {
           </div>
           <div>
             <div class="v3-model-row__name" :title="row.description || undefined">
-              {{ row.id }} <FreeBadge v-if="row.freeVariant" />
+              {{ row.id }} <FreeBadge v-if="row.freeVariant" /><span v-if="row.isRecommended" class="v3-chip v3-chip--warn" style="font-size: 10px; padding: 1px 5px; margin-left: 3px" :title="t('modelcatalog.recommendedTip') || '推荐模型'">⭐</span>
             </div>
             <div
               v-if="row.description"

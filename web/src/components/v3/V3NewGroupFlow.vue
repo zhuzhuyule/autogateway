@@ -7,6 +7,7 @@ import {
   FREE_MODELS,
   bootstrapExposedModels,
   displayModelName,
+  isRecommended,
   type FreeProvider,
 } from "@/data/freeProviders";
 import type { Group } from "@/types/models";
@@ -43,7 +44,13 @@ const props = withDefaults(defineProps<Props>(), {
 const emit = defineEmits<Emits>();
 
 const picked = ref<FreeProvider | null>(null);
+// 用户在弹窗里可编辑的基本信息. 选模板自动填, 之后用户可改 — submit 用这些值
+// 而不是 picked.recommendedGroupName / picked.baseUrl 直接转, 给"自定义 baseUrl"
+// "改个 display 名" 之类小调整留口子.
 const groupName = ref("");
+const displayName = ref("");
+const baseUrl = ref("");
+const channelType = ref<FreeProvider["channelType"]>("openai");
 const pasted = ref("");
 const submitting = ref(false);
 
@@ -51,14 +58,33 @@ const submitting = ref(false);
 const showPaid = ref(false);
 const selectedModel = ref<string>("");
 
+// Free + Official 一起平铺, 用 kind 字段区分 — Official 走 OFFICIAL_PROVIDERS
+// (OpenAI/Anthropic/Gemini), 跳过免费档假设; Free 来自 FREE_PROVIDERS.
+// Official 排前面让用户能秒看到自己最熟悉的牌子.
+interface CatalogItem {
+  provider: FreeProvider;
+  kind: "official" | "free";
+}
+const providerCatalog = computed<CatalogItem[]>(() => {
+  const official: CatalogItem[] = OFFICIAL_PROVIDERS.map(p => ({ provider: p, kind: "official" }));
+  const free: CatalogItem[] = FREE_PROVIDERS.map(p => ({ provider: p, kind: "free" }));
+  return [...official, ...free];
+});
+
 watch(picked, p => {
   if (!p) {
     selectedModel.value = "";
+    displayName.value = "";
+    baseUrl.value = "";
+    channelType.value = "openai";
     return;
   }
   const freeIds = FREE_MODELS.filter(m => m.providerId === p.id).map(m => m.modelId);
   selectedModel.value = freeIds[0] ?? p.testModel;
   showPaid.value = false;
+  displayName.value = p.recommendedDisplayName;
+  baseUrl.value = p.baseUrl;
+  channelType.value = p.channelType;
 });
 
 const visibleModels = computed(() => {
@@ -104,6 +130,9 @@ watch(
     if (v) {
       picked.value = null;
       groupName.value = "";
+      displayName.value = "";
+      baseUrl.value = "";
+      channelType.value = "openai";
       pasted.value = "";
       submitting.value = false;
       smartInput.value = "";
@@ -111,11 +140,13 @@ watch(
   }
 );
 
+// 选了 provider 后直接进 step 2 (配置表单), Key 是可选的不卡 step 3.
+// step 3 = 用户已经准备好提交 (有 groupName + baseUrl), 此时按钮高亮.
 const step = computed<1 | 2 | 3>(() => {
   if (!picked.value) {
     return 1;
   }
-  if (!pasted.value.trim()) {
+  if (!groupName.value.trim() || !baseUrl.value.trim()) {
     return 2;
   }
   return 3;
@@ -154,145 +185,6 @@ function openKeyPage() {
   }
 }
 
-// Favicon support
-const FAVICON_DOMAIN_MAP: Record<string, string> = {
-  openai: "openai.com",
-  gemini: "gemini.google.com",
-  anthropic: "anthropic.com",
-  google: "google.com",
-  groq: "groq.com",
-  cerebras: "cerebras.ai",
-  openrouter: "openrouter.ai",
-  together: "together.ai",
-  cloudflare: "cloudflare.com",
-  mistral: "mistral.ai",
-  cohere: "cohere.com",
-  github: "github.com",
-  siliconflow: "siliconflow.cn",
-  zhipu: "zhipuai.cn",
-  nvidia: "nvidia.com",
-  gitee: "gitee.com",
-  modelscope: "modelscope.cn",
-  longcat: "longcat.chat",
-  xfyun: "xfyun.cn",
-  aihubmix: "aihubmix.com",
-  kilo: "kilo.ai",
-  llm7: "llm7.io",
-};
-
-function faviconFor(id: string): string {
-  const domain = FAVICON_DOMAIN_MAP[id];
-  if (domain) {
-    return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=64`;
-  }
-  return "";
-}
-const faviconErr = ref<Record<string, boolean>>({});
-function onFaviconErr(id: string) {
-  faviconErr.value[id] = true;
-}
-
-function rateTag(p: FreeProvider): string {
-  return p.freeTier
-    .replace(/requests?\/day/gi, "/day")
-    .replace(/tokens?\/day/gi, "tk/day")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-interface ExtraTag {
-  label: string;
-  cls: string;
-}
-
-function extraTags(p: FreeProvider): ExtraTag[] {
-  const tags: ExtraTag[] = [];
-  const cnt = FREE_MODELS.filter(m => m.providerId === p.id).length;
-  if (cnt > 0) {
-    tags.push({ label: `${cnt} 免费模型`, cls: "v3-pc__tag--count" });
-  }
-  if (p.rpm) {
-    tags.push({ label: p.rpm, cls: "v3-pc__tag--limit" });
-  }
-  if (p.rpd) {
-    tags.push({ label: p.rpd, cls: "v3-pc__tag--limit" });
-  }
-  if (p.concurrent) {
-    tags.push({ label: p.concurrent, cls: "v3-pc__tag--limit" });
-  }
-  if (p.context) {
-    tags.push({ label: p.context, cls: "v3-pc__tag--spec" });
-  }
-  if (p.highlights) {
-    for (const h of p.highlights) {
-      tags.push({ label: h, cls: "v3-pc__tag--feat" });
-    }
-  }
-  return tags;
-}
-
-function featTags(p: FreeProvider): string[] {
-  if (!p.description) {
-    return [];
-  }
-  const seen = new Set(extraTags(p).map(t => t.label));
-  return p.description
-    .split(/[,，/|·、]/)
-    .map(s => s.trim())
-    .filter(s => s && !seen.has(s));
-}
-
-function badgeLabel(badge?: FreeProvider["badge"]) {
-  if (badge === "fast") {
-    return "⚡ fast";
-  }
-  if (badge === "high-quota") {
-    return "high quota";
-  }
-  if (badge === "multi-model") {
-    return "multi-model";
-  }
-  return "";
-}
-
-function badgeClass(badge?: FreeProvider["badge"]) {
-  if (badge === "fast") {
-    return "v3-pc__badge v3-pc__badge--fast";
-  }
-  if (badge === "high-quota") {
-    return "v3-pc__badge v3-pc__badge--high";
-  }
-  if (badge === "multi-model") {
-    return "v3-pc__badge v3-pc__badge--multi";
-  }
-  return "v3-pc__badge";
-}
-
-function pavClassFor(id: string) {
-  const known = [
-    "groq",
-    "cerebras",
-    "openrouter",
-    "together",
-    "cloudflare",
-    "mistral",
-    "google",
-    "cohere",
-    "github",
-    "anthropic",
-  ];
-  if (known.includes(id)) {
-    return `v3-pav v3-pav-${id}`;
-  }
-  if (id.includes("google")) {
-    return "v3-pav v3-pav-google";
-  }
-  if (id.includes("github")) {
-    return "v3-pav v3-pav-github";
-  }
-  return "v3-pav v3-pav-default";
-}
-
 async function ensureGroupExists(): Promise<Group> {
   // create the group with provider's recommended config
   if (!picked.value) {
@@ -310,10 +202,10 @@ async function ensureGroupExists(): Promise<Group> {
   }
   const submit: Partial<Group> = {
     name: groupName.value || p.recommendedGroupName,
-    display_name: p.recommendedDisplayName,
+    display_name: displayName.value || p.recommendedDisplayName,
     description: p.description,
-    channel_type: p.channelType,
-    upstreams: [{ url: p.baseUrl, weight: 1 }],
+    channel_type: channelType.value || p.channelType,
+    upstreams: [{ url: baseUrl.value || p.baseUrl, weight: 1 }],
     test_model: testModel,
     sort: 0,
     validation_endpoint: "",
@@ -474,6 +366,7 @@ async function createGroup() {
               <span class="v3-msel__chip-id">
                 {{ displayModelName(picked ?? undefined, m.id) }}
                 <FreeBadge v-if="m.isFree" />
+                <span v-if="picked && isRecommended(picked.id, m.id)" style="font-size: 10px" title="推荐">⭐</span>
               </span>
               <span v-if="!m.isFree" class="v3-msel__chip-badge v3-msel__chip-badge--paid">paid</span>
               <span v-if="m.tier" class="v3-msel__chip-tier">{{ m.tier }}</span>
@@ -562,14 +455,14 @@ async function createGroup() {
           </div>
         </div>
 
-        <!-- Provider catalog grid -->
+        <!-- Provider catalog: 紧凑 chip 网格, free + official 平铺, chip 区分类型. -->
         <div
           style="
-            margin-top: 18px;
+            margin-top: 14px;
             display: flex;
             align-items: center;
             gap: 10px;
-            margin-bottom: 12px;
+            margin-bottom: 10px;
           "
         >
           <div
@@ -583,164 +476,72 @@ async function createGroup() {
             {{ picked ? t("v3.orPickAnother") : t("v3.chooseProvider") }}
           </div>
           <div style="flex: 1; height: 1px; background: var(--v3-line)" />
-          <span class="v3-chip">{{ FREE_PROVIDERS.length }} {{ t("v3.providersAvailable") }}</span>
+          <span class="v3-chip">{{ providerCatalog.length }} {{ t("v3.providersAvailable") }}</span>
         </div>
-        <div class="v3-pc-grid">
-          <div
-            v-for="prov in FREE_PROVIDERS"
-            :key="prov.id"
-            class="v3-pc"
-            :class="{ 'v3-pc--selected': picked?.id === prov.id }"
-            @click="pickProvider(prov)"
+        <div class="v3-pc-compact">
+          <button
+            v-for="item in providerCatalog"
+            :key="`${item.kind}-${item.provider.id}`"
+            type="button"
+            class="v3-pc-chip"
+            :class="{ 'v3-pc-chip--selected': picked?.id === item.provider.id }"
+            :title="`${item.provider.name} · ${item.provider.freeTier}`"
+            @click="pickProvider(item.provider)"
           >
-            <div class="v3-pc__head">
-              <div class="v3-pc__logo-wrapper">
-                <ProviderLogo
-                  v-if="hasProviderLogo(prov.id) || hasProviderLogo(prov.name)"
-                  :hint="hasProviderLogo(prov.id) ? prov.id : prov.name"
-                  :size="24"
-                  style="border-radius: 5px"
-                />
-                <img
-                  v-else-if="faviconFor(prov.id) && !faviconErr[prov.id]"
-                  :src="faviconFor(prov.id)"
-                  alt=""
-                  @error="onFaviconErr(prov.id)"
-                  class="v3-pc__favicon"
-                />
-                <span v-else :class="pavClassFor(prov.id) + ' v3-pc__logo'">
-                  {{
-                    prov.name
-                      .replace(/[^A-Za-z0-9]/g, "")
-                      .slice(0, 2)
-                      .toUpperCase()
-                  }}
-                </span>
-              </div>
-              <div style="flex: 1; min-width: 0">
-                <div class="v3-pc__name">{{ prov.name }}</div>
-              </div>
-              <span v-if="prov.badge" :class="badgeClass(prov.badge)">
-                {{ badgeLabel(prov.badge) }}
-              </span>
-            </div>
-            <div class="v3-pc__tags">
-              <span class="v3-pc__tag v3-pc__tag--rate">★ {{ rateTag(prov) }}</span>
-              <span
-                v-for="x in extraTags(prov)"
-                :key="`x-${x.label}`"
-                class="v3-pc__tag"
-                :class="x.cls"
-              >{{ x.label }}</span>
-              <span v-for="t in featTags(prov)" :key="t" class="v3-pc__tag">{{ t }}</span>
-            </div>
-            <div class="v3-pc__foot">
-              <button
-                class="v3-btn v3-btn--sm"
-                style="flex: 1; height: 26px; font-size: 11px"
-                @click.stop="pickProvider(prov)"
-              >
-                {{ picked?.id === prov.id ? t("v3.selected") : t("v3.useThis") }}
-              </button>
-              <a
-                :href="prov.signupUrl"
-                target="_blank"
-                rel="noopener noreferrer"
-                class="v3-btn v3-btn--sm"
-                style="height: 26px; font-size: 11px"
-                @click.stop
-              >
-                <n-icon :component="OpenOutline" :size="10" />
-                {{ t("v3.getKey") }}
-              </a>
-            </div>
+            <ProviderLogo
+              :hint="hasProviderLogo(item.provider.id) ? item.provider.id : item.provider.name"
+              :host="item.provider.baseUrl"
+              :fallback-initial="item.provider.name"
+              :size="20"
+              style="border-radius: 4px"
+            />
+            <span class="v3-pc-chip__name">{{ item.provider.name }}</span>
+            <span
+              class="v3-pc-chip__tag"
+              :class="item.kind === 'official' ? 'v3-pc-chip__tag--official' : 'v3-pc-chip__tag--free'"
+            >{{ item.kind === "official" ? t("v3.officialChip") : t("v3.freeChip") }}</span>
+          </button>
+        </div>
+
+        <!-- 基本信息表单 (选了 provider 后显示) — 让用户能改 name/display/baseUrl/channelType -->
+        <div v-if="picked" class="v3-ngf__form">
+          <div class="v3-ngf__form-row">
+            <label class="v3-ngf__form-lbl">{{ t("v3.formGroupName") }}</label>
+            <input
+              v-model="groupName"
+              class="v3-ngf__form-input"
+              spellcheck="false"
+              :placeholder="picked.recommendedGroupName"
+            />
+          </div>
+          <div class="v3-ngf__form-row">
+            <label class="v3-ngf__form-lbl">{{ t("v3.formDisplayName") }}</label>
+            <input
+              v-model="displayName"
+              class="v3-ngf__form-input"
+              :placeholder="picked.recommendedDisplayName"
+            />
+          </div>
+          <div class="v3-ngf__form-row">
+            <label class="v3-ngf__form-lbl">{{ t("v3.formBaseUrl") }}</label>
+            <input
+              v-model="baseUrl"
+              class="v3-ngf__form-input"
+              spellcheck="false"
+              :placeholder="picked.baseUrl"
+            />
+          </div>
+          <div class="v3-ngf__form-row">
+            <label class="v3-ngf__form-lbl">{{ t("v3.formChannelType") }}</label>
+            <select v-model="channelType" class="v3-ngf__form-input">
+              <option value="openai">OpenAI</option>
+              <option value="openai-response">OpenAI (Response)</option>
+              <option value="anthropic">Anthropic</option>
+              <option value="gemini">Gemini</option>
+            </select>
           </div>
         </div>
 
-        <!-- Official paid providers section (OpenAI / Anthropic / Gemini) -->
-        <div
-          style="
-            margin-top: 18px;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            margin-bottom: 12px;
-          "
-        >
-          <div
-            style="
-              font: 500 11px/1 var(--v3-mono);
-              letter-spacing: 0.1em;
-              text-transform: uppercase;
-              color: var(--v3-ink-3);
-            "
-          >
-            {{ t("v3.officialProviders") }}
-          </div>
-          <div style="flex: 1; height: 1px; background: var(--v3-line)" />
-          <span class="v3-chip">{{ OFFICIAL_PROVIDERS.length }} {{ t("v3.officialProvidersAvailable") }}</span>
-        </div>
-        <div class="v3-pc-grid">
-          <div
-            v-for="prov in OFFICIAL_PROVIDERS"
-            :key="prov.id"
-            class="v3-pc"
-            :class="{ 'v3-pc--selected': picked?.id === prov.id }"
-            @click="pickProvider(prov)"
-          >
-            <div class="v3-pc__head">
-              <div class="v3-pc__logo-wrapper">
-                <ProviderLogo
-                  v-if="hasProviderLogo(prov.id) || hasProviderLogo(prov.name)"
-                  :hint="hasProviderLogo(prov.id) ? prov.id : prov.name"
-                  :size="24"
-                  style="border-radius: 5px"
-                />
-                <img
-                  v-else-if="faviconFor(prov.id) && !faviconErr[prov.id]"
-                  :src="faviconFor(prov.id)"
-                  alt=""
-                  @error="onFaviconErr(prov.id)"
-                  class="v3-pc__favicon"
-                />
-                <span v-else :class="pavClassFor(prov.id) + ' v3-pc__logo'">
-                  {{
-                    prov.name
-                      .replace(/[^A-Za-z0-9]/g, "")
-                      .slice(0, 2)
-                      .toUpperCase()
-                  }}
-                </span>
-              </div>
-              <div style="flex: 1; min-width: 0">
-                <div class="v3-pc__name">{{ prov.name }}</div>
-              </div>
-            </div>
-            <div class="v3-pc__tags">
-              <span class="v3-pc__tag">{{ prov.freeTier }}</span>
-            </div>
-            <div class="v3-pc__foot">
-              <button
-                class="v3-btn v3-btn--sm"
-                style="flex: 1; height: 26px; font-size: 11px"
-                @click.stop="pickProvider(prov)"
-              >
-                {{ picked?.id === prov.id ? t("v3.selected") : t("v3.useThis") }}
-              </button>
-              <a
-                :href="prov.signupUrl"
-                target="_blank"
-                rel="noopener noreferrer"
-                class="v3-btn v3-btn--sm"
-                style="height: 26px; font-size: 11px"
-                @click.stop
-              >
-                <n-icon :component="OpenOutline" :size="10" />
-                {{ t("v3.getKey") }}
-              </a>
-            </div>
-          </div>
-        </div>
       </div>
 
       <div class="v3-ngf__foot">
@@ -780,6 +581,89 @@ async function createGroup() {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
   gap: 10px;
+}
+
+/* 紧凑 chip 网格 - 选 provider 时不占大块视野, 让下方表单成为视觉重点 */
+.v3-pc-compact {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+.v3-pc-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 9px 5px 6px;
+  background: var(--v3-card-bg, #fff);
+  border: 1px solid var(--v3-line);
+  border-radius: 18px;
+  cursor: pointer;
+  font: 500 12px var(--v3-sans);
+  color: var(--v3-ink);
+  transition: all 140ms ease;
+  outline: none;
+}
+.v3-pc-chip:hover {
+  border-color: var(--v3-accent);
+  background: oklch(from var(--v3-accent) 98% 0.02 h);
+}
+.v3-pc-chip--selected {
+  border-color: var(--v3-accent);
+  background: oklch(from var(--v3-accent) 95% 0.04 h);
+  box-shadow: 0 0 0 2px oklch(from var(--v3-accent) l c h / 0.15);
+}
+.v3-pc-chip__name {
+  white-space: nowrap;
+}
+.v3-pc-chip__tag {
+  font: 500 9.5px var(--v3-mono);
+  letter-spacing: 0.04em;
+  padding: 1px 5px;
+  border-radius: 4px;
+  text-transform: uppercase;
+}
+.v3-pc-chip__tag--free {
+  color: var(--v3-ok);
+  background: oklch(from var(--v3-ok) l c h / 0.1);
+}
+.v3-pc-chip__tag--official {
+  color: var(--v3-accent);
+  background: oklch(from var(--v3-accent) l c h / 0.1);
+}
+
+/* 基本信息表单 - 选了 provider 之后展开, 4 行 label + input */
+.v3-ngf__form {
+  display: grid;
+  grid-template-columns: 100px 1fr;
+  gap: 8px 12px;
+  align-items: center;
+  padding: 12px 14px;
+  margin: 0 0 14px;
+  background: var(--v3-soft, #fafafa);
+  border: 1px solid var(--v3-line);
+  border-radius: 8px;
+}
+.v3-ngf__form-row {
+  display: contents;
+}
+.v3-ngf__form-lbl {
+  font: 500 11.5px var(--v3-sans);
+  color: var(--v3-ink-3);
+  letter-spacing: 0.02em;
+}
+.v3-ngf__form-input {
+  font: 500 12px var(--v3-mono);
+  padding: 6px 9px;
+  background: var(--v3-card-bg, #fff);
+  border: 1px solid var(--v3-line);
+  border-radius: 5px;
+  outline: none;
+  color: var(--v3-ink);
+  transition: border-color 140ms;
+}
+.v3-ngf__form-input:focus {
+  border-color: var(--v3-accent);
 }
 .v3-pc {
   background: var(--v3-surface);
