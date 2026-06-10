@@ -899,6 +899,7 @@ export const FREE_MODELS: FreeModel[] = [
     modelId: "llama-4-scout-17b-16e-instruct",
     tier: "balanced",
     notes: "多模态",
+    recommended: true,
   },
   {
     providerId: "groq",
@@ -1012,7 +1013,7 @@ export const FREE_MODELS: FreeModel[] = [
   },
   { providerId: "mistral", modelId: "mistral-large-latest", tier: "max", notes: "Mistral Large 3", recommended: true },
   { providerId: "mistral", modelId: "open-mistral-nemo", tier: "fast" },
-  { providerId: "mistral", modelId: "codestral-latest", tier: "balanced", notes: "代码专用" },
+  { providerId: "mistral", modelId: "codestral-latest", tier: "balanced", notes: "代码专用", recommended: true },
   { providerId: "mistral", modelId: "pixtral-large-latest", tier: "max", notes: "视觉多模态" },
 
   // Google AI Studio
