@@ -225,6 +225,7 @@ func registerProtectedAPIRoutes(
 		keys.POST("/validate-group", serverHandler.ValidateGroupKeys)
 		keys.POST("/test-multiple", serverHandler.TestMultipleKeys)
 		keys.PUT("/:id/notes", serverHandler.UpdateKeyNotes)
+		keys.PUT("/:id", serverHandler.UpdateKey)
 	}
 
 	// Tasks

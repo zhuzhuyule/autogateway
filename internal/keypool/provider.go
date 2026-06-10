@@ -417,6 +417,23 @@ func (p *KeyProvider) AddKeys(groupID uint, keys []models.APIKey) error {
 	return err
 }
 
+// ReloadKey 从 DB 重新读取单条 key 并覆盖 cache. 用于 in-place 编辑 key
+// (UpdateKey) 后同步 cache - key_value/key_hash/status 都可能变, 需要让 SWRR
+// 拿到最新数据. addKeyToStore 内部 HSet 用 key:<id> 覆盖, LRem+LPush 处理活跃
+// 列表, 所以同 id 重写是安全幂等的.
+func (p *KeyProvider) ReloadKey(keyID uint) error {
+	var key models.APIKey
+	if err := p.db.First(&key, keyID).Error; err != nil {
+		return err
+	}
+	// Non-active 状态先从活跃列表 LRem; addKeyToStore 只在 Active 时 LPush.
+	if key.Status != models.KeyStatusActive {
+		activeKeysListKey := fmt.Sprintf("group:%d:active_keys", key.GroupID)
+		_ = p.store.LRem(activeKeysListKey, 0, key.ID)
+	}
+	return p.addKeyToStore(&key)
+}
+
 // RemoveKeys 批量从池和数据库中移除 Key。
 func (p *KeyProvider) RemoveKeys(groupID uint, keyValues []string) (int64, error) {
 	if len(keyValues) == 0 {

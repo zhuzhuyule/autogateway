@@ -651,23 +651,62 @@
   opacity: 0.6;
   cursor: progress;
 }
-.v5-modelcard__test--testing :deep(svg),
-.v5-modelcard__test--testing svg {
-  animation: v5-spin 800ms linear infinite;
-}
 .v5-modelcard__test--ok {
-  border-color: oklch(from var(--v3-success) l c h / 0.5);
-  color: var(--v3-success);
-  background: oklch(from var(--v3-success) l c h / 0.08);
+  border-color: oklch(from var(--v3-ok) l c h / 0.5);
+  color: var(--v3-ok);
+  background: oklch(from var(--v3-ok) l c h / 0.08);
 }
 .v5-modelcard__test--bad {
   border-color: oklch(from var(--v3-danger) l c h / 0.5);
   color: var(--v3-danger);
   background: oklch(from var(--v3-danger) l c h / 0.08);
 }
-@keyframes v5-spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
+
+/* testing 时按钮里的跳动三点 — 替代旋转 spinner, 视觉更明确"在跑" */
+.v5-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.v5-dots span {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: currentColor;
+  display: inline-block;
+  animation: v5-dot-jump 1000ms ease-in-out infinite;
+}
+.v5-dots span:nth-child(2) { animation-delay: 150ms; }
+.v5-dots span:nth-child(3) { animation-delay: 300ms; }
+@keyframes v5-dot-jump {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.55; }
+  30% { transform: translateY(-3px); opacity: 1; }
+}
+
+/* model name 旁的状态点 — 让用户在卡片顶端一眼看到 model 测过没/通没通 */
+.v5-modelcard__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  margin-top: 6px;       /* 视觉与 code 顶部对齐, code 内部有 leading */
+  cursor: help;          /* 暗示 hover 有详情 */
+}
+.v5-modelcard__dot--ok {
+  background: var(--v3-ok);
+  box-shadow: 0 0 0 2px oklch(from var(--v3-ok) l c h / 0.18);
+}
+.v5-modelcard__dot--bad {
+  background: var(--v3-danger);
+  box-shadow: 0 0 0 2px oklch(from var(--v3-danger) l c h / 0.18);
+}
+.v5-modelcard__dot--testing {
+  background: var(--v3-accent, #2b5cff);
+  animation: v5-dot-pulse 900ms ease-in-out infinite;
+}
+@keyframes v5-dot-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 oklch(from var(--v3-accent, #2b5cff) l c h / 0.5); }
+  50% { box-shadow: 0 0 0 6px oklch(from var(--v3-accent, #2b5cff) l c h / 0); }
 }
 
 /* ===== Blocked model state (orthogonal to mode) ===== */

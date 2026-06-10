@@ -1315,40 +1315,49 @@ async function onExposedDrop(targetIdx: number) {
   await persistGroupPatch({ exposed_models: next });
 }
 
-// inline notes editing
-const editingNoteId = ref<number | null>(null);
-const editingNoteText = ref("");
-const savingNotesId = ref<number | null>(null);
+// === Key 编辑弹窗 (key value + notes 同时改, 走 P11.32 后端 PUT /keys/:id) ===
+// 旧的 inline notes-only 编辑已替换 — 笔图标改为打开此弹窗.
+const keyEditDialogShow = ref(false);
+const editingKey = ref<KeyRow | null>(null);
+const editKeyValueInput = ref(""); // 空 = 不改 key value
+const editNotesInput = ref("");
+const editKeySaving = ref(false);
 
-function startEditNotes(k: KeyRow) {
-  editingNoteId.value = k.id;
-  editingNoteText.value = k.notes || "";
+function openEditKeyDialog(k: KeyRow) {
+  editingKey.value = k;
+  editKeyValueInput.value = ""; // 始终留空 — 不预填 mask 避免覆盖真值
+  editNotesInput.value = k.notes || "";
+  keyEditDialogShow.value = true;
 }
 
-function cancelNotes() {
-  editingNoteId.value = null;
-  editingNoteText.value = "";
-}
-
-async function saveNotes(k: KeyRow) {
-  const trimmed = editingNoteText.value.trim();
-  if (trimmed === (k.notes || "")) {
-    cancelNotes();
+async function saveKeyEdit() {
+  if (!editingKey.value || editKeySaving.value) {
     return;
   }
-  savingNotesId.value = k.id;
-  const previous = k.notes;
-  k.notes = trimmed;
+  const k = editingKey.value;
+  const newKeyValue = editKeyValueInput.value.trim();
+  const newNotes = editNotesInput.value.trim();
+  editKeySaving.value = true;
+  const previousNotes = k.notes;
+  k.notes = newNotes;
   try {
-    await keysApi.updateKeyNotes(k.id, trimmed);
-    message.success(t("keys.notesUpdated") || "Notes updated");
-    cancelNotes();
+    await keysApi.updateKey(k.id, newKeyValue, newNotes);
+    message.success(
+      newKeyValue
+        ? t("keys.keyUpdated") || "Key updated"
+        : t("keys.notesUpdated") || "Notes updated",
+    );
+    keyEditDialogShow.value = false;
+    if (newKeyValue) {
+      // status 被后端重置 active, key_value 也变了 — 重新拉列表
+      loadKeys();
+    }
   } catch (e) {
-    k.notes = previous;
-    console.error("update notes failed", e);
+    k.notes = previousNotes;
+    console.error("update key failed", e);
     message.error(t("common.requestFailed"));
   } finally {
-    savingNotesId.value = null;
+    editKeySaving.value = false;
   }
 }
 
@@ -1955,64 +1964,31 @@ const filterCounts = computed(() => ({
                   {{ t("v5.kcPillTip") }}
                 </n-tooltip>
 
-                <template v-if="editingNoteId === k.id">
-                  <input
-                    v-model="editingNoteText"
-                    class="v5-keycard__notes-input"
-                    :placeholder="t('v3.notesPlaceholder')"
-                    @keyup.enter="saveNotes(k)"
-                    @keyup.esc="cancelNotes"
-                    @click.stop
-                  />
-                  <n-tooltip>
-                    <template #trigger>
-                      <button
-                        class="v5-keycard__iconbtn v5-keycard__iconbtn--ok"
-                        :disabled="savingNotesId === k.id"
-                        @click.stop="saveNotes(k)"
-                      >
-                        <n-icon :component="CheckmarkCircle" :size="14" />
-                      </button>
-                    </template>
-                    {{ t("common.save") }}
-                  </n-tooltip>
-                  <n-tooltip>
-                    <template #trigger>
-                      <button class="v5-keycard__iconbtn" @click.stop="cancelNotes">
-                        <n-icon :component="CloseOutline" :size="14" />
-                      </button>
-                    </template>
-                    {{ t("common.cancel") }}
-                  </n-tooltip>
-                </template>
-
-                <template v-else>
-                  <n-tooltip v-if="k.notes" placement="top">
-                    <template #trigger>
-                      <code class="v5-keycard__mask v5-keycard__mask--notes">{{ k.notes }}</code>
-                    </template>
-                    <span style="font-family: var(--v3-mono); font-size: 11.5px">
-                      {{ maskKey(k.key_value) }}
-                    </span>
-                  </n-tooltip>
-                  <code v-else class="v5-keycard__mask">{{ maskKey(k.key_value) }}</code>
-                  <n-tooltip>
-                    <template #trigger>
-                      <button class="v5-keycard__iconbtn" @click.stop="startEditNotes(k)">
-                        <n-icon :component="PencilOutline" :size="14" />
-                      </button>
-                    </template>
-                    {{ t("v3.editNotes") || "Notes" }}
-                  </n-tooltip>
-                  <n-tooltip>
-                    <template #trigger>
-                      <button class="v5-keycard__iconbtn" @click.stop="copyKey(k)">
-                        <n-icon :component="CopyOutline" :size="14" />
-                      </button>
-                    </template>
-                    {{ t("v5.copy") }}
-                  </n-tooltip>
-                </template>
+                <n-tooltip v-if="k.notes" placement="top">
+                  <template #trigger>
+                    <code class="v5-keycard__mask v5-keycard__mask--notes">{{ k.notes }}</code>
+                  </template>
+                  <span style="font-family: var(--v3-mono); font-size: 11.5px">
+                    {{ maskKey(k.key_value) }}
+                  </span>
+                </n-tooltip>
+                <code v-else class="v5-keycard__mask">{{ maskKey(k.key_value) }}</code>
+                <n-tooltip>
+                  <template #trigger>
+                    <button class="v5-keycard__iconbtn" @click.stop="openEditKeyDialog(k)">
+                      <n-icon :component="PencilOutline" :size="14" />
+                    </button>
+                  </template>
+                  {{ t("keys.editKeyTitle") }}
+                </n-tooltip>
+                <n-tooltip>
+                  <template #trigger>
+                    <button class="v5-keycard__iconbtn" @click.stop="copyKey(k)">
+                      <n-icon :component="CopyOutline" :size="14" />
+                    </button>
+                  </template>
+                  {{ t("v5.copy") }}
+                </n-tooltip>
               </div>
 
               <!-- Row 2: stats + icon actions -->
@@ -2678,5 +2654,53 @@ const filterCounts = computed(() => ({
       @toggle-block="toggleBlock"
       @remove-exposed="removeFromExposed"
     />
+
+    <!-- Key 编辑弹窗 (P11.33): key value 留空 = 只改 notes; 填了走 in-place rotate -->
+    <n-modal
+      v-model:show="keyEditDialogShow"
+      preset="dialog"
+      :title="t('keys.editKeyTitle')"
+    >
+      <div style="display: flex; flex-direction: column; gap: 12px; margin-top: 8px">
+        <div>
+          <label style="font: 500 12px var(--v3-sans); color: var(--v3-ink-3); display: block; margin-bottom: 4px">
+            {{ t("keys.editKeyValueLabel") }}
+            <span style="font: 400 11px var(--v3-mono); color: var(--v3-ink-4); margin-left: 4px">
+              {{ t("keys.editKeyValueHint") }}
+            </span>
+          </label>
+          <n-input
+            v-model:value="editKeyValueInput"
+            type="textarea"
+            :placeholder="t('keys.editKeyValuePlaceholder')"
+            :rows="3"
+            spellcheck="false"
+          />
+        </div>
+        <div>
+          <label style="font: 500 12px var(--v3-sans); color: var(--v3-ink-3); display: block; margin-bottom: 4px">
+            {{ t("v3.editNotes") || "Notes" }}
+          </label>
+          <n-input
+            v-model:value="editNotesInput"
+            type="textarea"
+            :placeholder="t('v3.notesPlaceholder')"
+            :rows="2"
+            maxlength="255"
+            show-count
+          />
+        </div>
+      </div>
+      <template #action>
+        <n-button @click="keyEditDialogShow = false">{{ t("common.cancel") }}</n-button>
+        <n-button
+          type="primary"
+          :disabled="editKeySaving"
+          @click="saveKeyEdit"
+        >
+          {{ editKeySaving ? t("v3.saving") : t("common.save") }}
+        </n-button>
+      </template>
+    </n-modal>
   </section>
 </template>

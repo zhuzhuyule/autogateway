@@ -47,6 +47,9 @@ interface Props {
 }
 
 const props = defineProps<Props>();
+// 父组件用 refresh 事件触发列表重拉. key value 编辑后 cache 已经同步,
+// 但前端 row 数据需要从后端拉取 fresh state (status 等).
+const emit = defineEmits<{ (e: "refresh"): void }>();
 
 const keys = ref<KeyRow[]>([]);
 const loading = ref(false);
@@ -105,6 +108,8 @@ const deleteDialogShow = ref(false);
 const notesDialogShow = ref(false);
 const editingKey = ref<KeyRow | null>(null);
 const editingNotes = ref("");
+// In-place key value 编辑: 空字符串 = "不改 key value, 只改 notes"
+const editingKeyValue = ref("");
 
 watch(
   () => props.selectedGroup,
@@ -307,29 +312,42 @@ function getDisplayValue(key: KeyRow): string {
   return key.is_visible ? key.key_value : maskKey(key.key_value);
 }
 
-// 编辑密钥备注
-function editKeyNotes(key: KeyRow) {
+// 打开编辑弹窗 — 同时承载 key value 和 notes 编辑
+function editKey(key: KeyRow) {
   editingKey.value = key;
   editingNotes.value = key.notes || "";
+  // key value 输入框默认空 = "不改". 用户不知道当前明文 (除非已 toggle 可见),
+  // 不预填 mask 字符串避免误以为是真值. 留空就只改 notes.
+  editingKeyValue.value = "";
   notesDialogShow.value = true;
 }
 
-// 保存备注
-async function saveKeyNotes() {
+// 保存编辑 — keyValue 空就只调 notes 走 updateKey (兼容旧端点行为)
+async function saveKeyEdit() {
   if (!editingKey.value) {
     return;
   }
-
   try {
-    const trimmed = editingNotes.value.trim();
-    await keysApi.updateKeyNotes(editingKey.value.id, trimmed);
-    editingKey.value.notes = trimmed;
-    window.$message.success(t("keys.notesUpdated"));
+    const trimmedNotes = editingNotes.value.trim();
+    const trimmedKey = editingKeyValue.value.trim();
+    await keysApi.updateKey(editingKey.value.id, trimmedKey, trimmedNotes);
+    // 本地同步 (notes 立即生效; key_value 后端覆盖, 列表 reload 会拉到新值)
+    editingKey.value.notes = trimmedNotes;
+    if (trimmedKey) {
+      // 改了 key value: 重置 status 视图 (跟后端一致) + 触发列表刷新
+      editingKey.value.status = "active";
+      emit("refresh");
+    }
+    window.$message.success(
+      trimmedKey ? t("keys.keyUpdated") : t("keys.notesUpdated"),
+    );
     notesDialogShow.value = false;
   } catch (error) {
-    console.error("Update notes failed", error);
+    console.error("Update key failed", error);
   }
 }
+
+// copyKey (复制 raw key value) 已存在于上方 — 不重复定义
 
 async function restoreKey(key: KeyRow) {
   if (!props.selectedGroup?.id || !key.key_value || isRestoring.value) {
@@ -743,8 +761,8 @@ function resetPage() {
                   <n-button
                     size="tiny"
                     text
-                    @click="editKeyNotes(key)"
-                    :title="t('keys.editNotes')"
+                    @click="editKey(key)"
+                    :title="t('keys.editKeyTitle')"
                   >
                     <template #icon>
                       <n-icon :component="Pencil" />
@@ -874,18 +892,42 @@ function resetPage() {
   </div>
 
   <!-- 备注编辑对话框 -->
-  <n-modal v-model:show="notesDialogShow" preset="dialog" :title="t('keys.editKeyNotes')">
-    <n-input
-      v-model:value="editingNotes"
-      type="textarea"
-      :placeholder="t('keys.enterNotes')"
-      :rows="3"
-      maxlength="255"
-      show-count
-    />
+  <n-modal v-model:show="notesDialogShow" preset="dialog" :title="t('keys.editKeyTitle')">
+    <div style="display: flex; flex-direction: column; gap: 12px; margin-top: 8px">
+      <!-- Key value: 留空 = 不改, 防止误粘 mask 字符串覆盖真值 -->
+      <div>
+        <label style="font: 500 12px sans-serif; color: var(--text-secondary); display: block; margin-bottom: 4px">
+          {{ t("keys.editKeyValueLabel") }}
+          <span style="font: 400 11px monospace; color: var(--text-tertiary); margin-left: 4px">
+            {{ t("keys.editKeyValueHint") }}
+          </span>
+        </label>
+        <n-input
+          v-model:value="editingKeyValue"
+          type="textarea"
+          :placeholder="t('keys.editKeyValuePlaceholder')"
+          :rows="3"
+          spellcheck="false"
+        />
+      </div>
+      <!-- Notes -->
+      <div>
+        <label style="font: 500 12px sans-serif; color: var(--text-secondary); display: block; margin-bottom: 4px">
+          {{ t("keys.editNotes") }}
+        </label>
+        <n-input
+          v-model:value="editingNotes"
+          type="textarea"
+          :placeholder="t('keys.enterNotes')"
+          :rows="2"
+          maxlength="255"
+          show-count
+        />
+      </div>
+    </div>
     <template #action>
       <n-button @click="notesDialogShow = false">{{ t("common.cancel") }}</n-button>
-      <n-button type="primary" @click="saveKeyNotes">{{ t("common.save") }}</n-button>
+      <n-button type="primary" @click="saveKeyEdit">{{ t("common.save") }}</n-button>
     </template>
   </n-modal>
 </template>

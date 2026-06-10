@@ -110,7 +110,10 @@ func SystemRoleForChannelType(channelType string) string {
 type Group struct {
 	ID                  uint                 `gorm:"primaryKey;autoIncrement" json:"id"`
 	EffectiveConfig     types.SystemSettings `gorm:"-" json:"effective_config,omitempty"`
-	Name                string               `gorm:"type:varchar(255);not null;unique" json:"name"`
+	// Name 唯一性约束改走 migration partial index (WHERE deleted_at IS NULL).
+	// 软删的 group 不再占用 name; 业务侧创建/重命名只检查 active groups.
+	// 见 internal/db/migrations/v2_5_17_PartialUniqueGroupName.go
+	Name                string               `gorm:"type:varchar(255);not null;index" json:"name"`
 	Endpoint            string               `gorm:"-" json:"endpoint"`
 	DisplayName         string               `gorm:"type:varchar(255)" json:"display_name"`
 	ProxyKeys           string               `gorm:"type:text" json:"proxy_keys"`

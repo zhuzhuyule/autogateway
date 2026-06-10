@@ -33,6 +33,7 @@ import nvidiaSvg from "@lobehub/icons-static-svg/icons/nvidia-color.svg?raw";
 import siliconcloudSvg from "@lobehub/icons-static-svg/icons/siliconcloud-color.svg?raw";
 import modelscopeSvg from "@lobehub/icons-static-svg/icons/modelscope-color.svg?raw";
 import longcatSvg from "@lobehub/icons-static-svg/icons/longcat-color.svg?raw";
+import sensenovaSvg from "@lobehub/icons-static-svg/icons/sensenova-color.svg?raw";
 import sparkSvg from "@lobehub/icons-static-svg/icons/spark-color.svg?raw";
 import giteeaiSvg from "@lobehub/icons-static-svg/icons/giteeai.svg?raw";
 import aihubmixSvg from "@lobehub/icons-static-svg/icons/aihubmix-color.svg?raw";
@@ -73,6 +74,7 @@ export const LOGO_MAP: Record<string, string> = {
   siliconcloud: siliconcloudSvg,
   modelscope: modelscopeSvg,
   longcat: longcatSvg,
+  sensenova: sensenovaSvg,
   spark: sparkSvg,
   giteeai: giteeaiSvg,
   aihubmix: aihubmixSvg,
@@ -122,6 +124,8 @@ const KEYWORD_TO_KEY: Array<[string, string]> = [
   ["siliconflow", "siliconcloud"],   // host: api.siliconflow.cn
   ["siliconcloud", "siliconcloud"],
   ["longcat", "longcat"],            // host: api.longcat.chat
+  ["sensenova", "sensenova"],        // host: token.sensenova.cn / api.sensenova.cn
+  ["sensetime", "sensenova"],        // 商汤品牌别名
   ["bigmodel", "zhipu"],             // host: open.bigmodel.cn — 智谱 GLM 平台
   ["zhipu", "zhipu"],
   ["glm", "zhipu"],

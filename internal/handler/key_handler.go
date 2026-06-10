@@ -515,6 +515,49 @@ func (s *Server) ExportKeys(c *gin.Context) {
 	}
 }
 
+// UpdateKeyRequest is the unified payload for PUT /keys/:id — in-place rotates
+// key value and/or updates notes. Both fields optional: empty key_value means
+// "leave the key value untouched". Notes capped at 255 runes.
+type UpdateKeyRequest struct {
+	KeyValue string `json:"key_value"`
+	Notes    string `json:"notes"`
+}
+
+// UpdateKey handles in-place edit of a single key. Status auto-resets to active
+// when key_value changes (so SWRR re-picks it). Statistics preserved.
+func (s *Server) UpdateKey(c *gin.Context) {
+	keyIDStr := c.Param("id")
+	keyID, err := strconv.Atoi(keyIDStr)
+	if err != nil || keyID <= 0 {
+		response.Error(c, app_errors.NewAPIError(app_errors.ErrBadRequest, "invalid key ID format"))
+		return
+	}
+	var req UpdateKeyRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Error(c, app_errors.NewAPIError(app_errors.ErrInvalidJSON, err.Error()))
+		return
+	}
+	notes := strings.TrimSpace(req.Notes)
+	if utf8.RuneCountInString(notes) > 255 {
+		response.Error(c, app_errors.NewAPIError(app_errors.ErrValidation, "notes length must be <= 255 characters"))
+		return
+	}
+	rawKey := strings.TrimSpace(req.KeyValue)
+	if err := s.KeyService.UpdateKey(uint(keyID), rawKey, notes); err != nil {
+		if err == gorm.ErrRecordNotFound {
+			response.Error(c, app_errors.ErrResourceNotFound)
+			return
+		}
+		if apiErr, ok := err.(*app_errors.APIError); ok {
+			response.Error(c, apiErr)
+			return
+		}
+		response.Error(c, app_errors.ParseDBError(err))
+		return
+	}
+	response.Success(c, nil)
+}
+
 // UpdateKeyNotesRequest defines the payload for updating a key's notes.
 type UpdateKeyNotesRequest struct {
 	Notes string `json:"notes"`

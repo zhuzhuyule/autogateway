@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"autogateway/internal/encryption"
+	app_errors "autogateway/internal/errors"
 	"autogateway/internal/keypool"
 	"autogateway/internal/models"
 	"io"
@@ -196,6 +197,68 @@ func (s *KeyService) filterValidKeys(keys []string) []string {
 // isValidKeyFormat performs basic validation on key format
 func (s *KeyService) isValidKeyFormat(key string) bool {
 	return strings.TrimSpace(key) != ""
+}
+
+// IsValidKeyFormat is the exported variant used by handler-level validation.
+func (s *KeyService) IsValidKeyFormat(key string) bool {
+	return s.isValidKeyFormat(key)
+}
+
+// UpdateKey performs an in-place update on a single key: optionally rotates
+// the key value (re-encrypts + recomputes hash) and/or updates notes. Statistics
+// (RequestCount / FailureCount / LastUsedAt) are preserved — the user intent
+// is "rotate this same key's content", not "create new key".
+//
+// rawKeyValue: trimmed plaintext. If non-empty, re-encrypted & dup-checked.
+// If empty, key value is left untouched (notes-only update).
+// notes: trimmed string, <= 255 runes.
+//
+// On successful KeyValue change, Status is reset to Active so the rotated
+// key re-enters SWRR rotation (the old value may have been marked invalid).
+// KeyProvider cache is refreshed via ReloadKey at the end.
+//
+// Returns ErrDuplicateResource if the new value collides with another active
+// key in the same group.
+func (s *KeyService) UpdateKey(keyID uint, rawKeyValue, notes string) error {
+	var key models.APIKey
+	if err := s.DB.First(&key, keyID).Error; err != nil {
+		return err
+	}
+	updates := map[string]any{"notes": notes}
+	if rawKeyValue != "" {
+		if !s.isValidKeyFormat(rawKeyValue) {
+			return fmt.Errorf("invalid key format")
+		}
+		newHash := s.EncryptionSvc.Hash(rawKeyValue)
+		// 不能跟同 group 其他 key 撞 hash. self 排除.
+		var dup int64
+		if err := s.DB.Model(&models.APIKey{}).
+			Where("group_id = ? AND key_hash = ? AND id <> ?", key.GroupID, newHash, key.ID).
+			Count(&dup).Error; err != nil {
+			return err
+		}
+		if dup > 0 {
+			return app_errors.NewAPIError(app_errors.ErrDuplicateResource, "key value already exists in this group")
+		}
+		encryptedKey, err := s.EncryptionSvc.Encrypt(rawKeyValue)
+		if err != nil {
+			return fmt.Errorf("encrypt key: %w", err)
+		}
+		updates["key_value"] = encryptedKey
+		updates["key_hash"] = newHash
+		// 重新参与 SWRR — 用户主动改的, 此前可能因为 401 被熔断.
+		updates["status"] = models.KeyStatusActive
+	}
+	if err := s.DB.Model(&key).Updates(updates).Error; err != nil {
+		return err
+	}
+	// 同步 cache: 让 SelectKey 看到新 KeyValue/Hash/Status.
+	if err := s.KeyProvider.ReloadKey(keyID); err != nil {
+		// cache mismatch 是性能问题不是正确性问题 (下次 SyncGroupKeysFromDB 修),
+		// 不阻塞 DB 写成功的响应.
+		_ = err
+	}
+	return nil
 }
 
 // RestoreMultipleKeys handles the business logic of restoring keys from a text block.

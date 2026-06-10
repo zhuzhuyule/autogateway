@@ -140,6 +140,18 @@ export const keysApi = {
     await http.put(`/keys/${keyId}/notes`, { notes }, { hideMessage: true });
   },
 
+  // In-place 编辑密钥: 可同时改 key value 和 notes.
+  // 传空 key_value 表示"只改 notes"; 改 key value 时后端会重新加密 +
+  // 重算 hash + status 重置为 active. request_count / failure_count /
+  // last_used_at 保留, 历史统计不丢.
+  async updateKey(keyId: number, keyValue: string, notes: string): Promise<void> {
+    await http.put(
+      `/keys/${keyId}`,
+      { key_value: keyValue, notes },
+      { hideMessage: true },
+    );
+  },
+
   // 测试分组下指定模型的连通性 (后端会用一个活跃 key + 该模型 跑一次 ValidateKey)
   async testGroupModel(
     groupId: number,

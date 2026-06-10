@@ -4,12 +4,11 @@ import type { Group } from "@/types/models";
 import { getGroupDisplayName } from "@/utils/display";
 import { AddOutline, LinkOutline, LockClosedOutline, SearchOutline } from "@vicons/ionicons5";
 import { NIcon } from "naive-ui";
-import { computed, reactive, ref, watch } from "vue";
+import { computed, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import AggregateGroupModal from "@/components/keys/AggregateGroupModal.vue";
 import V3NewGroupFlow from "@/components/v3/V3NewGroupFlow.vue";
 import ProviderLogo from "@/components/common/ProviderLogo.vue";
-import { hasProviderLogo } from "@/data/providerLogos";
 
 const { t } = useI18n();
 
@@ -66,62 +65,9 @@ const userGroups = computed(() => filtered.value.filter(g => !g.is_system));
 const hasSearch = computed(() => search.value.trim().length > 0);
 const canDrag = computed(() => !hasSearch.value && !savingOrder.value);
 
-function shortFor(g: Group): string {
-  const src = g.display_name || g.name || "?";
-  return (
-    src
-      .replace(/[^A-Za-z0-9]/g, "")
-      .slice(0, 2)
-      .toUpperCase() || "??"
-  );
-}
-
-function avatarClass(g: Group): string {
-  if (g.channel_type === "anthropic") {
-    return "v3-pav-anthropic";
-  }
-  if (g.channel_type === "gemini") {
-    return "v3-pav-google";
-  }
-  if (g.is_system) {
-    return "v3-pav-default";
-  }
-  const lower = g.name.toLowerCase();
-  for (const key of [
-    "groq",
-    "cerebras",
-    "openrouter",
-    "together",
-    "cloudflare",
-    "mistral",
-    "google",
-    "cohere",
-    "github",
-    "anthropic",
-  ]) {
-    if (lower.includes(key)) {
-      return `v3-pav-${key}`;
-    }
-  }
-  return "v3-pav-default";
-}
-
-// Favicon support for sidebar avatars (consistent with Dashboard + Group detail)
-const FAVICON_DOMAIN_MAP: Record<string, string> = {
-  groq: "groq.com",
-  cerebras: "cerebras.ai",
-  openrouter: "openrouter.ai",
-  together: "together.ai",
-  cloudflare: "cloudflare.com",
-  mistral: "mistral.ai",
-  google: "ai.google.dev",
-  cohere: "cohere.com",
-  github: "github.com",
-  anthropic: "anthropic.com",
-  "default-openai": "openai.com",
-  "default-anthropic": "anthropic.com",
-  "default-gemini": "gemini.google.com",
-};
+// 旧 favicon / shortFor / avatarClass / FAVICON_DOMAIN_MAP 已删 (P11.34) —
+// sidebar 改用统一 ProviderLogo, 它内置三层 fallback: lobehub 品牌 SVG → host
+// apex domain favicon (Google s2) → 首字母圆色块.
 
 function extractHost(url?: string): string | null {
   if (!url) {
@@ -134,24 +80,6 @@ function extractHost(url?: string): string | null {
   }
 }
 
-function faviconFor(g: Group): string {
-  const role = (g.system_role || "").trim();
-  if (role && FAVICON_DOMAIN_MAP[role]) {
-    return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(FAVICON_DOMAIN_MAP[role])}&sz=64`;
-  }
-  const lower = g.name.toLowerCase();
-  for (const k of Object.keys(FAVICON_DOMAIN_MAP)) {
-    if (lower.includes(k)) {
-      return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(FAVICON_DOMAIN_MAP[k])}&sz=64`;
-    }
-  }
-  const host = extractHost(g.upstreams?.[0]?.url);
-  if (host) {
-    return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(host)}&sz=64`;
-  }
-  return "";
-}
-
 // providerHint 把 group 解析成 ProviderLogo 能识别的字符串(system_role 优先,
 // 否则回退到 name + 第一个 upstream host)。
 function providerHint(g: Group): string {
@@ -162,16 +90,6 @@ function providerHint(g: Group): string {
   ]
     .filter(Boolean)
     .join(" ");
-}
-
-const faviconErr = reactive<Record<string, boolean>>({});
-function onFaviconErr(g: Group) {
-  if (g.id != null) {
-    faviconErr[String(g.id)] = true;
-  }
-}
-function isFaviconBroken(g: Group): boolean {
-  return g.id != null && faviconErr[String(g.id)] === true;
 }
 
 function subTextFor(g: Group): string {
@@ -326,25 +244,16 @@ function onDragEnd() {
           @click="emit('select', g)"
         >
           <span class="v5-picon" style="width: 38px; height: 38px">
+            <!-- P11.34: 统一走 ProviderLogo 自带三层 fallback (lobehub → apex favicon
+                 → 首字母色块). 不再用 sidebar 自己那套带 FAVICON_DOMAIN_MAP 的旧版,
+                 后者对 agnes / sensenova 等不在白名单的 provider 会拉到 Google globe
+                 占位 (子域 favicon 缺失). -->
             <ProviderLogo
-              v-if="hasProviderLogo(providerHint(g))"
               :hint="providerHint(g)"
+              :host="g.upstreams?.[0]?.url"
+              :fallback-initial="getGroupDisplayName(g)"
               :size="28"
             />
-            <img
-              v-else-if="faviconFor(g) && !isFaviconBroken(g)"
-              :src="faviconFor(g)"
-              alt=""
-              draggable="false"
-              @error="onFaviconErr(g)"
-            />
-            <span
-              v-else
-              :class="['v3-pav', avatarClass(g)]"
-              style="width: 100%; height: 100%; border-radius: 0; font-size: 12px"
-            >
-              {{ shortFor(g) }}
-            </span>
           </span>
           <div style="min-width: 0">
             <div class="v3-gl__row-name">
@@ -382,24 +291,11 @@ function onDragEnd() {
       >
         <span class="v5-picon" style="width: 38px; height: 38px">
           <ProviderLogo
-            v-if="hasProviderLogo(providerHint(g))"
             :hint="providerHint(g)"
+            :host="g.upstreams?.[0]?.url"
+            :fallback-initial="getGroupDisplayName(g)"
             :size="28"
           />
-          <img
-            v-else-if="faviconFor(g) && !isFaviconBroken(g)"
-            :src="faviconFor(g)"
-            alt=""
-            draggable="false"
-            @error="onFaviconErr(g)"
-          />
-          <span
-            v-else
-            :class="['v3-pav', avatarClass(g)]"
-            style="width: 100%; height: 100%; border-radius: 0; font-size: 10px"
-          >
-            {{ shortFor(g) }}
-          </span>
         </span>
         <div style="min-width: 0">
           <div class="v3-gl__row-name">

@@ -22,7 +22,13 @@ import MarkdownIt from "markdown-it";
 import DOMPurify from "dompurify";
 import ProviderLogo from "@/components/common/ProviderLogo.vue";
 import { hasProviderLogo } from "@/data/providerLogos";
-import { findProviderByUpstreams, isFree } from "@/data/freeProviders";
+import {
+  findProviderByUpstreams,
+  getProviderById,
+  isFree,
+  modalityOf,
+  type Modality,
+} from "@/data/freeProviders";
 
 const { t } = useI18n();
 
@@ -240,10 +246,14 @@ const aggregateChildren = ref<Map<number, number[]>>(new Map());
 interface ModelEntry {
   groupName: string;
   groupDisplay: string;
+  groupHost?: string; // group 第一个 upstream URL, 给 ProviderLogo 的 favicon fallback 用
   kind: "alias" | "model";
   name: string; // 显示的 model 名 (alias name or real_model)
   hint?: string; // alias → 显示它指向哪些 real_model;model → 显示哪些 alias 用它
   isFree?: boolean; // 来自 FREE_PROVIDERS / Registry 判断, 仅对 model entries 设置
+  // chat / image / video — 用 modalityOf() 算, 决定 send() 走 /v1/chat 还是
+  // /v1/images. alias 默认 chat (实际请求时会 resolve 到 real_model 再算).
+  modality: Modality;
 }
 interface GroupSection {
   group: GroupInfo;
@@ -353,6 +363,40 @@ const sections = computed<GroupSection[]>(() => {
     }
   }
 
+  // Pass 3: free provider 元数据里声明的 imageModels / videoModels 也注入对应
+  // 标准分组. 上游 /v1/models 不一定返回 image/video 模型 (e.g. agnes 的 image
+  // 走单独端点), 用户也可能没手动加进 exposed_models, 这里兜底让 picker 能看到.
+  // 仅对 standard group + 匹配到 FREE_PROVIDERS 时生效, 不污染普通分组.
+  for (const g of groups.value) {
+    if (g.group_type === "aggregate") {
+      continue;
+    }
+    const pid = groupToProvider.get(g.id);
+    if (!pid) {
+      continue;
+    }
+    const fp = getProviderById(pid);
+    if (!fp) {
+      continue;
+    }
+    const extra = [...(fp.imageModels || []), ...(fp.videoModels || [])];
+    if (extra.length === 0) {
+      continue;
+    }
+    const targets = [g.id, ...(subToAgg.get(g.id) || [])];
+    for (const gid of targets) {
+      let bg = byGroup.get(gid);
+      if (!bg) {
+        bg = { aliases: new Map(), models: new Map() };
+        byGroup.set(gid, bg);
+      }
+      for (const m of extra) {
+        // 当前 freeProvider 全部 imageModels / videoModels 都是免费 — 跟 chat 一样标 true
+        noteModel(bg, m, null, true);
+      }
+    }
+  }
+
   const out: GroupSection[] = [];
   for (const g of groups.value) {
     const data = byGroup.get(g.id);
@@ -360,35 +404,46 @@ const sections = computed<GroupSection[]>(() => {
       continue;
     }
     const entries: ModelEntry[] = [];
+    const pid = groupToProvider.get(g.id);
+    const groupHost = g.upstreams?.[0]?.url || "";
     // aliases 排在前面 (高频选择). hint 字段全量列出关联, 由 UI 层用
     // ellipsis 截断 — 列表视图能展示更多, 卡片视图自动收尾.
     // alias 的 isFree 取决于它指向的 real_models 在 byGroup 里的 isFree 是否任一为 true
     for (const [name, reals] of [...data.aliases.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
       let aliasFree = false;
+      let aliasModality: Modality = "chat";
       for (const m of reals) {
         const minfo = data.models.get(m);
         if (minfo?.isFree) {
           aliasFree = true;
-          break;
+        }
+        // alias 模态取它指向的任一 real_model 的模态; 多 target 时第一个非 chat 优先
+        const mod = modalityOf(pid, m);
+        if (mod !== "chat") {
+          aliasModality = mod;
         }
       }
       entries.push({
         groupName: g.name,
         groupDisplay: g.display,
+        groupHost,
         kind: "alias",
         name,
         hint: [...reals].join(", "),
         isFree: aliasFree,
+        modality: aliasModality,
       });
     }
     for (const [name, info] of [...data.models.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
       entries.push({
         groupName: g.name,
         groupDisplay: g.display,
+        groupHost,
         kind: "model",
         name,
         hint: info.aliases.size > 0 ? [...info.aliases].join(", ") : undefined,
         isFree: info.isFree,
+        modality: modalityOf(pid, name),
       });
     }
     out.push({ group: g, entries });
@@ -455,11 +510,16 @@ function pickManual() {
   if (!g) {
     return;
   }
+  // 手动输入 model 时反查 provider 算 modality, 让用户手动加 image / video
+  // model 时 send() 也能走对路径
+  const pUp = findProviderByUpstreams(g.upstreams);
   pickModel({
     groupName: g.name,
     groupDisplay: g.display,
+    groupHost: g.upstreams?.[0]?.url,
     kind: "model",
     name,
+    modality: modalityOf(pUp?.id, name),
   });
   manualModelName.value = "";
 }
@@ -797,6 +857,106 @@ function removePending(idx: number) {
   pendingAttachments.value.splice(idx, 1);
 }
 
+// Image generation: 调用 OpenAI 兼容 /v1/images/generations, 把生成的图片
+// URL 转 markdown 塞到 assistant message — 现有 markdown-it 渲染会自动出
+// <img>. 跟 chat 共享 messages 数组 + session, 切回 chat 历史依然可见.
+// 暂不暴露 size/n 参数 (硬编码 1×1024), 后续可加控件.
+async function sendImage(groupName: string, modelName: string, prompt: string) {
+  const s = active.value;
+  if (!s) {
+    return;
+  }
+  if (!prompt) {
+    message.warning(t("playground.imagePromptRequired"));
+    return;
+  }
+  const now = Date.now();
+  s.messages.push({ role: "user", content: prompt, sentAt: now });
+  s.messages.push({
+    role: "assistant",
+    content: "",
+    phase: "thinking",
+    sentAt: now,
+  });
+  const asst = s.messages[s.messages.length - 1];
+  input.value = "";
+  pendingAttachments.value = [];
+  sending.value = true;
+  s.updatedAt = Date.now();
+  if (s.title === t("playground.defaultTitle")) {
+    s.title = prompt.slice(0, 24);
+  }
+  await nextTick();
+  scrollToBottom();
+
+  try {
+    const resp = await fetch(
+      `/proxy/${encodeURIComponent(groupName)}/v1/images/generations`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${authKey.value || ""}`,
+          "X-Playground-Trial": "1",
+        },
+        body: JSON.stringify({
+          model: modelName,
+          prompt,
+          n: 1,
+          size: "1024x1024",
+        }),
+      },
+    );
+    if (!resp.ok) {
+      const errText = await resp.text().catch(() => "");
+      asst.content = `[${resp.status} ${resp.statusText}] ${errText || t("playground.requestFailed")}`;
+      asst.error = true;
+      asst.phase = "done";
+      asst.doneAt = Date.now();
+      return;
+    }
+    const json = (await resp.json()) as {
+      data?: Array<{ url?: string; b64_json?: string; revised_prompt?: string }>;
+      usage?: { total_tokens?: number; input_tokens?: number; output_tokens?: number };
+    };
+    const items = json.data || [];
+    if (items.length === 0) {
+      asst.content = t("playground.emptyResponse");
+      asst.error = true;
+    } else {
+      // OpenAI 返回有 url (托管) 或 b64_json (内嵌). 都转 markdown image, 渲
+      // 染器会出 <img>. revised_prompt (如果有) 作为图片下方说明.
+      const lines: string[] = [];
+      for (const it of items) {
+        const src = it.url || (it.b64_json ? `data:image/png;base64,${it.b64_json}` : "");
+        if (!src) continue;
+        lines.push(`![](${src})`);
+        if (it.revised_prompt) {
+          lines.push(`*${it.revised_prompt}*`);
+        }
+      }
+      asst.content = lines.join("\n\n");
+      asst.firstByteAt = Date.now();
+    }
+    if (json.usage) {
+      asst.usage = {
+        prompt_tokens: json.usage.input_tokens,
+        completion_tokens: json.usage.output_tokens,
+        total_tokens: json.usage.total_tokens,
+      };
+    }
+    asst.phase = "done";
+    asst.doneAt = Date.now();
+  } catch (e) {
+    asst.content = `[network error] ${(e as Error).message}`;
+    asst.error = true;
+    asst.phase = "done";
+    asst.doneAt = Date.now();
+  } finally {
+    sending.value = false;
+  }
+}
+
 // Ctrl/Cmd+V 粘贴: 剪贴板含图片就当附件处理 (截图、复制图片场景常用),
 // 不含图片则不阻止默认 paste — 文字粘贴正常.
 async function onPaste(e: ClipboardEvent) {
@@ -870,6 +1030,27 @@ async function send() {
     return;
   }
   const [groupName, , modelName] = parts;
+
+  // 按 modality 分流: chat → 现有 streaming 逻辑; image → sendImage();
+  // video → 提示尚未支持 (P11.23 范围). 模态从当前 sections entry 反查;
+  // 找不到 entry (新 group 未刷新) 时, 用 modalityOf 直接算.
+  let modality: Modality = "chat";
+  for (const sec of sections.value) {
+    if (sec.group.name !== groupName) continue;
+    const e = sec.entries.find(x => x.name === modelName);
+    if (e) {
+      modality = e.modality;
+      break;
+    }
+  }
+  if (modality === "video") {
+    message.warning(t("playground.videoNotSupported"));
+    return;
+  }
+  if (modality === "image") {
+    await sendImage(groupName, modelName, text);
+    return;
+  }
 
   const now = Date.now();
   s.messages.push({
@@ -1187,6 +1368,17 @@ function asstMeta(m: ChatMessage): string {
     }
   }
   return parts.join("  ·  ");
+}
+
+function modalityIcon(m: Modality): string {
+  if (m === "image") return "🎨";
+  if (m === "video") return "🎬";
+  return "💬";
+}
+function modalityLabel(m: Modality): string {
+  if (m === "image") return t("playground.modalityImageLabel");
+  if (m === "video") return t("playground.modalityVideoLabel");
+  return t("playground.modalityChatLabel");
 }
 </script>
 
@@ -1594,14 +1786,12 @@ function asstMeta(m: ChatMessage): string {
         >
           <span class="pg-modal__tab-logo">
             <ProviderLogo
-              v-if="logoHintForGroup(sec.group)"
-              :hint="logoHintForGroup(sec.group)!"
+              :hint="logoHintForGroup(sec.group) || sec.group.name"
+              :host="sec.group.upstreams?.[0]?.url"
+              :fallback-initial="sec.group.display"
               :size="16"
               style="border-radius: 3px"
             />
-            <span v-else class="pg-modal__tab-letter">
-              {{ sec.group.display.replace(/[^A-Za-z0-9一-龥]/g, "").slice(0, 1).toUpperCase() }}
-            </span>
           </span>
           <span class="pg-modal__tab-name">{{ sec.group.display }}</span>
           <span v-if="currentGroupId === sec.group.id" class="pg-modal__tab-dot" />
@@ -1636,6 +1826,11 @@ function asstMeta(m: ChatMessage): string {
                 >
                   <div class="pg-card__top">
                     <span class="pg-card__name" :title="e.name">{{ e.name }}</span>
+                    <span v-if="e.modality !== 'chat'"
+                      class="pg-list-row__tag" :class="`pg-list-row__tag--${e.modality}`"
+                      :title="modalityLabel(e.modality)">
+                      {{ modalityIcon(e.modality) }} {{ modalityLabel(e.modality) }}
+                    </span>
                     <span v-if="e.isFree && e.kind === 'model'" class="pg-list-row__tag pg-list-row__tag--free">
                       {{ t("playground.freeTag") }}
                     </span>
@@ -1726,14 +1921,20 @@ function asstMeta(m: ChatMessage): string {
                   <span v-if="e.kind === 'alias'" class="pg-list-row__tag pg-list-row__tag--alias">
                     {{ t("playground.aliasTag") }}
                   </span>
+                  <span v-if="e.modality !== 'chat'"
+                    class="pg-list-row__tag" :class="`pg-list-row__tag--${e.modality}`"
+                    :title="modalityLabel(e.modality)">
+                    {{ modalityIcon(e.modality) }} {{ modalityLabel(e.modality) }}
+                  </span>
                   <span v-if="e.isFree && e.kind === 'model'" class="pg-list-row__tag pg-list-row__tag--free">
                     {{ t("playground.freeTag") }}
                   </span>
                 </div>
                 <div v-if="activeTabGroupId === null" class="pg-list-row__provider">
                   <ProviderLogo
-                    v-if="logoHintForGroup({ name: e.groupName, display: e.groupDisplay })"
-                    :hint="logoHintForGroup({ name: e.groupName, display: e.groupDisplay })!"
+                    :hint="logoHintForGroup({ name: e.groupName, display: e.groupDisplay }) || e.groupName"
+                    :host="e.groupHost"
+                    :fallback-initial="e.groupDisplay"
                     :size="14"
                     style="border-radius: 3px"
                   />
@@ -3141,6 +3342,14 @@ body.pg-route-active .v3-main > .app-footer {
 .pg-modal .pg-list-row__tag--free {
   color: #178f4e;
   background: rgba(23, 143, 78, 0.12);
+}
+.pg-modal .pg-list-row__tag--image {
+  color: #8b5cf6;
+  background: rgba(139, 92, 246, 0.12);
+}
+.pg-modal .pg-list-row__tag--video {
+  color: #d97706;
+  background: rgba(217, 119, 6, 0.12);
 }
 .pg-modal .pg-list-row__provider {
   display: inline-flex;

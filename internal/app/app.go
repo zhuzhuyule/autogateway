@@ -140,6 +140,12 @@ func (a *App) Start() error {
 		if err := db.MigrateDatabase(a.db); err != nil {
 			return fmt.Errorf("database data migration failed: %w", err)
 		}
+		// P11.19: replace legacy UNIQUE(name) with partial unique (active rows only).
+		// Lets soft-deleted groups co-exist with a same-named new group.
+		// Must run AFTER AutoMigrate (gorm creates the legacy index there).
+		if err := db.V2_5_17_PartialUniqueGroupName(a.db); err != nil {
+			return fmt.Errorf("V2_5_17 partial unique groups.name failed: %w", err)
+		}
 		logrus.Info("Database auto-migration completed.")
 
 		// 初始化系统设置
