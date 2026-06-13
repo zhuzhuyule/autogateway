@@ -841,8 +841,16 @@ function isFreeModel(modelId: string): boolean {
   return isFree(matchedProvider.value?.id, modelId) === true;
 }
 
-// ⭐推荐徽标：仅在能确定 providerId 时判定，aggregate 无单一 provider → false
+// ⭐推荐徽标:单分组按 matchedProvider 判;聚合分组遍历子分组, 任一 sub 的 provider
+// 推荐该 model 即视为推荐 (model card 上会带 ⭐ 徽标).
 function isRecommendedModel(modelId: string): boolean {
+  if (isAggregate.value) {
+    for (const sg of subGroups.value) {
+      const p = findProviderByUpstreams(sg.group?.upstreams || []);
+      if (p?.id && isRecommended(p.id, modelId)) return true;
+    }
+    return false;
+  }
   const pid = matchedProvider.value?.id;
   if (!pid) return false;
   return isRecommended(pid, modelId);
@@ -977,6 +985,46 @@ async function testModel(modelId: string) {
   }
 }
 
+// P11.38: 批量/一键测试 — 控制并发度防止打爆上游 + 后端
+const bulkTesting = ref(false);
+const BULK_TEST_CONCURRENCY = 3;
+
+async function bulkTestModels(modelIds: string[]) {
+  if (bulkTesting.value || modelIds.length === 0) return;
+  // 跳过 in-flight, 其它的都重测一次 (用户 click 这个按钮就是想刷新所有状态)
+  const queue = modelIds.filter(m => !testingModels.value.has(m));
+  if (queue.length === 0) return;
+  bulkTesting.value = true;
+  message.info(t("v3.bulkTestStart", { n: queue.length }));
+  try {
+    let idx = 0;
+    const workers = Array.from({ length: Math.min(BULK_TEST_CONCURRENCY, queue.length) }, async () => {
+      // 简单 worker pool: 每个 worker 不断从队头取
+      while (idx < queue.length) {
+        const myIdx = idx++;
+        const modelId = queue[myIdx];
+        // testModel 自带防重复; 我们这里只调它即可, 失败也不阻塞下一项
+        try {
+          await testModel(modelId);
+        } catch {
+          /* 单项失败 testModel 内部已经写了 result, 这里继续下一个 */
+        }
+      }
+    });
+    await Promise.all(workers);
+    // 统计成功/失败 — 给用户一个完成 toast
+    const ok = queue.filter(m => modelTestResults.value[m]?.ok === true).length;
+    const fail = queue.length - ok;
+    if (fail === 0) {
+      message.success(t("v3.bulkTestDoneOk", { n: ok }));
+    } else {
+      message.warning(t("v3.bulkTestDoneMixed", { ok, fail }));
+    }
+  } finally {
+    bulkTesting.value = false;
+  }
+}
+
 // tab 角标:specified 模式展示白名单数量(强调已暴露这件事);
 // passthrough / 聚合分组展示上游全量数。
 const modelCount = computed(() => {
@@ -1027,7 +1075,18 @@ type RoutingMode = "passthrough" | "specified";
 const routingMode = ref<RoutingMode>("passthrough");
 const exposedModels = ref<string[]>([]);
 const blockedModels = ref<string[]>([]);
-const availFilter = ref<"all" | "free" | "trial" | "paid">("all");
+const availFilter = ref<"all" | "free" | "trial" | "paid" | "recommended">("all");
+
+// "推荐" 过滤的可见性 — 单分组看 matchedProvider, aggregate 看是否任一 sub-group
+// 能匹配到 free provider. 否则按钮过滤永远空, 没用.
+const showRecommendedFilter = computed(() => {
+  if (isAggregate.value) {
+    return subGroups.value.some(
+      sg => !!findProviderByUpstreams(sg.group?.upstreams || [])?.id,
+    );
+  }
+  return !!matchedProvider.value?.id;
+});
 
 // 仅 Gitee 显示 "体验" 过滤 (trial-quota 模式只 gitee/longcat/nvidia 有,
 // 但只有 gitee 把它作为常态产品定位 — 其它两家也按业务展示)
@@ -1064,7 +1123,7 @@ watch(() => props.group?.id, syncFromGroup);
 const exposedSet = computed(() => new Set(exposedModels.value));
 const blockedSet = computed(() => new Set(blockedModels.value));
 
-// 已暴露列表(顶部区,specified 模式才显示) — 应用 search + free/paid 过滤
+// 已暴露列表(顶部区,specified 模式才显示) — 应用 search + free/paid/recommended 过滤
 const filteredExposed = computed(() => {
   let list = exposedModels.value;
   const q = modelSearch.value.toLowerCase().trim();
@@ -1089,11 +1148,13 @@ const filteredExposed = computed(() => {
       if (k !== null) return false;
       return !isFreeModel(m);
     });
+  } else if (availFilter.value === "recommended") {
+    list = list.filter(m => isRecommendedModel(m));
   }
   return list;
 });
 
-// 上游全部列表(底部区) — 应用 search + free/paid 过滤
+// 上游全部列表(底部区) — 应用 search + free/paid/recommended 过滤
 const filteredAvailable = computed(() => {
   let list = groupModels.value;
   const q = modelSearch.value.toLowerCase().trim();
@@ -1118,6 +1179,8 @@ const filteredAvailable = computed(() => {
       if (k !== null) return false;
       return !isFreeModel(m);
     });
+  } else if (availFilter.value === "recommended") {
+    list = list.filter(m => isRecommendedModel(m));
   }
   return list;
 });
@@ -2119,6 +2182,14 @@ const filterCounts = computed(() => ({
               <button class="v3-btn v3-btn--sm" :class="{ 'v3-btn--accent': availFilter === 'paid' }" @click="availFilter = 'paid'">
                 {{ t("v3.paid") || "收费" }}
               </button>
+              <button
+                v-if="showRecommendedFilter"
+                class="v3-btn v3-btn--sm"
+                :class="{ 'v3-btn--accent': availFilter === 'recommended' }"
+                @click="availFilter = 'recommended'"
+              >
+                ⭐ {{ t("v3.recommended") || "推荐" }}
+              </button>
             </div>
           </div>
         </div>
@@ -2173,6 +2244,18 @@ const filterCounts = computed(() => ({
             <span class="v5-section-head__title">{{ t("v3.exposedModels") || "已暴露" }}</span>
             <span class="v3-chip" style="font-size: 10px">{{ exposedModels.length }}</span>
             <span class="v5-section-head__hint">{{ t("v3.exposedHint") || "白名单 — 仅这些模型可调用,可加别名,支持拖拽排序" }}</span>
+            <div class="v5-section-head__spacer" style="flex: 1"></div>
+            <!-- P11.38: 一键测试 - 测当前 filteredExposed 列表里的所有 model. < 30 显示 -->
+            <button
+              v-if="filteredExposed.length > 0 && filteredExposed.length < 30"
+              class="v3-btn v3-btn--sm"
+              :disabled="bulkTesting"
+              :title="t('v3.bulkTestTip')"
+              @click="bulkTestModels(filteredExposed)"
+            >
+              <n-icon :component="PulseOutline" :size="11" />
+              {{ bulkTesting ? t("v3.bulkTestRunning") : t("v3.bulkTestBtn", { n: filteredExposed.length }) }}
+            </button>
           </div>
 
           <div v-if="filteredExposed.length" class="v5-cardgrid">
@@ -2185,6 +2268,7 @@ const filterCounts = computed(() => ({
                 'v5-modelcard--dragging': dragIdx === exposedModels.indexOf(modelId),
                 'v5-modelcard--blocked': blockedSet.has(modelId),
                 'v5-modelcard--selected': isSelected(modelId),
+                'v5-modelcard--testfail': modelTestState(modelId)?.ok === false,
               }"
               draggable="true"
               @click="toggleSelected(modelId)"
@@ -2277,6 +2361,18 @@ const filterCounts = computed(() => ({
           <div class="v5-section-head" style="margin-top: 16px">
             <span class="v5-section-head__title">{{ t("v3.upstreamAll") || "上游全部" }}</span>
             <span class="v3-chip" style="font-size: 10px">{{ filteredAvailable.length }} / {{ groupModels.length }}</span>
+            <div class="v5-section-head__spacer" style="flex: 1"></div>
+            <!-- P11.38: 当前 filtered < 30 时提供一键测试 (上限保护 provider) -->
+            <button
+              v-if="filteredAvailable.length > 0 && filteredAvailable.length < 30"
+              class="v3-btn v3-btn--sm"
+              :disabled="bulkTesting"
+              :title="t('v3.bulkTestTip')"
+              @click="bulkTestModels(filteredAvailable)"
+            >
+              <n-icon :component="PulseOutline" :size="11" />
+              {{ bulkTesting ? t("v3.bulkTestRunning") : t("v3.bulkTestBtn", { n: filteredAvailable.length }) }}
+            </button>
           </div>
 
           <div v-if="filteredAvailable.length" class="v5-cardgrid">
@@ -2289,6 +2385,7 @@ const filterCounts = computed(() => ({
                 'v5-modelcard--inexposed': exposedSet.has(modelId),
                 'v5-modelcard--blocked': blockedSet.has(modelId),
                 'v5-modelcard--selected': isSelected(modelId),
+                'v5-modelcard--testfail': modelTestState(modelId)?.ok === false,
               }"
               @click="toggleSelected(modelId)"
             >
@@ -2371,6 +2468,24 @@ const filterCounts = computed(() => ({
         <!-- PASSTHROUGH MODE / AGGREGATE: 单列表 -->
         <!-- =================================== -->
         <template v-else>
+          <!-- P11.38: filtered < 30 时加一键测试 head; 否则保持原来无 head 极简布局 -->
+          <div
+            v-if="filteredAvailable.length > 0 && filteredAvailable.length < 30"
+            class="v5-section-head"
+          >
+            <span class="v5-section-head__title">{{ t("v3.allModelsTitle") || "全部模型" }}</span>
+            <span class="v3-chip" style="font-size: 10px">{{ filteredAvailable.length }} / {{ groupModels.length }}</span>
+            <div class="v5-section-head__spacer" style="flex: 1"></div>
+            <button
+              class="v3-btn v3-btn--sm"
+              :disabled="bulkTesting"
+              :title="t('v3.bulkTestTip')"
+              @click="bulkTestModels(filteredAvailable)"
+            >
+              <n-icon :component="PulseOutline" :size="11" />
+              {{ bulkTesting ? t("v3.bulkTestRunning") : t("v3.bulkTestBtn", { n: filteredAvailable.length }) }}
+            </button>
+          </div>
           <div v-if="filteredAvailable.length" class="v5-cardgrid">
             <div
               v-for="modelId in filteredAvailable"
@@ -2379,6 +2494,7 @@ const filterCounts = computed(() => ({
               :class="{
                 'v5-modelcard--blocked': blockedSet.has(modelId),
                 'v5-modelcard--selected': isSelected(modelId),
+                'v5-modelcard--testfail': modelTestState(modelId)?.ok === false,
               }"
               @click="toggleSelected(modelId)"
             >

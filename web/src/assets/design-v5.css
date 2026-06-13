@@ -748,6 +748,12 @@
   border-color: var(--v3-accent);
 }
 
+/* ===== Test failure state — placed after exposed/selected so red wins ===== */
+.v5-modelcard--testfail {
+  border-color: var(--v3-danger);
+  background: oklch(from var(--v3-danger) l c h / 0.12);
+}
+
 /* P8.2: alias 失效项跳转后 model card 高亮 2s 淡出 */
 @keyframes v5-modelcard-highlight {
   0% { box-shadow: 0 0 0 0 var(--v3-accent); background: oklch(from var(--v3-accent) l c h / 0.18); }
