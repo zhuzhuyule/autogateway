@@ -262,7 +262,12 @@ func (s *SyncService) ProcessPayload(ctx context.Context, payload *SyncPayload) 
 		groupIDMap := make(map[uint]uint)
 		for _, incoming := range payload.Groups {
 			var existing models.Group
-			err := tx.Unscoped().Where("name = ?", incoming.Name).First(&existing).Error
+			// 优先取本端 active row 当 existing — 否则 LWW 会把 soft-deleted "agnes" 复活,
+			// 跟本端原有 active "agnes" 撞 partial unique (uni_groups_name_active).
+			// `deleted_at IS NULL` 在 SQLite/Postgres 都返回 0/1, DESC 让 active=1 排前.
+			err := tx.Unscoped().Where("name = ?", incoming.Name).
+				Order("deleted_at IS NULL DESC, id DESC").
+				First(&existing).Error
 			if err != nil {
 				if errors.Is(err, gorm.ErrRecordNotFound) {
 					oldID := incoming.ID

@@ -7,11 +7,15 @@ import {
   type SyncConfig,
   type VersionInfo,
   type UpgradeStatus,
+  type PreviewPushResponse,
+  type PreviewItem,
 } from "@/api/sync";
 import { versionService } from "@/services/version";
 import {
   Add,
+  ArrowDownCircleOutline,
   ArrowUpCircle,
+  ArrowUpCircleOutline,
   CheckmarkCircle,
   CloseCircle,
   Create,
@@ -24,6 +28,8 @@ import {
   NAlert,
   NButton,
   NCard,
+  NCollapse,
+  NCollapseItem,
   NDataTable,
   NDrawer,
   NDrawerContent,
@@ -159,8 +165,42 @@ const columns = computed(() => [
     render(row: SyncPeer) {
       // 注: peer 行不再显示升级按钮 — 跨节点远程升级当前未实现, 显示按钮反而误导.
       // 顶部"升级本端"按钮基于 GitHub release 真实测算, 才是用户唯一可触发的升级路径.
+      // P11.37: 按钮 disable 闸门 - 未连接的 peer 不让 trigger
+      const canTrigger = isPeerConnected(row);
+      const otherBusy = triggeringPeerId.value !== null && triggeringPeerId.value !== row.id;
       return h(NSpace, { size: 4 }, {
         default: () => [
+          // P11.35 + P11.37: Pull 按钮 wrap NPopconfirm 做二次确认, 同时未连接 disable
+          h(
+            NPopconfirm,
+            { onPositiveClick: () => handleTriggerPull(row), positiveText: t("sync.pullConfirmYes") },
+            {
+              trigger: () =>
+                h(
+                  NButton,
+                  {
+                    size: "small", tertiary: true,
+                    loading: triggeringPeerId.value === row.id,
+                    disabled: !canTrigger || otherBusy,
+                    title: canTrigger ? t("sync.triggerPull") : t("sync.triggerDisabledNotConnected"),
+                  },
+                  { icon: () => h(NIcon, null, { default: () => h(ArrowDownCircleOutline) }) }
+                ),
+              default: () => t("sync.pullConfirmHint", { name: row.name }),
+            }
+          ),
+          // P11.35 + P11.36 + P11.37: Push 走 preview modal, 未连接 disable
+          h(
+            NButton,
+            {
+              size: "small", tertiary: true,
+              loading: triggeringPeerId.value === row.id,
+              disabled: !canTrigger || otherBusy,
+              onClick: () => handleTriggerPush(row),
+              title: canTrigger ? t("sync.triggerPush") : t("sync.triggerDisabledNotConnected"),
+            },
+            { icon: () => h(NIcon, null, { default: () => h(ArrowUpCircleOutline) }) }
+          ),
           h(
             NButton,
             { size: "small", tertiary: true, onClick: () => openLogs(row), title: t("sync.viewHistory") },
@@ -429,6 +469,116 @@ async function handleDelete(id: string) {
   }
 }
 
+// P11.35: 手动 trigger pull/push. 用 ref 锁防止双击; 操作结束后 reload peer
+// 状态拿最新 last_synced_at + status, 同时反应 sync 历史日志条目.
+const triggeringPeerId = ref<string | null>(null);
+
+async function handleTriggerPull(peer: SyncPeer) {
+  if (triggeringPeerId.value) return;
+  triggeringPeerId.value = peer.id;
+  try {
+    await syncApi.triggerPull(peer.id);
+    message.success(t("sync.pullSuccess", { name: peer.name }));
+    loadPeers();
+  } catch (err: any) {
+    message.error(err.response?.data?.message || err.response?.data?.error || t("sync.pullFailed"));
+  } finally {
+    triggeringPeerId.value = null;
+  }
+}
+
+// P11.36: push 二次确认弹窗状态. preview API 拿到的本次将推送的清单.
+const pushConfirmShow = ref(false);
+const pushConfirmPeer = ref<SyncPeer | null>(null);
+const pushConfirmPreview = ref<PreviewPushResponse | null>(null);
+const pushConfirmLoading = ref(false);
+
+async function handleTriggerPush(peer: SyncPeer) {
+  if (triggeringPeerId.value) return;
+  triggeringPeerId.value = peer.id;
+  try {
+    // 先 preview, 看会发什么
+    const preview = await syncApi.previewPush(peer.id);
+    pushConfirmPeer.value = peer;
+    pushConfirmPreview.value = preview;
+    pushConfirmShow.value = true;
+  } catch (err: any) {
+    message.error(err.response?.data?.message || err.response?.data?.error || t("sync.pushFailed"));
+  } finally {
+    triggeringPeerId.value = null;
+  }
+}
+
+// 用户在确认弹窗按 "确认推送" — 真正发起 push
+async function confirmTriggerPush() {
+  if (!pushConfirmPeer.value || pushConfirmLoading.value) return;
+  const peer = pushConfirmPeer.value;
+  pushConfirmLoading.value = true;
+  try {
+    await syncApi.triggerPush(peer.id);
+    message.success(t("sync.pushSuccess", { name: peer.name }));
+    pushConfirmShow.value = false;
+    loadPeers();
+  } catch (err: any) {
+    message.error(err.response?.data?.message || err.response?.data?.error || t("sync.pushFailed"));
+  } finally {
+    pushConfirmLoading.value = false;
+  }
+}
+
+// 按 type 分组 affected, UI 渲染用
+const pushConfirmGroupedAffected = computed(() => {
+  const buckets: Record<string, PreviewItem[]> = { group: [], subgroup: [], alias: [], key: [], setting: [] };
+  for (const item of pushConfirmPreview.value?.affected ?? []) {
+    if (buckets[item.type]) buckets[item.type].push(item);
+  }
+  return buckets;
+});
+
+// 每组里 upsert / delete 各几条 — UI 展示在 collapse header 上
+function countByAction(items: PreviewItem[]): { upsert: number; deleted: number } {
+  let upsert = 0, deleted = 0;
+  for (const it of items) {
+    if (it.action === "delete") deleted++; else upsert++;
+  }
+  return { upsert, deleted };
+}
+
+// P11.37: NCollapse 展开/全部展开/全部折叠控制. 默认全部 collapsed - 用户先看 summary
+const expandedTypes = ref<string[]>([]);
+function toggleAllExpand() {
+  const allTypes = ["group", "subgroup", "alias", "key", "setting"].filter(
+    t => pushConfirmGroupedAffected.value[t]?.length > 0,
+  );
+  if (expandedTypes.value.length === allTypes.length) {
+    expandedTypes.value = [];
+  } else {
+    expandedTypes.value = allTypes;
+  }
+}
+
+// 相对时间 — dayjs 没装, 自写一个 minimal helper
+function relativeTime(iso: string): string {
+  const ms = Date.now() - new Date(iso).getTime();
+  const sec = Math.floor(ms / 1000);
+  if (sec < 60) return t("sync.relJustNow");
+  const min = Math.floor(sec / 60);
+  if (min < 60) return t("sync.relMinAgo", { n: min });
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return t("sync.relHourAgo", { n: hr });
+  const day = Math.floor(hr / 24);
+  return t("sync.relDayAgo", { n: day });
+}
+
+// P11.37: peer 是否处于 "可触发同步" 状态. status 字段实际值见 sync_handler.go:
+//   active / connected / warning:*  → 可用
+//   disconnected / "" / error       → 不可用
+function isPeerConnected(peer: SyncPeer): boolean {
+  const s = (peer.status || "").trim();
+  if (!s || s === "disconnected") return false;
+  return s === "active" || s === "connected" || s.startsWith("warning");
+}
+
 async function handleSave() {
   if (!editingPeer.value) return;
   try {
@@ -635,14 +785,17 @@ async function handleSave() {
       <n-drawer-content
         :title="t('sync.historyTitle') + (logPeer ? ` — ${logPeer.name}` : '')"
         closable
+        :body-content-style="{ display: 'flex', flexDirection: 'column', height: '100%', padding: '14px' }"
       >
+        <!-- flex-height + 父容器 height:100% 让表格撑满抽屉内容区, 不再固定 max-height=600 -->
         <n-data-table
           :columns="logColumns"
           :data="logRows"
           :loading="logLoading"
           :bordered="false"
           size="small"
-          :max-height="600"
+          flex-height
+          style="flex: 1; min-height: 0"
         >
           <template #empty>
             <n-empty :description="t('sync.noHistory')" />
@@ -650,6 +803,129 @@ async function handleSave() {
         </n-data-table>
       </n-drawer-content>
     </n-drawer>
+
+    <!-- P11.36: 推送二次确认弹窗 - 按表分类展示 affected -->
+    <n-modal
+      v-model:show="pushConfirmShow"
+      preset="card"
+      style="width: 640px; max-height: calc(100vh - 80px)"
+      :title="t('sync.pushConfirmTitle', { name: pushConfirmPeer?.name || '' })"
+      :mask-closable="false"
+    >
+      <div v-if="pushConfirmPreview" style="display: flex; flex-direction: column; gap: 10px">
+        <!-- since 时间 + 总计 -->
+        <div style="font: 400 12px var(--v3-sans); color: var(--v3-ink-3); line-height: 1.6">
+          <div v-if="pushConfirmPreview.since">
+            {{ t("sync.pushConfirmSince", { time: new Date(pushConfirmPreview.since).toLocaleString() }) }}
+          </div>
+          <div v-else>{{ t("sync.pushConfirmSinceFull") }}</div>
+          <div style="margin-top: 4px; color: var(--v3-warn, #d97706)">
+            ⚠️ {{ t("sync.pushConfirmLWWNote") }}
+          </div>
+        </div>
+
+        <!-- 没数据时空状态 -->
+        <n-empty
+          v-if="pushConfirmPreview.affected.length === 0"
+          :description="t('sync.pushConfirmEmpty')"
+          style="padding: 20px 0"
+        />
+
+        <!-- 按表分类 collapse — 默认全部收起, 头部带 chips 显示 +N / ×N 统计 -->
+        <template v-else>
+          <div style="display: flex; justify-content: space-between; align-items: center;
+                      padding: 2px 0 4px; border-bottom: 1px solid var(--v3-line)">
+            <span style="font: 500 12px var(--v3-sans); color: var(--v3-ink-2)">
+              {{ t("sync.pushConfirmAffectedTotal", { n: pushConfirmPreview.affected.length }) }}
+            </span>
+            <n-button text size="tiny" @click="toggleAllExpand">
+              {{
+                expandedTypes.length > 0
+                  ? t("sync.pushConfirmCollapseAll")
+                  : t("sync.pushConfirmExpandAll")
+              }}
+            </n-button>
+          </div>
+
+          <n-collapse
+            v-model:expanded-names="expandedTypes"
+            :default-expanded-names="[]"
+            arrow-placement="left"
+          >
+            <template v-for="(items, type) in pushConfirmGroupedAffected" :key="type">
+              <n-collapse-item
+                v-if="items.length > 0"
+                :name="type"
+              >
+                <template #header>
+                  <span style="font: 600 12px var(--v3-sans); color: var(--v3-ink)">
+                    {{ t(`sync.pushConfirmType_${type}`) }}
+                  </span>
+                </template>
+                <template #header-extra>
+                  <n-space :size="6" align="center">
+                    <n-tag
+                      v-if="countByAction(items).upsert > 0"
+                      size="small"
+                      type="success"
+                      :bordered="false"
+                    >
+                      +{{ countByAction(items).upsert }}
+                    </n-tag>
+                    <n-tag
+                      v-if="countByAction(items).deleted > 0"
+                      size="small"
+                      type="error"
+                      :bordered="false"
+                    >
+                      ×{{ countByAction(items).deleted }}
+                    </n-tag>
+                  </n-space>
+                </template>
+                <div style="max-height: 220px; overflow-y: auto; padding: 2px 0">
+                  <div
+                    v-for="(item, idx) in items"
+                    :key="`${type}-${idx}`"
+                    style="display: flex; align-items: center; gap: 8px; padding: 4px 0;
+                           font: 400 12px var(--v3-mono); color: var(--v3-ink)"
+                  >
+                    <span
+                      :style="{
+                        width: '16px', textAlign: 'center', fontWeight: 700,
+                        color: item.action === 'delete' ? 'var(--v3-danger)' : 'var(--v3-ok)',
+                      }"
+                    >{{ item.action === "delete" ? "×" : "+" }}</span>
+                    <span style="flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap"
+                      :title="item.name"
+                    >{{ item.name }}</span>
+                    <span
+                      style="font: 400 10.5px var(--v3-mono); color: var(--v3-ink-4)"
+                      :title="new Date(item.updated_at).toLocaleString()"
+                    >
+                      {{ relativeTime(item.updated_at) }}
+                    </span>
+                  </div>
+                </div>
+              </n-collapse-item>
+            </template>
+          </n-collapse>
+        </template>
+      </div>
+
+      <template #footer>
+        <n-space justify="end">
+          <n-button @click="pushConfirmShow = false">{{ t("common.cancel") }}</n-button>
+          <n-button
+            type="primary"
+            :loading="pushConfirmLoading"
+            :disabled="pushConfirmPreview?.affected.length === 0"
+            @click="confirmTriggerPush"
+          >
+            {{ t("sync.pushConfirmAction") }}
+          </n-button>
+        </n-space>
+      </template>
+    </n-modal>
   </n-card>
 </template>
 

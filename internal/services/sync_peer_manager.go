@@ -440,90 +440,232 @@ func (m *SyncPeerManager) doPull(ctx context.Context) {
 	}
 
 	myPubKey := m.keypair.PublicKeyBase64()
-
 	for _, peer := range peers {
-		pullURL := fmt.Sprintf("%s/api/sync/pull", strings.TrimRight(peer.URL, "/"))
-		// 把本端公钥显式带在 query, 让对端用这个加密响应 (绕过对端 db 里可能陈旧的公钥记录).
-		// 这是修 mini 端 "Max" peer 错存了自己公钥 → 加密给本端无法解 的 stale-record bug.
-		params := []string{}
-		// doPull 用专属的 LastPulledAt 作为 since 下限, 跟 LastSyncedAt (push 也会改) 解耦.
-		// 必须用 UTC 序列化 — SQLite TEXT 比较是字典序, "+00:00" 时间戳跟
-		// "+08:00" 时间戳字典序混乱 (15:46+00 < 23:45+08 字面上, 但实际 15:46 UTC > 15:45 UTC).
-		if peer.LastPulledAt != nil {
-			params = append(params, "since="+url.QueryEscape(peer.LastPulledAt.UTC().Format(time.RFC3339Nano)))
-		}
-		if myPubKey != "" {
-			params = append(params, "my_public_key="+url.QueryEscape(myPubKey))
-		}
-		if len(params) > 0 {
-			pullURL += "?" + strings.Join(params, "&")
-		}
-		req, err := http.NewRequestWithContext(ctx, "GET", pullURL, nil)
-		if err != nil {
-			continue
-		}
-		req.Header.Set("X-Sync-Key", peer.SyncKey)
+		_ = m.pullOnePeer(ctx, peer, settings, myPubKey)
+	}
+}
 
-		client := &http.Client{Timeout: 10 * time.Second}
-		resp, err := client.Do(req)
-		if err != nil {
-			logrus.Debugf("failed to pull from peer %s: %v", peer.Name, err)
-			m.writeLog(peer.ID, "pull", "error", fmt.Sprintf("http failed: %v", err), "")
-			continue
-		}
+// pullOnePeer 单个 peer 的 pull 实现, 供 doPull 循环和手动 trigger 复用.
+// 返回的 error 是给手动 trigger 走 API 时返给前端的 (循环里 ignore).
+// HTTP timeout = 30s — sqlite 数据量大时 schema_hash + delta 计算可能 >10s, 给余量.
+func (m *SyncPeerManager) pullOnePeer(ctx context.Context, peer models.SyncPeer, settings types.SystemSettings, myPubKey string) error {
+	pullURL := fmt.Sprintf("%s/api/sync/pull", strings.TrimRight(peer.URL, "/"))
+	// 把本端公钥显式带在 query, 让对端用这个加密响应 (绕过对端 db 里可能陈旧的公钥记录).
+	// 这是修 mini 端 "Max" peer 错存了自己公钥 → 加密给本端无法解 的 stale-record bug.
+	params := []string{}
+	// doPull 用专属的 LastPulledAt 作为 since 下限, 跟 LastSyncedAt (push 也会改) 解耦.
+	// 必须用 UTC 序列化 — SQLite TEXT 比较是字典序, "+00:00" 时间戳跟
+	// "+08:00" 时间戳字典序混乱 (15:46+00 < 23:45+08 字面上, 但实际 15:46 UTC > 15:45 UTC).
+	if peer.LastPulledAt != nil {
+		params = append(params, "since="+url.QueryEscape(peer.LastPulledAt.UTC().Format(time.RFC3339Nano)))
+	}
+	if myPubKey != "" {
+		params = append(params, "my_public_key="+url.QueryEscape(myPubKey))
+	}
+	if len(params) > 0 {
+		pullURL += "?" + strings.Join(params, "&")
+	}
+	req, err := http.NewRequestWithContext(ctx, "GET", pullURL, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("X-Sync-Key", peer.SyncKey)
 
-		if resp.StatusCode != http.StatusOK {
-			m.writeLog(peer.ID, "pull", "error", fmt.Sprintf("http status %d", resp.StatusCode), "")
-			resp.Body.Close()
-			continue
-		}
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		logrus.Debugf("failed to pull from peer %s: %v", peer.Name, err)
+		m.writeLog(peer.ID, "pull", "error", fmt.Sprintf("http failed: %v", err), "")
+		return err
+	}
+	defer resp.Body.Close()
 
-		var response struct {
-			Ciphertext string `json:"ciphertext"`
-		}
-		if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
-			m.writeLog(peer.ID, "pull", "error", fmt.Sprintf("decode response: %v", err), "")
-			resp.Body.Close()
-			continue
-		}
-		resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		errMsg := fmt.Sprintf("http status %d", resp.StatusCode)
+		m.writeLog(peer.ID, "pull", "error", errMsg, "")
+		return fmt.Errorf("%s", errMsg)
+	}
 
-		if response.Ciphertext == "" {
-			continue // No new data, not an error - skip logging to avoid noise
-		}
+	var response struct {
+		Ciphertext string `json:"ciphertext"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+		m.writeLog(peer.ID, "pull", "error", fmt.Sprintf("decode response: %v", err), "")
+		return err
+	}
 
-		// 跟 ws 路径一致: 优先非对称 (用对端公钥), 失败再回退 legacy.
-		var payload *SyncPayload
-		if peer.PublicKeyX25519 != "" {
-			payload, err = m.syncService.DecryptPayloadFrom(response.Ciphertext, peer.PublicKeyX25519)
-			if err != nil && settings.SyncKey != "" {
-				payload, err = m.syncService.DecryptPayload(response.Ciphertext, settings.SyncKey)
-			}
-		} else {
+	if response.Ciphertext == "" {
+		// No new data — 算成功, 但不记 log 避免噪音
+		now := time.Now()
+		m.db.Model(&models.SyncPeer{}).Where("id = ?", peer.ID).Update("last_pulled_at", now)
+		return nil
+	}
+
+	// 跟 ws 路径一致: 优先非对称 (用对端公钥), 失败再回退 legacy.
+	var payload *SyncPayload
+	if peer.PublicKeyX25519 != "" {
+		payload, err = m.syncService.DecryptPayloadFrom(response.Ciphertext, peer.PublicKeyX25519)
+		if err != nil && settings.SyncKey != "" {
 			payload, err = m.syncService.DecryptPayload(response.Ciphertext, settings.SyncKey)
 		}
-		if err != nil {
-			logrus.Errorf("failed to decrypt pulled payload from peer %s: %v", peer.Name, err)
-			m.writeLog(peer.ID, "pull", "error", fmt.Sprintf("decrypt: %v", err), "")
-			continue
-		}
-
-		if err := m.syncService.ProcessPayload(ctx, payload); err != nil {
-			logrus.Errorf("failed to process pulled payload from peer %s: %v", peer.Name, err)
-			m.writeLog(peer.ID, "pull", "error", fmt.Sprintf("merge: %v", err), payloadSummary(payload))
-			continue
-		}
-
-		now := time.Now()
-		// 同时更新 last_synced_at (展示用) 和 last_pulled_at (pull since 用)
-		m.db.Model(&models.SyncPeer{}).Where("id = ?", peer.ID).Updates(map[string]any{
-			"last_synced_at": now,
-			"last_pulled_at": now,
-		})
-		summary := payloadSummary(payload)
-		m.writeLog(peer.ID, "pull", "success", "", summary)
-		logrus.Infof("successfully pulled and merged changes from peer %s (%s)", peer.Name, summary)
+	} else {
+		payload, err = m.syncService.DecryptPayload(response.Ciphertext, settings.SyncKey)
 	}
+	if err != nil {
+		logrus.Errorf("failed to decrypt pulled payload from peer %s: %v", peer.Name, err)
+		m.writeLog(peer.ID, "pull", "error", fmt.Sprintf("decrypt: %v", err), "")
+		return err
+	}
+
+	if err := m.syncService.ProcessPayload(ctx, payload); err != nil {
+		logrus.Errorf("failed to process pulled payload from peer %s: %v", peer.Name, err)
+		m.writeLog(peer.ID, "pull", "error", fmt.Sprintf("merge: %v", err), payloadSummary(payload))
+		return err
+	}
+
+	now := time.Now()
+	// 同时更新 last_synced_at (展示用) 和 last_pulled_at (pull since 用)
+	m.db.Model(&models.SyncPeer{}).Where("id = ?", peer.ID).Updates(map[string]any{
+		"last_synced_at": now,
+		"last_pulled_at": now,
+	})
+	summary := payloadSummary(payload)
+	m.writeLog(peer.ID, "pull", "success", "", summary)
+	logrus.Infof("successfully pulled and merged changes from peer %s (%s)", peer.Name, summary)
+	return nil
+}
+
+// PullPeer 手动 trigger 单个 peer 的 pull, 由 sync_handler 调用.
+// 返回 error 给前端展示, 不复用循环里的 silent fail 路径.
+func (m *SyncPeerManager) PullPeer(ctx context.Context, peerID string) error {
+	settings := m.settingsManager.GetSettings()
+	if !settings.SyncEnabled {
+		return fmt.Errorf("sync is disabled")
+	}
+	var peer models.SyncPeer
+	if err := m.db.First(&peer, "id = ?", peerID).Error; err != nil {
+		return fmt.Errorf("peer not found: %w", err)
+	}
+	myPubKey := m.keypair.PublicKeyBase64()
+	return m.pullOnePeer(ctx, peer, settings, myPubKey)
+}
+
+// PreviewItem 是 preview-push 返回的单条变更摘要 (按表分类用 Type 字段区分).
+// Action 只区分 "upsert" 和 "delete" — 本端没法可靠区分 create vs update
+// (不知道对端是否已有这条记录), upsert 表达 "会发送过去" 即可.
+type PreviewItem struct {
+	Type    string    `json:"type"`              // group / subgroup / alias / key / setting
+	Name    string    `json:"name"`              // 展示用 (group.name / alias / key 掩码 / setting_key)
+	Action  string    `json:"action"`            // upsert / delete
+	Updated time.Time `json:"updated_at"`        // 排序展示用
+}
+
+// PreviewPushResponse 是 GET /api/sync/peers/:id/preview-push 的响应.
+type PreviewPushResponse struct {
+	PeerID         string        `json:"peer_id"`
+	PeerName       string        `json:"peer_name"`
+	Since          *time.Time    `json:"since"`            // since 时间 (nil = 全量)
+	SettingsCount  int           `json:"settings_count"`
+	GroupsCount    int           `json:"groups_count"`
+	SubGroupsCount int           `json:"subgroups_count"`
+	AliasesCount   int           `json:"aliases_count"`
+	APIKeysCount   int           `json:"api_keys_count"`
+	Affected       []PreviewItem `json:"affected"`
+}
+
+// PreviewPushPayload 计算"如果现在 push 给 peer, 会发什么"的摘要.
+// 不锁 fingerprint, 用户确认后真正 push 时可能数据已变 — 这是 trade-off:
+// 中间用户改动可能多推, 是已知的简化设计.
+func (m *SyncPeerManager) PreviewPushPayload(ctx context.Context, peerID string) (*PreviewPushResponse, error) {
+	settings := m.settingsManager.GetSettings()
+	if !settings.SyncEnabled {
+		return nil, fmt.Errorf("sync is disabled")
+	}
+	var peer models.SyncPeer
+	if err := m.db.First(&peer, "id = ?", peerID).Error; err != nil {
+		return nil, fmt.Errorf("peer not found: %w", err)
+	}
+
+	// since: 用 push 主路径同样的 since 计算 — 当前实现取所有 peer 中最旧的
+	// last_synced_at (覆盖最保守; 推全量 = 把所有需补齐的 delta 推出去).
+	since := m.computeSinceFromPeers()
+	payload, err := m.syncService.ExportPayload(ctx, since)
+	if err != nil {
+		return nil, fmt.Errorf("export payload: %w", err)
+	}
+
+	resp := &PreviewPushResponse{
+		PeerID:   peer.ID,
+		PeerName: peer.Name,
+		Since:    since,
+	}
+	resp.SettingsCount = len(payload.Settings)
+	resp.GroupsCount = len(payload.Groups)
+	resp.SubGroupsCount = len(payload.SubGroups)
+	resp.AliasesCount = len(payload.ModelAliases)
+	resp.APIKeysCount = len(payload.APIKeys)
+
+	actionOf := func(deletedAt gorm.DeletedAt) string {
+		if deletedAt.Valid {
+			return "delete"
+		}
+		return "upsert"
+	}
+	for _, s := range payload.Settings {
+		resp.Affected = append(resp.Affected, PreviewItem{
+			Type: "setting", Name: s.SettingKey, Action: actionOf(s.DeletedAt), Updated: s.UpdatedAt,
+		})
+	}
+	for _, g := range payload.Groups {
+		resp.Affected = append(resp.Affected, PreviewItem{
+			Type: "group", Name: g.Name, Action: actionOf(g.DeletedAt), Updated: g.UpdatedAt,
+		})
+	}
+	for _, sg := range payload.SubGroups {
+		resp.Affected = append(resp.Affected, PreviewItem{
+			Type: "subgroup",
+			Name: fmt.Sprintf("group=%d → sub=%d", sg.GroupID, sg.SubGroupID),
+			Action: actionOf(sg.DeletedAt),
+			Updated: sg.UpdatedAt,
+		})
+	}
+	for _, a := range payload.ModelAliases {
+		resp.Affected = append(resp.Affected, PreviewItem{
+			Type: "alias", Name: fmt.Sprintf("%s → %s", a.Alias, a.RealModel),
+			Action: actionOf(a.DeletedAt), Updated: a.UpdatedAt,
+		})
+	}
+	for _, k := range payload.APIKeys {
+		mask := k.KeyHash
+		if len(mask) > 12 {
+			mask = mask[:8] + "…" + mask[len(mask)-4:]
+		}
+		resp.Affected = append(resp.Affected, PreviewItem{
+			Type: "key", Name: mask, Action: actionOf(k.DeletedAt), Updated: k.UpdatedAt,
+		})
+	}
+	return resp, nil
+}
+
+// PushPeer 手动 trigger: 强制 push 给单个 peer (不等 debounce).
+// 当前 push 逻辑统一处理所有 active peers, 这里复用 pushToPeers 但仅当目标
+// peer 在 activePeers 中 (即 ws 已建立) 时有效. 用 NotifyChange 也行, 但
+// 我们要支持"虽然 WS 没建但用户想试试" — 给一个明确响应.
+func (m *SyncPeerManager) PushPeer(ctx context.Context, peerID string) error {
+	settings := m.settingsManager.GetSettings()
+	if !settings.SyncEnabled {
+		return fmt.Errorf("sync is disabled")
+	}
+	m.peersMu.Lock()
+	_, connected := m.activePeers[peerID]
+	m.peersMu.Unlock()
+	if !connected {
+		return fmt.Errorf("peer not connected via WS (push needs an active WS connection)")
+	}
+	// 复用 pushToPeers — 它会推给所有 connected peer. 目标 peer 包含在内.
+	// 不为单个 peer 重写另一份加密/广播逻辑, YAGNI.
+	m.pushToPeers(ctx, settings)
+	return nil
 }
 
 // writeLog 写一条 SyncLog 到数据库. 失败时只 warn, 不阻断同步主路径.

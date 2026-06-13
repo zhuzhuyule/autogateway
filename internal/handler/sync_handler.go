@@ -33,6 +33,7 @@ type SyncHandler struct {
 	settingsManager *config.SystemSettingsManager
 	keypair         *services.NodeKeypairService
 	db              *gorm.DB
+	peerManager     *services.SyncPeerManager // for manual trigger pull/push
 
 	// Active WebSocket connections
 	clientsMu sync.Mutex
@@ -40,14 +41,62 @@ type SyncHandler struct {
 }
 
 // NewSyncHandler creates a new SyncHandler
-func NewSyncHandler(syncService *services.SyncService, settingsManager *config.SystemSettingsManager, keypair *services.NodeKeypairService, db *gorm.DB) *SyncHandler {
+func NewSyncHandler(syncService *services.SyncService, settingsManager *config.SystemSettingsManager, keypair *services.NodeKeypairService, db *gorm.DB, peerManager *services.SyncPeerManager) *SyncHandler {
 	return &SyncHandler{
 		syncService:     syncService,
 		settingsManager: settingsManager,
 		keypair:         keypair,
 		db:              db,
+		peerManager:     peerManager,
 		clients:         make(map[*websocket.Conn]bool),
 	}
+}
+
+// TriggerPull manually pulls from the given peer (POST /api/sync/peers/:id/pull).
+// Returns 200 on success, 4xx on bad request, 5xx on pull error (timeout / decrypt).
+func (h *SyncHandler) TriggerPull(c *gin.Context) {
+	peerID := c.Param("id")
+	if peerID == "" {
+		c.JSON(400, gin.H{"code": 400, "message": "missing peer id"})
+		return
+	}
+	if err := h.peerManager.PullPeer(c.Request.Context(), peerID); err != nil {
+		c.JSON(500, gin.H{"code": 500, "message": err.Error()})
+		return
+	}
+	c.JSON(200, gin.H{"code": 0, "message": "ok"})
+}
+
+// PreviewPush returns a non-destructive summary of what TriggerPush would send.
+// GET /api/sync/peers/:id/preview-push. Used by the UI to show a confirm modal
+// before actually pushing.
+func (h *SyncHandler) PreviewPush(c *gin.Context) {
+	peerID := c.Param("id")
+	if peerID == "" {
+		c.JSON(400, gin.H{"code": 400, "message": "missing peer id"})
+		return
+	}
+	preview, err := h.peerManager.PreviewPushPayload(c.Request.Context(), peerID)
+	if err != nil {
+		c.JSON(500, gin.H{"code": 500, "message": err.Error()})
+		return
+	}
+	c.JSON(200, gin.H{"code": 0, "data": preview})
+}
+
+// TriggerPush manually pushes to the given peer (POST /api/sync/peers/:id/push).
+// Requires an active WS connection to the peer.
+func (h *SyncHandler) TriggerPush(c *gin.Context) {
+	peerID := c.Param("id")
+	if peerID == "" {
+		c.JSON(400, gin.H{"code": 400, "message": "missing peer id"})
+		return
+	}
+	if err := h.peerManager.PushPeer(c.Request.Context(), peerID); err != nil {
+		c.JSON(500, gin.H{"code": 500, "message": err.Error()})
+		return
+	}
+	c.JSON(200, gin.H{"code": 0, "message": "ok"})
 }
 
 // Broadcast 向所有已连接的 client (作为 ws server 端持有) 推送密文消息.
@@ -308,6 +357,9 @@ func (h *SyncHandler) performHandshake(ws *websocket.Conn, peer *models.SyncPeer
 		resp.Reason = "minor_version_diff"
 		resp.PeerVersion = hello.Version
 		h.db.Model(&models.SyncPeer{}).Where("id = ?", peer.ID).Update("status", "warning:minor_version_diff")
+	} else {
+		// version 一致时清掉旧的 warning, 否则 UI 一直挂着不实际的"过期"状态
+		h.db.Model(&models.SyncPeer{}).Where("id = ?", peer.ID).Update("status", "active")
 	}
 	_ = ws.WriteJSON(resp)
 	return true

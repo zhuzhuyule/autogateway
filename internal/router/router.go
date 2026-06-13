@@ -265,6 +265,10 @@ func registerProtectedAPIRoutes(
 		syncPeers.POST("", syncHandler.CreatePeer)
 		syncPeers.PUT("/:id", syncHandler.UpdatePeer)
 		syncPeers.DELETE("/:id", syncHandler.DeletePeer)
+		// 手动触发同步 (P11.35) + push 预览 (P11.36)
+		syncPeers.GET("/:id/preview-push", syncHandler.PreviewPush)
+		syncPeers.POST("/:id/pull", syncHandler.TriggerPull)
+		syncPeers.POST("/:id/push", syncHandler.TriggerPush)
 	}
 
 	// P9.2: 远程升级 - 写信号文件, 等宿主机 watcher 接管

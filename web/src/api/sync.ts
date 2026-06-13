@@ -82,6 +82,26 @@ export interface SyncConfig {
   sync_key: string;
 }
 
+// P11.36: push 二次确认 preview 响应
+export interface PreviewItem {
+  type: "group" | "subgroup" | "alias" | "key" | "setting";
+  name: string;
+  action: "upsert" | "delete";
+  updated_at: string;
+}
+
+export interface PreviewPushResponse {
+  peer_id: string;
+  peer_name: string;
+  since: string | null;
+  settings_count: number;
+  groups_count: number;
+  subgroups_count: number;
+  aliases_count: number;
+  api_keys_count: number;
+  affected: PreviewItem[];
+}
+
 export const syncApi = {
   /** P9.1: 同步全局配置 (启用开关 + 全局加密密钥) */
   async getConfig(): Promise<SyncConfig> {
@@ -105,6 +125,21 @@ export const syncApi = {
   },
   async deletePeer(id: string): Promise<void> {
     await http.delete(`/sync/peers/${id}`);
+  },
+  /** P11.35: 手动 trigger 单个 peer 的 pull (HTTP 拉对端最新 delta) */
+  async triggerPull(id: string): Promise<void> {
+    await http.post(`/sync/peers/${id}/pull`, {});
+  },
+  /** P11.35: 手动 trigger 单个 peer 的 push (推本端最新 delta 到对端).
+   *  要求 WS 已建立; 否则返 500 提示 "peer not connected via WS". */
+  async triggerPush(id: string): Promise<void> {
+    await http.post(`/sync/peers/${id}/push`, {});
+  },
+  /** P11.36: push 前先调 preview, 看会发什么. 不打 fingerprint snapshot,
+   *  真 push 时数据可能多 (用户中间又改了) — 已知 trade-off. */
+  async previewPush(id: string): Promise<PreviewPushResponse> {
+    const r = await http.get(`/sync/peers/${id}/preview-push`, { hideMessage: true });
+    return r.data as PreviewPushResponse;
   },
   /** P9.1: 拉本端版本信息, 用于 UI 比对对端版本徽章 */
   async getVersion(): Promise<VersionInfo> {
