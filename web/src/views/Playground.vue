@@ -38,12 +38,29 @@ const md = new MarkdownIt({
   linkify: true,
   breaks: true,
 });
+// 视频扩展名 — 命中则把 <img>/<a> 转成内嵌 <video> 播放器。
+const VIDEO_EXT_RE = /\.(?:mp4|webm|mov|m4v|ogv)(?:[?#]|$)/i;
+
 function renderMarkdown(text: string): string {
   if (!text) {
     return "";
   }
-  return DOMPurify.sanitize(md.render(text), {
-    ADD_ATTR: ["target", "rel"],
+  let html = md.render(text);
+  // 模型用 markdown image 语法贴视频 (![](x.mp4)) → markdown-it 出 <img>,转 <video>。
+  html = html.replace(/<img\b[^>]*\bsrc="([^"]+)"[^>]*>/gi, (m, src) =>
+    VIDEO_EXT_RE.test(src)
+      ? `<video controls preload="metadata" src="${src}" style="max-width:100%"></video>`
+      : m,
+  );
+  // 视频 URL 被 linkify 成 <a> → 转 <video> (裸 url 与 [text](x.mp4) 都覆盖)。
+  html = html.replace(/<a\b[^>]*\bhref="([^"]+)"[^>]*>.*?<\/a>/gi, (m, href) =>
+    VIDEO_EXT_RE.test(href)
+      ? `<video controls preload="metadata" src="${href}" style="max-width:100%"></video>`
+      : m,
+  );
+  return DOMPurify.sanitize(html, {
+    ADD_ATTR: ["target", "rel", "controls", "preload", "src"],
+    ADD_TAGS: ["video", "source"],
   });
 }
 
