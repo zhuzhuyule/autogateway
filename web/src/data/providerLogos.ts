@@ -46,6 +46,7 @@ import stepfunSvg from "@lobehub/icons-static-svg/icons/stepfun-color.svg?raw";
 import bytedanceSvg from "@lobehub/icons-static-svg/icons/bytedance-color.svg?raw";
 import jinaSvg from "@lobehub/icons-static-svg/icons/jina.svg?raw";
 import fireworksSvg from "@lobehub/icons-static-svg/icons/fireworks-color.svg?raw";
+import sambanovaSvg from "@lobehub/icons-static-svg/icons/sambanova-color.svg?raw";
 
 export const LOGO_MAP: Record<string, string> = {
   openai: openaiSvg,
@@ -87,6 +88,7 @@ export const LOGO_MAP: Record<string, string> = {
   bytedance: bytedanceSvg,
   jina: jinaSvg,
   fireworks: fireworksSvg,
+  sambanova: sambanovaSvg,
 };
 
 const KEYWORD_TO_KEY: Array<[string, string]> = [
@@ -95,6 +97,8 @@ const KEYWORD_TO_KEY: Array<[string, string]> = [
   ["default-anthropic", "anthropic"],
   ["default-gemini", "gemini"],
   // 复合关键字优先 (cerebras 先于 cere; openrouter 先于 openai 子串)
+  // sambanova 放最前: 它是 openai-compat (system_role 可能含 openai), 必须先于 openai 命中
+  ["sambanova", "sambanova"],
   ["openrouter", "openrouter"],
   ["openai", "openai"],
   ["anthropic", "anthropic"],
