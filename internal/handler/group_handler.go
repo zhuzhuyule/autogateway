@@ -3,6 +3,7 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"net/url"
 	"strconv"
 	"strings"
@@ -234,7 +235,11 @@ func (s *Server) ProbeModels(c *gin.Context) {
 
 	models, err := services.ProbeUpstreamModels(c.Request.Context(), req.BaseURL, req.ChannelType, req.Key)
 	if err != nil {
-		response.Error(c, app_errors.NewAPIError(app_errors.ErrBadGateway, err.Error()))
+		var ue *url.Error
+		if errors.As(err, &ue) {
+			ue.URL = "" // 清掉可能含 ?key= 的 URL,避免 key 泄漏到响应 body
+		}
+		response.Error(c, app_errors.NewAPIError(app_errors.ErrBadGateway, "failed to fetch upstream models: "+err.Error()))
 		return
 	}
 

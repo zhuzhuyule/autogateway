@@ -1465,7 +1465,6 @@ export default {
     pickModelFirst: "请先选模型",
     pickModelExpired: "model 选择已失效, 请重选",
     imagePromptRequired: "图像生成需要 prompt, 请输入描述",
-    videoNotSupported: "视频生成模型暂不支持, 请选其他模型",
     videoPromptRequired: "视频生成需要 prompt, 请输入描述",
     videoGenerating: "视频生成中… {p}%",
     videoTimeout: "视频生成超时, 请稍后重试或缩短时长",

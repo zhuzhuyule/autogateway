@@ -1478,7 +1478,6 @@ export default {
     pickModelFirst: "Pick a model first",
     pickModelExpired: "Model selection expired, please pick again",
     imagePromptRequired: "Image generation needs a prompt — please describe what to draw",
-    videoNotSupported: "Video generation models aren't supported yet — pick another model",
     videoPromptRequired: "Video generation needs a prompt — please describe the scene",
     videoGenerating: "Generating video… {p}%",
     videoTimeout: "Video generation timed out, please retry later",

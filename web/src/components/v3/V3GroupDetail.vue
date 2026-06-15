@@ -2172,7 +2172,7 @@ const filterCounts = computed(() => ({
               :disabled="modelsRefreshing"
               @click="refreshGroupModels"
             >
-              <n-icon :component="RefreshOutline" :size="11" :class="modelsRefreshing ? 'v5-spin' : ''" />
+              <n-icon :component="RefreshOutline" :size="11" :class="modelsRefreshing ? 'v5-keycard__pill-spin' : ''" />
               {{ modelsRefreshing ? t("common.loading") : t("v3.refreshModelsBtn") }}
             </button>
             <div v-if="!isAggregate" class="v5-modemode">

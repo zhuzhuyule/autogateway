@@ -1428,7 +1428,6 @@ export default {
     pickModelFirst: "先に model を選択",
     pickModelExpired: "model 選択が無効、再選択してください",
     imagePromptRequired: "画像生成には prompt が必要です — 描く内容を入力してください",
-    videoNotSupported: "動画生成モデルはまだ未対応、別のモデルを選んでください",
     videoPromptRequired: "動画生成には prompt が必要です — シーンを入力してください",
     videoGenerating: "動画生成中… {p}%",
     videoTimeout: "動画生成がタイムアウトしました。後でもう一度お試しください",
