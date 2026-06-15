@@ -70,6 +70,10 @@ const providerSearch = ref("");
 const showAllFree = ref(false); // 默认只显示推荐, 点 "更多" 展开全部 free
 const submitting = ref(false);
 
+// Probe models (Task 3)
+const probedModels = ref<string[]>([]);
+const probing = ref(false);
+
 // ============================================================================
 // Provider catalog & filtering
 // ============================================================================
@@ -234,13 +238,11 @@ function firstRecommendedModel(p: FreeProvider): string {
   return p.testModel;
 }
 
-// 当前 picked 的可选模型清单 (用于 testModel 下拉)
+// 当前 picked 的可选模型清单 (用于 testModel 下拉); 合并实时探测结果
 const availableModelsForPicked = computed(() => {
   const p = picked.value;
-  if (!p) {
-    return [];
-  }
-  const list = new Set<string>([...p.models, ...(p.paidModels ?? [])]);
+  const base = p ? [...p.models, ...(p.paidModels ?? [])] : [];
+  const list = new Set<string>([...base, ...probedModels.value]);
   return Array.from(list);
 });
 
@@ -264,6 +266,8 @@ watch(
     showAllFree.value = false;
     submitting.value = false;
     remotelyTakenNames.value = new Set();
+    probedModels.value = [];
+    probing.value = false;
   },
 );
 
@@ -297,6 +301,42 @@ const canCreate = computed(
 // ============================================================================
 // 创建
 // ============================================================================
+
+// ============================================================================
+// 探测上游真实模型 (Task 3)
+// ============================================================================
+
+async function handleProbeModels() {
+  const baseUrl = formBaseUrl.value.trim();
+  const key = keysInput.value.trim().split(/[\n,]/)[0]?.trim() || "";
+  if (!baseUrl || !key) {
+    return;
+  }
+  probing.value = true;
+  try {
+    const res = await keysApi.probeModels({
+      base_url: baseUrl,
+      channel_type: formChannelType.value,
+      key,
+    });
+    probedModels.value = res.models ?? [];
+    window.$message?.success(t("v3.probedModelsOk", { n: probedModels.value.length }));
+    // 若 testModel 为空则自动选第一个
+    if (!formTestModel.value && probedModels.value.length > 0) {
+      formTestModel.value = probedModels.value[0];
+    }
+  } catch (e) {
+    const err = e as { response?: { data?: { message?: string; error?: string } }; message?: string };
+    const msg =
+      err?.response?.data?.message ||
+      err?.response?.data?.error ||
+      err?.message ||
+      "unknown error";
+    window.$message?.error(t("v3.probedModelsFail", { err: msg }));
+  } finally {
+    probing.value = false;
+  }
+}
 
 function close() {
   emit("update:show", false);
@@ -637,28 +677,46 @@ async function createProvider() {
               <input v-model="formBaseUrl" class="v3-ngf__form-input" spellcheck="false" />
             </div>
 
-            <!-- 测试模型: custom 模式下自由输入, 否则从已知模型清单 select -->
+            <!-- 测试模型: custom 模式下自由输入, 否则从已知模型清单 select; 旁边有「重新获取」按钮 -->
             <div class="v3-ngf__form-row">
               <label class="v3-ngf__form-lbl">
                 {{ t("v3.formTestModel") }}
                 <span class="v3-ngf__form-optional">{{ t("v3.optional") }}</span>
               </label>
-              <input
-                v-if="isCustomMode"
-                v-model="formTestModel"
-                class="v3-ngf__form-input"
-                spellcheck="false"
-                :placeholder="t('v3.customTestModelPlaceholder')"
-              />
-              <select v-else v-model="formTestModel" class="v3-ngf__form-input">
-                <option
-                  v-for="m in availableModelsForPicked"
-                  :key="m"
-                  :value="m"
+              <div class="v3-ngf__probe-wrap">
+                <input
+                  v-if="isCustomMode"
+                  v-model="formTestModel"
+                  class="v3-ngf__form-input v3-ngf__probe-input"
+                  spellcheck="false"
+                  :placeholder="t('v3.customTestModelPlaceholder')"
+                  :list="probedModels.length ? 'probed-models-list' : undefined"
+                />
+                <datalist v-if="isCustomMode && probedModels.length" id="probed-models-list">
+                  <option v-for="m in probedModels" :key="m" :value="m" />
+                </datalist>
+                <select v-else v-model="formTestModel" class="v3-ngf__form-input v3-ngf__probe-input">
+                  <option
+                    v-for="m in availableModelsForPicked"
+                    :key="m"
+                    :value="m"
+                  >
+                    {{ m }}{{ picked && isRecommended(picked.id, m) ? " ⭐" : "" }}
+                  </option>
+                </select>
+                <button
+                  class="v3-btn v3-btn--ghost v3-btn--sm v3-ngf__probe-btn"
+                  :disabled="probing || !formBaseUrl.trim() || !keysInput.trim()"
+                  :title="
+                    !formBaseUrl.trim() || !keysInput.trim()
+                      ? t('v3.refetchNeedBaseUrlKey')
+                      : t('v3.refetchModelsTip')
+                  "
+                  @click="handleProbeModels"
                 >
-                  {{ m }}{{ picked && isRecommended(picked.id, m) ? " ⭐" : "" }}
-                </option>
-              </select>
+                  {{ probing ? "…" : "🔄" }} {{ t("v3.refetchModels") }}
+                </button>
+              </div>
             </div>
           </div>
         </section>
@@ -942,6 +1000,25 @@ async function createProvider() {
 }
 .v3-ngf__form-input:focus {
   border-color: var(--v3-accent);
+}
+
+/* ===== Probe (重新获取) 行: input/select + 按钮 横排 ===== */
+.v3-ngf__probe-wrap {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.v3-ngf__probe-input {
+  flex: 1;
+  min-width: 0;
+}
+.v3-ngf__probe-btn {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.v3-ngf__probe-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 /* ===== Footer ===== */

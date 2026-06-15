@@ -370,4 +370,14 @@ export const keysApi = {
     const res = await http.get(`/groups/${groupId}/parent-aggregate-groups`);
     return res.data || [];
   },
+
+  // 用临时凭证探测上游真实可用模型 (创建流程用, 无需已有 group)
+  async probeModels(payload: {
+    base_url: string;
+    channel_type: string;
+    key: string;
+  }): Promise<{ models: string[] }> {
+    const res = await http.post("/groups/probe-models", payload, { hideMessage: true });
+    return res.data;
+  },
 };
