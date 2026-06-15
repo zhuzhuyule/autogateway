@@ -774,6 +774,26 @@ const modelsRefreshedAtDisplay = computed(() => {
   }
 });
 
+// === 刷新模型 ===
+const modelsRefreshing = ref(false);
+
+async function refreshGroupModels() {
+  if (!props.group?.id || modelsRefreshing.value) {
+    return;
+  }
+  modelsRefreshing.value = true;
+  try {
+    const res = await keysApi.refreshModels(props.group.id);
+    const n = res?.count ?? res?.models?.length ?? 0;
+    message.success(t("v3.refreshModelsSuccess", { n }));
+    emit("refresh");
+  } catch (e) {
+    message.error((e as Error).message || t("v3.refreshModelsFail"));
+  } finally {
+    modelsRefreshing.value = false;
+  }
+}
+
 // 速率档位优先取自 FreeModels Registry (无客户端推断)。
 // registry miss 时(模型未收录) → 内置清单 → 关键字推断 → 默认 balanced.
 const FAST_KEYWORDS = ["flash", "haiku", "8b", "instant", "mini", "small"];
@@ -2146,6 +2166,15 @@ const filterCounts = computed(() => ({
             </span>
           </div>
           <div class="v5-toolbar__spacer" style="gap: 16px; flex-wrap: wrap">
+            <button
+              v-if="!isAggregate"
+              class="v3-btn v3-btn--sm"
+              :disabled="modelsRefreshing"
+              @click="refreshGroupModels"
+            >
+              <n-icon :component="RefreshOutline" :size="11" :class="modelsRefreshing ? 'v5-spin' : ''" />
+              {{ modelsRefreshing ? t("common.loading") : t("v3.refreshModelsBtn") }}
+            </button>
             <div v-if="!isAggregate" class="v5-modemode">
               <button
                 class="v3-btn v3-btn--sm"

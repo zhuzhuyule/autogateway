@@ -263,6 +263,8 @@ export default {
     systemDefault: "系统默认",
     refreshModelsRequiresSave: "保存分组并添加密钥后才能拉取模型列表",
     refreshModelsSuccess: "已拉取 {n} 个上游模型",
+    refreshModelsBtn: "刷新模型",
+    refreshModelsFail: "拉取模型失败",
     upstreamModelsList: "上游可用模型",
     upstreamModelsEmpty: "尚未拉取过模型列表,点击下方刷新按钮拉取",
     lastRefreshed: "更新于 {at}",

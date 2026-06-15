@@ -380,4 +380,10 @@ export const keysApi = {
     const res = await http.post("/groups/probe-models", payload, { hideMessage: true });
     return res.data;
   },
+
+  // 刷新分组上游真实可用模型列表 (POST /groups/:id/refresh-models)
+  async refreshModels(groupId: number): Promise<{ models: string[]; count: number }> {
+    const res = await http.post(`/groups/${groupId}/refresh-models`, {}, { hideMessage: true });
+    return res.data;
+  },
 };

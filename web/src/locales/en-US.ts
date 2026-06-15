@@ -269,6 +269,8 @@ export default {
     systemDefault: "System Default",
     refreshModelsRequiresSave: "Save group and add keys first to fetch the model list",
     refreshModelsSuccess: "Fetched {n} upstream models",
+    refreshModelsBtn: "Refresh Models",
+    refreshModelsFail: "Failed to fetch models",
     upstreamModelsList: "Upstream available models",
     upstreamModelsEmpty: "No model list cached yet. Click refresh to fetch.",
     lastRefreshed: "Updated at {at}",

@@ -267,6 +267,8 @@ export default {
     systemDefault: "システム既定",
     refreshModelsRequiresSave: "グループ保存とキー追加後にモデル一覧を取得できます",
     refreshModelsSuccess: "{n} 件の上流モデルを取得しました",
+    refreshModelsBtn: "モデルを更新",
+    refreshModelsFail: "モデルの取得に失敗しました",
     upstreamModelsList: "上流の利用可能モデル",
     upstreamModelsEmpty: "まだモデル一覧を取得していません。更新ボタンをクリック",
     lastRefreshed: "更新: {at}",
