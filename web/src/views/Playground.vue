@@ -974,6 +974,146 @@ async function sendImage(groupName: string, modelName: string, prompt: string) {
   }
 }
 
+// Video generation: agnes 异步任务式。POST /v1/videos 建任务 → 轮询
+// /v1/videos/{task_id} 至 completed → remixed_from_video_id 为视频 URL,
+// 转 markdown image 塞 assistant message, renderMarkdown 自动渲染 <video> 播放器。
+// 走兼容端点 /v1/videos/{task_id} (在 /v1 下, 适配现有代理; 文档推荐的
+// /agnesapi?video_id= 在根域, 现有 /proxy/{group}/* 代理拼不出来)。
+const VIDEO_POLL_INTERVAL_MS = 5000;
+const VIDEO_POLL_MAX = 60; // 5s × 60 = 5min 上限
+
+async function sendVideo(groupName: string, modelName: string, prompt: string) {
+  const s = active.value;
+  if (!s) {
+    return;
+  }
+  if (!prompt) {
+    message.warning(t("playground.videoPromptRequired"));
+    return;
+  }
+  const now = Date.now();
+  s.messages.push({ role: "user", content: prompt, sentAt: now });
+  s.messages.push({
+    role: "assistant",
+    content: "",
+    phase: "thinking",
+    sentAt: now,
+  });
+  const asst = s.messages[s.messages.length - 1];
+  input.value = "";
+  pendingAttachments.value = [];
+  sending.value = true;
+  s.updatedAt = Date.now();
+  if (s.title === t("playground.defaultTitle")) {
+    s.title = prompt.slice(0, 24);
+  }
+  await nextTick();
+  scrollToBottom();
+
+  try {
+    // 1. 创建视频任务
+    const createResp = await fetch(
+      `/proxy/${encodeURIComponent(groupName)}/v1/videos`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${authKey.value || ""}`,
+          "X-Playground-Trial": "1",
+        },
+        body: JSON.stringify({
+          model: modelName,
+          prompt,
+          num_frames: 121,
+          frame_rate: 24,
+        }),
+      },
+    );
+    if (!createResp.ok) {
+      const errText = await createResp.text().catch(() => "");
+      asst.content = `[${createResp.status} ${createResp.statusText}] ${errText || t("playground.requestFailed")}`;
+      asst.error = true;
+      asst.phase = "done";
+      asst.doneAt = Date.now();
+      return;
+    }
+    const created = (await createResp.json()) as {
+      task_id?: string;
+      video_id?: string;
+    };
+    const taskId = created.task_id || created.video_id;
+    if (!taskId) {
+      asst.content = `${t("playground.requestFailed")} (no task_id)`;
+      asst.error = true;
+      asst.phase = "done";
+      asst.doneAt = Date.now();
+      return;
+    }
+    // 2. 轮询任务状态
+    asst.content = t("playground.videoGenerating", { p: 0 });
+    for (let i = 0; i < VIDEO_POLL_MAX; i++) {
+      await new Promise(r => setTimeout(r, VIDEO_POLL_INTERVAL_MS));
+      let pollResp: Response;
+      try {
+        pollResp = await fetch(
+          `/proxy/${encodeURIComponent(groupName)}/v1/videos/${encodeURIComponent(taskId)}`,
+          {
+            headers: {
+              Authorization: `Bearer ${authKey.value || ""}`,
+              "X-Playground-Trial": "1",
+            },
+          },
+        );
+      } catch {
+        continue; // 单次网络抖动, 继续轮询
+      }
+      if (!pollResp.ok) {
+        continue;
+      }
+      const r = (await pollResp.json()) as {
+        status?: string;
+        progress?: number;
+        remixed_from_video_id?: string;
+        error?: unknown;
+      };
+      if (r.status === "completed") {
+        const url = r.remixed_from_video_id;
+        if (url) {
+          asst.content = `![](${url})`; // renderMarkdown 把 .mp4 转 <video>
+          asst.firstByteAt = Date.now();
+        } else {
+          asst.content = `${t("playground.requestFailed")} (no video url)`;
+          asst.error = true;
+        }
+        asst.phase = "done";
+        asst.doneAt = Date.now();
+        return;
+      }
+      if (r.status === "failed") {
+        asst.content = `[video failed] ${JSON.stringify(r.error ?? {})}`;
+        asst.error = true;
+        asst.phase = "done";
+        asst.doneAt = Date.now();
+        return;
+      }
+      // queued / in_progress → 更新进度
+      asst.content = t("playground.videoGenerating", { p: r.progress ?? 0 });
+    }
+    // 轮询上限仍未完成
+    asst.content = t("playground.videoTimeout");
+    asst.error = true;
+    asst.phase = "done";
+    asst.doneAt = Date.now();
+  } catch (e) {
+    asst.content = `[network error] ${(e as Error).message}`;
+    asst.error = true;
+    asst.phase = "done";
+    asst.doneAt = Date.now();
+  } finally {
+    sending.value = false;
+  }
+}
+
 // Ctrl/Cmd+V 粘贴: 剪贴板含图片就当附件处理 (截图、复制图片场景常用),
 // 不含图片则不阻止默认 paste — 文字粘贴正常.
 async function onPaste(e: ClipboardEvent) {
@@ -1061,7 +1201,7 @@ async function send() {
     }
   }
   if (modality === "video") {
-    message.warning(t("playground.videoNotSupported"));
+    await sendVideo(groupName, modelName, text);
     return;
   }
   if (modality === "image") {
