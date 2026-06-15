@@ -76,8 +76,26 @@ const submitting = ref(false);
 
 interface CatalogItem {
   provider: FreeProvider;
-  kind: "official" | "recommended" | "free";
+  kind: "official" | "recommended" | "free" | "custom";
 }
+
+// 哨兵 — 代表"自定义/passthrough"入口; 不来自任何 provider 数据集
+const CUSTOM_SENTINEL: FreeProvider = {
+  id: "__custom__",
+  name: "Custom",
+  recommendedGroupName: "custom",
+  recommendedDisplayName: "Custom",
+  description: "",
+  baseUrl: "",
+  channelType: "openai",
+  testModel: "",
+  models: [],
+  freeTier: "",
+  signupUrl: "",
+  docsUrl: "",
+  upstreamHosts: [],
+  verifiedAt: "",
+};
 
 // "推荐" 优先: 有 isRecommended model + verifiedAt 较新的 free provider
 const recommendedIds = computed(() => {
@@ -187,6 +205,26 @@ function pickProvider(p: FreeProvider) {
   formTestModel.value = firstRecommendedModel(p);
 }
 
+// custom 模式 — 选了哨兵 provider
+const isCustomMode = computed(() => picked.value?.id === "__custom__");
+
+// 进入 custom 模式: 把哨兵设为 picked, 填默认名, 清空 baseUrl/testModel 等待用户填
+function pickCustom() {
+  picked.value = CUSTOM_SENTINEL;
+  let name = "custom";
+  if (props.existingGroupNames.includes(name)) {
+    let i = 2;
+    while (props.existingGroupNames.includes(`${name}-${i}`)) {
+      i += 1;
+    }
+    name = `${name}-${i}`;
+  }
+  formName.value = name;
+  formBaseUrl.value = "";
+  formChannelType.value = "openai";
+  formTestModel.value = "";
+}
+
 // 第一个推荐模型 — 优先 isRecommended, 没有就 freeProviders 自带 testModel
 function firstRecommendedModel(p: FreeProvider): string {
   const rec = FREE_MODELS.find(m => m.recommended && m.providerId === p.id);
@@ -277,20 +315,21 @@ async function createProvider() {
   submitting.value = true;
   try {
     const p = picked.value;
-    // 走 picked: specified 模式 + bootstrap exposed_models; 走 custom: passthrough,
-    // 等 detail 页拉真实 /v1/models 后再决定 expose 啥.
+    // 走 picked(非 custom): specified 模式 + bootstrap exposed_models;
+    // 走 custom 哨兵 / 无 picked: passthrough, 等 detail 页拉真实 /v1/models 后再决定 expose 啥.
+    const isCustom = isCustomMode.value;
     const providerConfig: Record<string, number> = {};
-    if (p?.rpmLimit !== undefined && p.rpmLimit > 0) {
+    if (!isCustom && p?.rpmLimit !== undefined && p.rpmLimit > 0) {
       providerConfig.rpm_limit = p.rpmLimit;
     }
-    if (p?.rpdLimit !== undefined && p.rpdLimit > 0) {
+    if (!isCustom && p?.rpdLimit !== undefined && p.rpdLimit > 0) {
       providerConfig.rpd_limit = p.rpdLimit;
     }
     const submit: Partial<Group> = {
       name: formName.value.trim(),
       // 选了模板优先用 provider 的 display name (含空格/大小写好看); custom 走 group name
-      display_name: p?.recommendedDisplayName || formName.value.trim(),
-      description: p?.description || "",
+      display_name: isCustom ? formName.value.trim() : (p?.recommendedDisplayName || formName.value.trim()),
+      description: isCustom ? "" : (p?.description || ""),
       channel_type: formChannelType.value,
       upstreams: [{ url: formBaseUrl.value.trim(), weight: 1 }],
       test_model: formTestModel.value || "",
@@ -302,11 +341,11 @@ async function createProvider() {
       config: providerConfig,
       header_rules: [],
       proxy_keys: "",
-      model_routing_mode: p ? "specified" : "passthrough",
-      exposed_models: p ? bootstrapExposedModels(p, formTestModel.value) : [],
+      model_routing_mode: isCustom ? "passthrough" : "specified",
+      exposed_models: isCustom ? [] : bootstrapExposedModels(p!, formTestModel.value),
     };
     // staticModels 类 (LongCat): 直接把已知清单写入 available_models, 免去之后 refresh 404
-    if (p?.staticModels) {
+    if (!isCustom && p?.staticModels) {
       submit.available_models = [...p.models, ...(p.paidModels ?? [])];
     }
     const g = await keysApi.createGroup(submit);
@@ -458,6 +497,26 @@ async function createProvider() {
               </div>
             </div>
 
+            <!-- 自定义入口卡片 — 接任意 OpenAI/Anthropic/Gemini 兼容端点 -->
+            <div class="v3-ngf__group">
+              <div class="v3-ngf__group-label">{{ t("v3.customProviderGroupLabel") }}</div>
+              <div class="v3-ngf__chips">
+                <button
+                  type="button"
+                  class="v3-pc-chip v3-pc-chip--custom"
+                  :class="{ 'v3-pc-chip--selected': isCustomMode }"
+                  :title="t('v3.customProviderDesc')"
+                  @click="pickCustom"
+                >
+                  <span class="v3-pc-chip__custom-icon">⚙️</span>
+                  <span class="v3-pc-chip__name">{{ t("v3.customProviderTitle") }}</span>
+                  <span class="v3-pc-chip__tag v3-pc-chip__tag--custom">
+                    {{ t("v3.customChip") }}
+                  </span>
+                </button>
+              </div>
+            </div>
+
             <div v-if="!showAllFree && restFreeCatalog.length" class="v3-ngf__more">
               <button class="v3-btn v3-btn--ghost v3-btn--sm" @click="showAllFree = true">
                 {{ t("v3.showMoreFree", { n: restFreeCatalog.length }) }}
@@ -578,13 +637,20 @@ async function createProvider() {
               <input v-model="formBaseUrl" class="v3-ngf__form-input" spellcheck="false" />
             </div>
 
-            <!-- 测试模型 select (picked 一定不为 null, 故 select 表单是唯一形态) -->
+            <!-- 测试模型: custom 模式下自由输入, 否则从已知模型清单 select -->
             <div class="v3-ngf__form-row">
               <label class="v3-ngf__form-lbl">
                 {{ t("v3.formTestModel") }}
                 <span class="v3-ngf__form-optional">{{ t("v3.optional") }}</span>
               </label>
-              <select v-model="formTestModel" class="v3-ngf__form-input">
+              <input
+                v-if="isCustomMode"
+                v-model="formTestModel"
+                class="v3-ngf__form-input"
+                spellcheck="false"
+                :placeholder="t('v3.customTestModelPlaceholder')"
+              />
+              <select v-else v-model="formTestModel" class="v3-ngf__form-input">
                 <option
                   v-for="m in availableModelsForPicked"
                   :key="m"
@@ -747,6 +813,14 @@ async function createProvider() {
 .v3-pc-chip__tag--recommended {
   color: #c97c0c;
   background: rgba(201, 124, 12, 0.12);
+}
+.v3-pc-chip__tag--custom {
+  color: var(--v3-ink-3);
+  background: var(--v3-line);
+}
+.v3-pc-chip__custom-icon {
+  font-size: 14px;
+  line-height: 1;
 }
 
 .v3-ngf__more {
