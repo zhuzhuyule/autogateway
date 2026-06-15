@@ -37,7 +37,6 @@ import FreeBadge from "@/components/common/FreeBadge.vue";
 import SpeedBadge from "@/components/common/SpeedBadge.vue";
 import CapabilityIcons from "@/components/common/CapabilityIcons.vue";
 import ProviderLogo from "@/components/common/ProviderLogo.vue";
-import { hasProviderLogo } from "@/data/providerLogos";
 import { freeModelsRef, getFreeStatus, lookupRegistry } from "@/api/freemodels";
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
@@ -383,69 +382,6 @@ const friendlyHint = computed(() => {
   return t("v5.hintOpenAI");
 });
 
-const groupAvatarShort = computed(() => {
-  if (!props.group) {
-    return "??";
-  }
-  const src = props.group.display_name || props.group.name;
-  return (
-    src
-      .replace(/[^A-Za-z0-9]/g, "")
-      .slice(0, 2)
-      .toUpperCase() || "??"
-  );
-});
-
-const groupAvatarClass = computed(() => {
-  const g = props.group;
-  if (!g) {
-    return "v3-pav-default";
-  }
-  if (g.channel_type === "anthropic") {
-    return "v3-pav-anthropic";
-  }
-  if (g.channel_type === "gemini") {
-    return "v3-pav-google";
-  }
-  if (g.is_system) {
-    return "v3-pav-default";
-  }
-  const lower = g.name.toLowerCase();
-  for (const key of [
-    "groq",
-    "cerebras",
-    "openrouter",
-    "together",
-    "cloudflare",
-    "mistral",
-    "google",
-    "cohere",
-    "github",
-    "anthropic",
-  ]) {
-    if (lower.includes(key)) {
-      return `v3-pav-${key}`;
-    }
-  }
-  return "v3-pav-default";
-});
-
-const FAVICON_DOMAIN_MAP: Record<string, string> = {
-  groq: "groq.com",
-  cerebras: "cerebras.ai",
-  openrouter: "openrouter.ai",
-  together: "together.ai",
-  cloudflare: "cloudflare.com",
-  mistral: "mistral.ai",
-  google: "ai.google.dev",
-  cohere: "cohere.com",
-  github: "github.com",
-  anthropic: "anthropic.com",
-  "default-openai": "openai.com",
-  "default-anthropic": "anthropic.com",
-  "default-gemini": "gemini.google.com",
-};
-
 function extractHost(url?: string): string | null {
   if (!url) {
     return null;
@@ -456,28 +392,6 @@ function extractHost(url?: string): string | null {
     return null;
   }
 }
-
-const faviconUrl = computed(() => {
-  const g = props.group;
-  if (!g) {
-    return "";
-  }
-  const role = (g.system_role || "").trim();
-  if (role && FAVICON_DOMAIN_MAP[role]) {
-    return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(FAVICON_DOMAIN_MAP[role])}&sz=64`;
-  }
-  const lower = g.name.toLowerCase();
-  for (const k of Object.keys(FAVICON_DOMAIN_MAP)) {
-    if (lower.includes(k)) {
-      return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(FAVICON_DOMAIN_MAP[k])}&sz=64`;
-    }
-  }
-  const host = extractHost(g.upstreams?.[0]?.url);
-  if (host) {
-    return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(host)}&sz=64`;
-  }
-  return "";
-});
 
 const providerHint = computed(() => {
   const g = props.group;
@@ -1669,28 +1583,17 @@ const filterCounts = computed(() => ({
     <!-- ===== HERO ===== -->
     <div class="v5-hero">
       <div class="v5-hero__top">
-        <!-- Avatar (ProviderLogo > favicon > letter avatar) -->
+        <!-- 统一走 ProviderLogo 三层 fallback (lobehub 品牌 SVG → host apex favicon
+             → 首字母), 与 V3GroupSidebar 一致; 旧的 FAVICON_DOMAIN_MAP 硬编码表覆盖不到
+             agnes 等 → 这些 provider 详情头部之前没 icon. 传 host 让 favicon 生效. -->
         <div class="v5-hero__avatar v5-picon" style="width: 52px; height: 52px">
           <ProviderLogo
-            v-if="hasProviderLogo(providerHint)"
             :hint="providerHint"
+            :host="group.upstreams?.[0]?.url"
+            :fallback-initial="getGroupDisplayName(group)"
             :size="44"
             style="border-radius: 8px"
           />
-          <img
-            v-else-if="faviconUrl && !faviconFailed"
-            :src="faviconUrl"
-            alt=""
-            draggable="false"
-            @error="faviconFailed = true"
-          />
-          <span
-            v-else
-            :class="['v3-pav', groupAvatarClass]"
-            style="width: 100%; height: 100%; border-radius: 0; font-size: 14px"
-          >
-            {{ groupAvatarShort }}
-          </span>
         </div>
 
         <div class="v5-hero__main">
