@@ -141,6 +141,37 @@ func runOne(ctx context.Context, base, channel, path string, headers map[string]
 	}, nil}
 }
 
+// ProbeUpstreamModels 用临时 base_url + key 拉上游模型清单。channelType 决定
+// 端点路径与响应解析格式。复用本文件 base_url 规整逻辑(剥末尾版本段)以及
+// upstream_models.go 中已有的 fetch*Models 解析函数。
+func ProbeUpstreamModels(ctx context.Context, baseURL, channelType, key string) ([]string, error) {
+	// 规整 base_url: 去尾部 "/" 和 "#" 转义标记, 再剥版本尾段 (/v1, /v1beta, ...)
+	cleaned := strings.TrimRight(strings.TrimRight(baseURL, "#"), "/")
+	u, err := url.Parse(cleaned)
+	if err != nil {
+		return nil, fmt.Errorf("invalid base_url: %w", err)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return nil, fmt.Errorf("only http/https is allowed, got %q", u.Scheme)
+	}
+	// 剥版本尾段, 避免 /v1/v1/models 双重拼接
+	probeBase := probeVersionTailRe.ReplaceAllString(u.String(), "")
+
+	// 用 upstream_models.go 的独立 fetch 函数, 传入规整后的 probeBase.
+	// 这些函数内部再通过 joinModelsPath 追加正确的路径, 所以 probeBase 不带版本.
+	switch channelType {
+	case "openai", "openai-response":
+		return fetchOpenAIModels(ctx, probeBase, key)
+	case "gemini":
+		return fetchGeminiModels(ctx, probeBase, key)
+	case "anthropic":
+		return fetchAnthropicModels(ctx, probeBase, key)
+	default:
+		// 未知类型: 尝试 OpenAI 兼容端点作为 best-effort
+		return fetchOpenAIModels(ctx, probeBase, key)
+	}
+}
+
 type outcome struct {
 	res *ProbeResult
 	err error

@@ -215,6 +215,35 @@ func (s *Server) GroupHealth(c *gin.Context) {
 	})
 }
 
+// ProbeModelsRequest is the payload for POST /api/groups/probe-models.
+type ProbeModelsRequest struct {
+	BaseURL     string `json:"base_url" binding:"required"`
+	ChannelType string `json:"channel_type" binding:"required"`
+	Key         string `json:"key"`
+}
+
+// ProbeModels 用临时 base_url + key 拉上游真实模型清单, 不依赖已建分组.
+// 用于 CreateGroup 流程中给 test_model 下拉提供候选列表.
+// 成功返回 {"models": [...]}, 失败返回 400 (参数错误) 或 502 (上游错误).
+func (s *Server) ProbeModels(c *gin.Context) {
+	var req ProbeModelsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Error(c, app_errors.NewAPIError(app_errors.ErrInvalidJSON, err.Error()))
+		return
+	}
+
+	models, err := services.ProbeUpstreamModels(c.Request.Context(), req.BaseURL, req.ChannelType, req.Key)
+	if err != nil {
+		response.Error(c, app_errors.NewAPIError(app_errors.ErrBadGateway, err.Error()))
+		return
+	}
+
+	response.Success(c, gin.H{
+		"models": models,
+		"count":  len(models),
+	})
+}
+
 func (s *Server) RefreshGroupModels(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {

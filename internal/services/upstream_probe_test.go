@@ -164,6 +164,98 @@ func TestProbeBaseUrlWithV1betaSegment(t *testing.T) {
 	}
 }
 
+// ---------- ProbeUpstreamModels tests ----------
+
+func TestProbeUpstreamModels(t *testing.T) {
+	t.Run("OpenAI returns data[].id list", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/v1/models" {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte(`{"data":[{"id":"gpt-4o"},{"id":"gpt-4o-mini"}]}`))
+				return
+			}
+			w.WriteHeader(http.StatusNotFound)
+		}))
+		defer srv.Close()
+
+		got, err := ProbeUpstreamModels(context.Background(), srv.URL, "openai", "test-key")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(got) != 2 {
+			t.Fatalf("expected 2 models, got %d: %v", len(got), got)
+		}
+		want := map[string]bool{"gpt-4o": true, "gpt-4o-mini": true}
+		for _, id := range got {
+			if !want[id] {
+				t.Errorf("unexpected model id %q", id)
+			}
+		}
+	})
+
+	t.Run("Gemini returns models[].name stripped of models/ prefix", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/v1beta/models" {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte(`{"models":[{"name":"models/gemini-2.5-flash"},{"name":"models/gemini-2.0-flash"}]}`))
+				return
+			}
+			w.WriteHeader(http.StatusNotFound)
+		}))
+		defer srv.Close()
+
+		got, err := ProbeUpstreamModels(context.Background(), srv.URL, "gemini", "test-key")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(got) != 2 {
+			t.Fatalf("expected 2 models, got %d: %v", len(got), got)
+		}
+		want := map[string]bool{"gemini-2.5-flash": true, "gemini-2.0-flash": true}
+		for _, id := range got {
+			if !want[id] {
+				t.Errorf("unexpected model id %q", id)
+			}
+		}
+	})
+
+	t.Run("upstream 401 returns non-nil error", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusUnauthorized)
+		}))
+		defer srv.Close()
+
+		_, err := ProbeUpstreamModels(context.Background(), srv.URL, "openai", "bad-key")
+		if err == nil {
+			t.Fatal("expected error for 401 response, got nil")
+		}
+	})
+
+	t.Run("base_url with version tail is normalised", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/v1/models" {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte(`{"data":[{"id":"gpt-4o"}]}`))
+				return
+			}
+			w.WriteHeader(http.StatusNotFound)
+		}))
+		defer srv.Close()
+
+		// Pass base URL already ending in /v1 — should not become /v1/v1/models
+		got, err := ProbeUpstreamModels(context.Background(), srv.URL+"/v1", "openai", "k")
+		if err != nil {
+			t.Fatalf("unexpected error with version-suffixed base url: %v", err)
+		}
+		if len(got) != 1 || got[0] != "gpt-4o" {
+			t.Errorf("expected [gpt-4o], got %v", got)
+		}
+	})
+}
+
 func TestProbeRealAnthropicShape(t *testing.T) {
 	// Real api.anthropic.com returns 401 to /v1/models AND /v1/messages.
 	// /v1/messages is the anthropic-exclusive disambiguator.

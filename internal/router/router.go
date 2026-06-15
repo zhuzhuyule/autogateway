@@ -193,6 +193,8 @@ func registerProtectedAPIRoutes(
 		groups.GET("/list", serverHandler.List)
 		groups.GET("/config-options", serverHandler.GetGroupConfigOptions)
 		groups.PUT("/reorder", serverHandler.ReorderGroups)
+		// 静态路径放在 /:id 通配之前, 避免被 :id 参数吞掉
+		groups.POST("/probe-models", serverHandler.ProbeModels)
 		groups.PUT("/:id", serverHandler.UpdateGroup)
 		groups.DELETE("/:id", serverHandler.DeleteGroup)
 		groups.GET("/:id/stats", serverHandler.GetGroupStats)
