@@ -478,6 +478,11 @@ export default {
     onlyTxtFileSupported: "仅支持 .txt 文件",
     fileImportedSuccessfully: "文件导入成功",
     fileReadError: "文件读取失败",
+    disableKey: "停用",
+    enableKey: "启用",
+    statusDisabled: "已停用",
+    keyDisabled: "已停用该密钥",
+    keyEnabled: "已启用该密钥",
   },
   subGroups: {
     addSubGroup: "添加子分组",

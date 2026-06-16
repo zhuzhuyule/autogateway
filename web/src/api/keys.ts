@@ -234,6 +234,16 @@ export const keysApi = {
     });
   },
 
+  // 手动停用密钥 (status → disabled, 移出轮转池)
+  async disableKey(keyId: number): Promise<void> {
+    await http.post(`/keys/${keyId}/disable`, {});
+  },
+
+  // 手动启用密钥 (status → active, 恢复轮转)
+  async enableKey(keyId: number): Promise<void> {
+    await http.post(`/keys/${keyId}/enable`, {});
+  },
+
   // 恢复所有无效密钥
   restoreAllInvalidKeys(group_id: number): Promise<void> {
     return http.post("/keys/restore-all-invalid", { group_id });

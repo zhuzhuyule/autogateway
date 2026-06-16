@@ -496,6 +496,11 @@ export default {
     onlyTxtFileSupported: ".txt ファイルのみサポート",
     fileImportedSuccessfully: "ファイルのインポートに成功しました",
     fileReadError: "ファイルの読み取りに失敗しました",
+    disableKey: "停止",
+    enableKey: "有効化",
+    statusDisabled: "停止中",
+    keyDisabled: "キーを停止しました",
+    keyEnabled: "キーを有効化しました",
   },
   subGroups: {
     addSubGroup: "サブグループを追加",

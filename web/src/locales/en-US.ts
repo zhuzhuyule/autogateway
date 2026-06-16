@@ -497,6 +497,11 @@ export default {
     onlyTxtFileSupported: "Only .txt files are supported",
     fileImportedSuccessfully: "File imported successfully",
     fileReadError: "Failed to read file",
+    disableKey: "Disable",
+    enableKey: "Enable",
+    statusDisabled: "Disabled",
+    keyDisabled: "Key disabled",
+    keyEnabled: "Key enabled",
   },
   subGroups: {
     addSubGroup: "Add Sub Group",

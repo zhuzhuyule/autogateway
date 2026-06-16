@@ -104,6 +104,9 @@ const isRestoring = ref(false);
 const createDialogShow = ref(false);
 const deleteDialogShow = ref(false);
 
+// 停用/启用 loading 防重复点击：key.id → true
+const togglingDisableIds = ref<Set<number>>(new Set());
+
 // 备注编辑相关
 const notesDialogShow = ref(false);
 const editingKey = ref<KeyRow | null>(null);
@@ -389,6 +392,28 @@ async function restoreKey(key: KeyRow) {
   });
 }
 
+async function toggleDisableKey(key: KeyRow) {
+  if (togglingDisableIds.value.has(key.id)) {
+    return;
+  }
+  togglingDisableIds.value.add(key.id);
+  try {
+    if (key.status === "active") {
+      await keysApi.disableKey(key.id);
+      key.status = "disabled";
+      window.$message.success(t("keys.keyDisabled"));
+    } else if (key.status === "disabled") {
+      await keysApi.enableKey(key.id);
+      key.status = "active";
+      window.$message.success(t("keys.keyEnabled"));
+    }
+  } catch (_error) {
+    window.$message.error(t("common.error"));
+  } finally {
+    togglingDisableIds.value.delete(key.id);
+  }
+}
+
 async function deleteKey(key: KeyRow) {
   if (!props.selectedGroup?.id || !key.key_value || isDeling.value) {
     return;
@@ -454,6 +479,8 @@ function getStatusClass(status: KeyStatus): string {
       return "status-valid";
     case "invalid":
       return "status-invalid";
+    case "disabled":
+      return "status-disabled";
     default:
       return "status-unknown";
   }
@@ -757,6 +784,12 @@ function resetPage() {
                   </template>
                   {{ t("keys.validShort") }}
                 </n-tag>
+                <n-tag v-else-if="key.status === 'disabled'" :bordered="false" round style="background: var(--n-color-disabled, #f0f0f0); color: #999;">
+                  <template #icon>
+                    <n-icon :component="AlertCircleOutline" />
+                  </template>
+                  {{ t("keys.statusDisabled") }}
+                </n-tag>
                 <n-tag v-else :bordered="false" round>
                   <template #icon>
                     <n-icon :component="AlertCircleOutline" />
@@ -821,7 +854,31 @@ function resetPage() {
                   {{ t("keys.testShort") }}
                 </n-button>
                 <n-button
-                  v-if="key.status !== 'active'"
+                  v-if="key.status === 'active'"
+                  tertiary
+                  size="tiny"
+                  type="default"
+                  :loading="togglingDisableIds.has(key.id)"
+                  :disabled="togglingDisableIds.has(key.id)"
+                  @click="toggleDisableKey(key)"
+                  :title="t('keys.disableKey')"
+                >
+                  {{ t("keys.disableKey") }}
+                </n-button>
+                <n-button
+                  v-else-if="key.status === 'disabled'"
+                  tertiary
+                  size="tiny"
+                  type="primary"
+                  :loading="togglingDisableIds.has(key.id)"
+                  :disabled="togglingDisableIds.has(key.id)"
+                  @click="toggleDisableKey(key)"
+                  :title="t('keys.enableKey')"
+                >
+                  {{ t("keys.enableKey") }}
+                </n-button>
+                <n-button
+                  v-if="key.status === 'invalid'"
                   tertiary
                   size="tiny"
                   @click="restoreKey(key)"
@@ -1169,6 +1226,12 @@ function resetPage() {
   border-color: var(--invalid-border);
   background: var(--card-bg-solid);
   opacity: 0.85;
+}
+
+.key-card.status-disabled {
+  border-color: var(--border-color);
+  background: var(--card-bg-solid);
+  opacity: 0.6;
 }
 
 .key-card.status-error {
