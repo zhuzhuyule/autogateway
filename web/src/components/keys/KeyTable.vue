@@ -316,13 +316,13 @@ function getDisplayValue(key: KeyRow): string {
 function editKey(key: KeyRow) {
   editingKey.value = key;
   editingNotes.value = key.notes || "";
-  // key value 输入框默认空 = "不改". 用户不知道当前明文 (除非已 toggle 可见),
-  // 不预填 mask 字符串避免误以为是真值. 留空就只改 notes.
-  editingKeyValue.value = "";
+  // 预填原密钥明文 (后端 ListKeysInGroup 已解密返回 key_value). 这样编辑时能看到
+  // 原密钥 — 尤其同步导致出现多个同名/同值 key 时, 便于辨别处理. 没改就只更新 notes.
+  editingKeyValue.value = key.key_value || "";
   notesDialogShow.value = true;
 }
 
-// 保存编辑 — keyValue 空就只调 notes 走 updateKey (兼容旧端点行为)
+// 保存编辑 — key 未变(等于预填的原值)就只更新 notes; 真改了才提交新 key.
 async function saveKeyEdit() {
   if (!editingKey.value) {
     return;
@@ -330,16 +330,23 @@ async function saveKeyEdit() {
   try {
     const trimmedNotes = editingNotes.value.trim();
     const trimmedKey = editingKeyValue.value.trim();
-    await keysApi.updateKey(editingKey.value.id, trimmedKey, trimmedNotes);
+    const original = (editingKey.value.key_value || "").trim();
+    // 预填了原密钥, 只有真改动才提交新 key (避免无谓重新加密 + status 重置)
+    const keyChanged = trimmedKey !== "" && trimmedKey !== original;
+    await keysApi.updateKey(
+      editingKey.value.id,
+      keyChanged ? trimmedKey : "",
+      trimmedNotes,
+    );
     // 本地同步 (notes 立即生效; key_value 后端覆盖, 列表 reload 会拉到新值)
     editingKey.value.notes = trimmedNotes;
-    if (trimmedKey) {
+    if (keyChanged) {
       // 改了 key value: 重置 status 视图 (跟后端一致) + 触发列表刷新
       editingKey.value.status = "active";
       emit("refresh");
     }
     window.$message.success(
-      trimmedKey ? t("keys.keyUpdated") : t("keys.notesUpdated"),
+      keyChanged ? t("keys.keyUpdated") : t("keys.notesUpdated"),
     );
     notesDialogShow.value = false;
   } catch (error) {

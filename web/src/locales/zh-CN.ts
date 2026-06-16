@@ -468,7 +468,7 @@ export default {
     editKeyNotes: "编辑密钥备注",
     editKeyTitle: "编辑密钥",
     editKeyValueLabel: "Key 值",
-    editKeyValueHint: "留空则不修改",
+    editKeyValueHint: "已填入当前密钥, 可直接编辑",
     editKeyValuePlaceholder: "粘贴新的 sk-xxx 替换当前 Key (统计/历史保留)",
     keyUpdated: "密钥已更新",
     enterNotes: "请输入备注...",

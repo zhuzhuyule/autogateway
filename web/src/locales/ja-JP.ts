@@ -486,7 +486,7 @@ export default {
     editKeyNotes: "キー備考を編集",
     editKeyTitle: "キーを編集",
     editKeyValueLabel: "Key 値",
-    editKeyValueHint: "空欄なら変更しない",
+    editKeyValueHint: "現在のキーを表示中 — 直接編集できます",
     editKeyValuePlaceholder: "新しい sk-xxx を貼り付けて現在の Key を置換 (統計/履歴は保持)",
     keyUpdated: "キーを更新しました",
     enterNotes: "備考を入力してください...",

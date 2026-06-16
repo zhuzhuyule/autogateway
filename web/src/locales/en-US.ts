@@ -487,7 +487,7 @@ export default {
     editKeyNotes: "Edit key notes",
     editKeyTitle: "Edit key",
     editKeyValueLabel: "Key value",
-    editKeyValueHint: "leave empty to keep current",
+    editKeyValueHint: "current key prefilled — edit directly",
     editKeyValuePlaceholder: "Paste a new sk-xxx to replace the current key (stats/history preserved)",
     keyUpdated: "Key updated",
     enterNotes: "Enter notes...",
