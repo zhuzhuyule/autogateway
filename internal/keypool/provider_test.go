@@ -10,7 +10,33 @@ import (
 	"autogateway/internal/models"
 	"autogateway/internal/ratelimit"
 	"autogateway/internal/store"
+
+	"github.com/glebarez/sqlite"
+	"gorm.io/gorm"
 )
+
+// newTestDB opens an in-memory SQLite DB and auto-migrates APIKey for tests
+// that need real DB transactions (e.g. SetKeyEnabled).
+func newTestDB(t *testing.T) *gorm.DB {
+	t.Helper()
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := db.AutoMigrate(&models.APIKey{}); err != nil {
+		t.Fatalf("automigrate: %v", err)
+	}
+	return db
+}
+
+// newTestProviderWithDB constructs a KeyProvider with store + encryption + db.
+func newTestProviderWithDB(s store.Store, enc encryption.Service, db *gorm.DB) *KeyProvider {
+	return &KeyProvider{
+		store:         s,
+		encryptionSvc: enc,
+		db:            db,
+	}
+}
 
 // noopEncryption wraps encryption.NewService("") for tests.
 func newNoopEncryption(t *testing.T) encryption.Service {
@@ -144,5 +170,96 @@ func TestSelectKey_AllKeysExhaustedReturnsNoActiveKeys(t *testing.T) {
 	}
 	if !errors.Is(err, app_errors.ErrNoActiveKeys) {
 		t.Errorf("expected ErrNoActiveKeys, got: %v", err)
+	}
+}
+
+// TestSetKeyEnabled verifies the manual disable/enable lifecycle for a single key.
+func TestSetKeyEnabled(t *testing.T) {
+	db := newTestDB(t)
+	s := store.NewMemoryStore()
+	enc := newNoopEncryption(t)
+	const groupID uint = 5
+	const keyID uint = 100
+
+	// Insert the key into DB with active status.
+	key := models.APIKey{
+		ID:           keyID,
+		KeyValue:     "sk-test-100",
+		KeyHash:      "hash100",
+		GroupID:      groupID,
+		Status:       models.KeyStatusActive,
+		FailureCount: 0,
+	}
+	if err := db.Create(&key).Error; err != nil {
+		t.Fatalf("create key in DB: %v", err)
+	}
+
+	// Seed the key into the store (active).
+	seedKey(t, s, groupID, keyID, "sk-test-100")
+
+	p := newTestProviderWithDB(s, enc, db)
+
+	// --- Disable the key ---
+	if err := p.SetKeyEnabled(keyID, false); err != nil {
+		t.Fatalf("SetKeyEnabled(false): %v", err)
+	}
+
+	// DB status should be disabled.
+	var dbKey models.APIKey
+	if err := db.First(&dbKey, keyID).Error; err != nil {
+		t.Fatalf("fetch key from DB after disable: %v", err)
+	}
+	if dbKey.Status != models.KeyStatusDisabled {
+		t.Errorf("DB status after disable: want %q, got %q", models.KeyStatusDisabled, dbKey.Status)
+	}
+
+	// Store hash status should be disabled.
+	keyHashKey := fmt.Sprintf("key:%d", keyID)
+	hash, err := s.HGetAll(keyHashKey)
+	if err != nil {
+		t.Fatalf("HGetAll after disable: %v", err)
+	}
+	if hash["status"] != models.KeyStatusDisabled {
+		t.Errorf("store hash status after disable: want %q, got %q", models.KeyStatusDisabled, hash["status"])
+	}
+
+	// SelectKey should not return the disabled key (ErrNoActiveKeys expected).
+	_, selErr := p.SelectKey(groupID, ratelimit.Limits{})
+	if !errors.Is(selErr, app_errors.ErrNoActiveKeys) {
+		t.Errorf("after disable: expected ErrNoActiveKeys, got %v", selErr)
+	}
+
+	// --- Enable the key ---
+	if err := p.SetKeyEnabled(keyID, true); err != nil {
+		t.Fatalf("SetKeyEnabled(true): %v", err)
+	}
+
+	// DB status should be active, failure_count = 0.
+	if err := db.First(&dbKey, keyID).Error; err != nil {
+		t.Fatalf("fetch key from DB after enable: %v", err)
+	}
+	if dbKey.Status != models.KeyStatusActive {
+		t.Errorf("DB status after enable: want %q, got %q", models.KeyStatusActive, dbKey.Status)
+	}
+	if dbKey.FailureCount != 0 {
+		t.Errorf("DB failure_count after enable: want 0, got %d", dbKey.FailureCount)
+	}
+
+	// Store hash status should be active.
+	hash, err = s.HGetAll(keyHashKey)
+	if err != nil {
+		t.Fatalf("HGetAll after enable: %v", err)
+	}
+	if hash["status"] != models.KeyStatusActive {
+		t.Errorf("store hash status after enable: want %q, got %q", models.KeyStatusActive, hash["status"])
+	}
+
+	// SelectKey should return the re-enabled key.
+	got, err := p.SelectKey(groupID, ratelimit.Limits{})
+	if err != nil {
+		t.Fatalf("SelectKey after enable: %v", err)
+	}
+	if got.ID != keyID {
+		t.Errorf("SelectKey after enable: want key %d, got %d", keyID, got.ID)
 	}
 }

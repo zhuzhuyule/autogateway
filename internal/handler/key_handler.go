@@ -558,6 +558,30 @@ func (s *Server) UpdateKey(c *gin.Context) {
 	response.Success(c, nil)
 }
 
+// DisableKey handles POST /keys/:id/disable — manually disables a key (status=disabled).
+func (s *Server) DisableKey(c *gin.Context) { s.setKeyEnabled(c, false) }
+
+// EnableKey handles POST /keys/:id/enable — re-enables a manually disabled key (status=active).
+func (s *Server) EnableKey(c *gin.Context) { s.setKeyEnabled(c, true) }
+
+func (s *Server) setKeyEnabled(c *gin.Context, enabled bool) {
+	keyIDStr := c.Param("id")
+	keyID, err := strconv.Atoi(keyIDStr)
+	if err != nil || keyID <= 0 {
+		response.Error(c, app_errors.NewAPIError(app_errors.ErrBadRequest, "invalid key ID"))
+		return
+	}
+	if err := s.KeyService.SetKeyEnabled(uint(keyID), enabled); err != nil {
+		if err == gorm.ErrRecordNotFound {
+			response.Error(c, app_errors.ErrResourceNotFound)
+			return
+		}
+		response.Error(c, app_errors.ParseDBError(err))
+		return
+	}
+	response.Success(c, nil)
+}
+
 // UpdateKeyNotesRequest defines the payload for updating a key's notes.
 type UpdateKeyNotesRequest struct {
 	Notes string `json:"notes"`

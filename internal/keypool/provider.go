@@ -379,6 +379,13 @@ func (p *KeyProvider) SyncGroupKeysFromDB(groupID uint) error {
 			continue
 		}
 
+		if k.Status == models.KeyStatusDisabled {
+			// 手动停用: 从 active list 摘出 + 把 hash 的 status 字段刷成 disabled
+			_ = p.store.LRem(activeListKey, 0, k.ID)
+			_ = p.store.HSet(keyHashKey, map[string]any{"status": models.KeyStatusDisabled})
+			continue
+		}
+
 		// active: 确保 hash 存在 + 在 active list 里. 已存在的 hash 不动 (保护 failure_count).
 		existingHash, err := p.store.HGetAll(keyHashKey)
 		if err != nil || len(existingHash) == 0 {
@@ -483,6 +490,54 @@ func (p *KeyProvider) RemoveKeys(groupID uint, keyValues []string) (int64, error
 	})
 
 	return deletedCount, err
+}
+
+// SetKeyEnabled 手动停用 (enabled=false) 或启用 (enabled=true) 指定 key。
+// 停用 → status=disabled, 从 active_keys 移除 (CronChecker 不会自动恢复它);
+// 启用 → status=active, failure_count=0, 重新加入 active_keys 轮转池。
+func (p *KeyProvider) SetKeyEnabled(keyID uint, enabled bool) error {
+	targetStatus := models.KeyStatusDisabled
+	if enabled {
+		targetStatus = models.KeyStatusActive
+	}
+	keyHashKey := fmt.Sprintf("key:%d", keyID)
+
+	return p.executeTransactionWithRetry(func(tx *gorm.DB) error {
+		var key models.APIKey
+		if err := tx.Set("gorm:query_option", "FOR UPDATE").First(&key, keyID).Error; err != nil {
+			return err
+		}
+
+		updates := map[string]any{"status": targetStatus}
+		if enabled {
+			updates["failure_count"] = 0
+		}
+		if err := tx.Model(&key).Updates(updates).Error; err != nil {
+			return fmt.Errorf("failed to update key %d in DB: %w", keyID, err)
+		}
+
+		activeListKey := fmt.Sprintf("group:%d:active_keys", key.GroupID)
+		if enabled {
+			if err := p.store.HSet(keyHashKey, map[string]any{
+				"status":        models.KeyStatusActive,
+				"failure_count": 0,
+			}); err != nil {
+				return fmt.Errorf("failed to HSet key %d status=active: %w", keyID, err)
+			}
+			_ = p.store.LRem(activeListKey, 0, keyID)
+			if err := p.store.LPush(activeListKey, keyID); err != nil {
+				return fmt.Errorf("failed to LPush key %d to active list: %w", keyID, err)
+			}
+		} else {
+			if err := p.store.HSet(keyHashKey, map[string]any{
+				"status": models.KeyStatusDisabled,
+			}); err != nil {
+				return fmt.Errorf("failed to HSet key %d status=disabled: %w", keyID, err)
+			}
+			_ = p.store.LRem(activeListKey, 0, keyID)
+		}
+		return nil
+	})
 }
 
 // RestoreKeys 恢复组内所有无效的 Key。

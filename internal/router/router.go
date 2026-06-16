@@ -226,6 +226,8 @@ func registerProtectedAPIRoutes(
 		keys.POST("/clear-all", serverHandler.ClearAllKeys)
 		keys.POST("/validate-group", serverHandler.ValidateGroupKeys)
 		keys.POST("/test-multiple", serverHandler.TestMultipleKeys)
+		keys.POST("/:id/disable", serverHandler.DisableKey)
+		keys.POST("/:id/enable", serverHandler.EnableKey)
 		keys.PUT("/:id/notes", serverHandler.UpdateKeyNotes)
 		keys.PUT("/:id", serverHandler.UpdateKey)
 	}

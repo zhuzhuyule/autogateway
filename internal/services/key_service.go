@@ -299,6 +299,11 @@ func (s *KeyService) RestoreMultipleKeys(groupID uint, keysText string) (*Restor
 	}, nil
 }
 
+// SetKeyEnabled 手动停用 (enabled=false) 或启用 (enabled=true) 指定 key。
+func (s *KeyService) SetKeyEnabled(keyID uint, enabled bool) error {
+	return s.KeyProvider.SetKeyEnabled(keyID, enabled)
+}
+
 // RestoreAllInvalidKeys sets the status of all 'inactive' keys in a group to 'active'.
 func (s *KeyService) RestoreAllInvalidKeys(groupID uint) (int64, error) {
 	return s.KeyProvider.RestoreKeys(groupID)
