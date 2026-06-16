@@ -181,21 +181,26 @@ func TestSetKeyEnabled(t *testing.T) {
 	const groupID uint = 5
 	const keyID uint = 100
 
-	// Insert the key into DB with active status.
+	// Insert the key into DB with non-zero failure_count to verify it is
+	// properly reset to 0 when the key is re-enabled.
 	key := models.APIKey{
 		ID:           keyID,
 		KeyValue:     "sk-test-100",
 		KeyHash:      "hash100",
 		GroupID:      groupID,
 		Status:       models.KeyStatusActive,
-		FailureCount: 0,
+		FailureCount: 5,
 	}
 	if err := db.Create(&key).Error; err != nil {
 		t.Fatalf("create key in DB: %v", err)
 	}
 
-	// Seed the key into the store (active).
+	// Seed the key into the store (active) with matching non-zero failure_count.
+	keyHashKey := fmt.Sprintf("key:%d", keyID)
 	seedKey(t, s, groupID, keyID, "sk-test-100")
+	if err := s.HSet(keyHashKey, map[string]any{"failure_count": "5"}); err != nil {
+		t.Fatalf("seed failure_count in store: %v", err)
+	}
 
 	p := newTestProviderWithDB(s, enc, db)
 
@@ -214,7 +219,6 @@ func TestSetKeyEnabled(t *testing.T) {
 	}
 
 	// Store hash status should be disabled.
-	keyHashKey := fmt.Sprintf("key:%d", keyID)
 	hash, err := s.HGetAll(keyHashKey)
 	if err != nil {
 		t.Fatalf("HGetAll after disable: %v", err)
@@ -245,13 +249,16 @@ func TestSetKeyEnabled(t *testing.T) {
 		t.Errorf("DB failure_count after enable: want 0, got %d", dbKey.FailureCount)
 	}
 
-	// Store hash status should be active.
+	// Store hash: status should be active, failure_count should be reset to 0.
 	hash, err = s.HGetAll(keyHashKey)
 	if err != nil {
 		t.Fatalf("HGetAll after enable: %v", err)
 	}
 	if hash["status"] != models.KeyStatusActive {
 		t.Errorf("store hash status after enable: want %q, got %q", models.KeyStatusActive, hash["status"])
+	}
+	if hash["failure_count"] != "0" {
+		t.Errorf("store hash failure_count after enable: want %q, got %q", "0", hash["failure_count"])
 	}
 
 	// SelectKey should return the re-enabled key.
@@ -261,5 +268,76 @@ func TestSetKeyEnabled(t *testing.T) {
 	}
 	if got.ID != keyID {
 		t.Errorf("SelectKey after enable: want key %d, got %d", keyID, got.ID)
+	}
+}
+
+// TestSyncGroupKeysFromDB_Disabled verifies that SyncGroupKeysFromDB correctly
+// handles a key whose DB status is disabled but whose store still reflects active
+// state (e.g. the store is stale before a mesh sync arrives).
+func TestSyncGroupKeysFromDB_Disabled(t *testing.T) {
+	db := newTestDB(t)
+	s := store.NewMemoryStore()
+	enc := newNoopEncryption(t)
+	const groupID uint = 6
+	const keyID uint = 200
+
+	// DB: key is disabled.
+	key := models.APIKey{
+		ID:           keyID,
+		KeyValue:     "sk-test-200",
+		KeyHash:      "hash200",
+		GroupID:      groupID,
+		Status:       models.KeyStatusDisabled,
+		FailureCount: 0,
+	}
+	if err := db.Create(&key).Error; err != nil {
+		t.Fatalf("create key in DB: %v", err)
+	}
+
+	// Store: key is still active (stale — mesh sync hasn't landed yet).
+	keyHashKey := fmt.Sprintf("key:%d", keyID)
+	if err := s.HSet(keyHashKey, map[string]any{
+		"id":            fmt.Sprint(keyID),
+		"key_string":    "sk-test-200",
+		"status":        models.KeyStatusActive,
+		"failure_count": "0",
+		"group_id":      fmt.Sprint(groupID),
+		"created_at":    "0",
+	}); err != nil {
+		t.Fatalf("seed store hash: %v", err)
+	}
+	activeListKey := fmt.Sprintf("group:%d:active_keys", groupID)
+	if err := s.LPush(activeListKey, keyID); err != nil {
+		t.Fatalf("seed active_keys: %v", err)
+	}
+
+	p := newTestProviderWithDB(s, enc, db)
+
+	if err := p.SyncGroupKeysFromDB(groupID); err != nil {
+		t.Fatalf("SyncGroupKeysFromDB: %v", err)
+	}
+
+	// Store hash status must be disabled.
+	hash, err := s.HGetAll(keyHashKey)
+	if err != nil {
+		t.Fatalf("HGetAll after sync: %v", err)
+	}
+	if hash["status"] != models.KeyStatusDisabled {
+		t.Errorf("store hash status after sync: want %q, got %q", models.KeyStatusDisabled, hash["status"])
+	}
+
+	// The key must NOT be in active_keys (LRem removed it).
+	activeLen, err := s.LLen(activeListKey)
+	if err != nil {
+		t.Fatalf("LLen active_keys after sync: %v", err)
+	}
+	if activeLen != 0 {
+		t.Errorf("active_keys length after sync: want 0 (disabled key removed), got %d", activeLen)
+	}
+
+	// SelectKey must not return the disabled key.
+	_, selErr := p.SelectKey(groupID, ratelimit.Limits{})
+	if !errors.Is(selErr, app_errors.ErrNoActiveKeys) {
+		t.Errorf("after sync: expected ErrNoActiveKeys, got %v", selErr)
 	}
 }

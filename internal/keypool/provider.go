@@ -193,6 +193,10 @@ func (p *KeyProvider) handleSuccess(keyID uint, keyHashKey, activeKeysListKey st
 		return fmt.Errorf("failed to get key details from store: %w", err)
 	}
 
+	if keyDetails["status"] == models.KeyStatusDisabled {
+		return nil // 手动停用的 key 不因 in-flight 成功被自动恢复
+	}
+
 	failureCount, _ := strconv.ParseInt(keyDetails["failure_count"], 10, 64)
 	isActive := keyDetails["status"] == models.KeyStatusActive
 
@@ -239,7 +243,7 @@ func (p *KeyProvider) handleFailure(apiKey *models.APIKey, group *models.Group, 
 		return fmt.Errorf("failed to get key details from store: %w", err)
 	}
 
-	if keyDetails["status"] == models.KeyStatusInvalid {
+	if keyDetails["status"] == models.KeyStatusInvalid || keyDetails["status"] == models.KeyStatusDisabled {
 		return nil
 	}
 
