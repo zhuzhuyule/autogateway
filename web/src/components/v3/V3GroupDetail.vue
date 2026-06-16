@@ -699,10 +699,10 @@ async function refreshGroupModels() {
   try {
     const res = await keysApi.refreshModels(props.group.id);
     const n = res?.count ?? res?.models?.length ?? 0;
-    message.success(t("v3.refreshModelsSuccess", { n }));
+    message.success(t("keys.refreshModelsSuccess", { n }));
     emit("refresh");
   } catch (e) {
-    message.error((e as Error).message || t("v3.refreshModelsFail"));
+    message.error((e as Error).message || t("keys.refreshModelsFail"));
   } finally {
     modelsRefreshing.value = false;
   }
@@ -2076,7 +2076,7 @@ const filterCounts = computed(() => ({
               @click="refreshGroupModels"
             >
               <n-icon :component="RefreshOutline" :size="11" :class="modelsRefreshing ? 'v5-keycard__pill-spin' : ''" />
-              {{ modelsRefreshing ? t("common.loading") : t("v3.refreshModelsBtn") }}
+              {{ modelsRefreshing ? t("common.loading") : t("keys.refreshModelsBtn") }}
             </button>
             <div v-if="!isAggregate" class="v5-modemode">
               <button
