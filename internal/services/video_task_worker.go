@@ -5,6 +5,8 @@ import (
 	"sync"
 	"time"
 
+	"autogateway/internal/channel"
+	"autogateway/internal/keypool"
 	"autogateway/internal/models"
 
 	"github.com/google/uuid"
@@ -63,6 +65,16 @@ func NewVideoTaskWorker(svc *VideoTaskService, upstream videoUpstream) *VideoTas
 	// 避免"Start 替换 sem 引用导致旧 goroutine 释放到旧 channel"的隐患。
 	w.sem = make(chan struct{}, w.concurrency)
 	return w
+}
+
+// NewVideoTaskWorkerWithChannel 是生产构造:用 channelUpstream 作为上游实现。
+func NewVideoTaskWorkerWithChannel(
+	svc *VideoTaskService,
+	gm *GroupManager,
+	cf *channel.Factory,
+	kp *keypool.KeyProvider,
+) *VideoTaskWorker {
+	return NewVideoTaskWorker(svc, newChannelUpstream(gm, cf, kp))
 }
 
 // Start 启动后台扫描循环。

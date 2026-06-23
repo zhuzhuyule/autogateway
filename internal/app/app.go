@@ -42,6 +42,7 @@ type App struct {
 	proxyServer           *proxy.ProxyServer
 	syncPeerManager       *services.SyncPeerManager
 	syncHandler           *handler.SyncHandler
+	videoTaskWorker       *services.VideoTaskWorker
 	storage               store.Store
 	db                    *gorm.DB
 	httpServer            *http.Server
@@ -64,6 +65,7 @@ type AppParams struct {
 	ProxyServer           *proxy.ProxyServer
 	SyncPeerManager       *services.SyncPeerManager
 	SyncHandler           *handler.SyncHandler
+	VideoTaskWorker       *services.VideoTaskWorker
 	Storage               store.Store
 	DB                    *gorm.DB
 }
@@ -85,6 +87,7 @@ func NewApp(params AppParams) *App {
 		proxyServer:           params.ProxyServer,
 		syncPeerManager:       params.SyncPeerManager,
 		syncHandler:           params.SyncHandler,
+		videoTaskWorker:       params.VideoTaskWorker,
 		storage:               params.Storage,
 		db:                    params.DB,
 	}
@@ -206,6 +209,9 @@ func (a *App) Start() error {
 		a.requestLogService.Start()
 		a.logCleanupService.Start()
 		a.cronChecker.Start()
+		// 视频任务后台 worker (claim pending → 调 agnes → 回填终态)。
+		// 仅 master 启动: 任务级租约保证多实例下同一任务只被一个实例执行。
+		a.videoTaskWorker.Start()
 		// 启动同步管理器前清理 30 天以上的 sync_logs, 避免无限增长
 		a.syncPeerManager.PurgeOldLogs(30)
 		// Gap 3: 双向 mesh 注入 broadcaster, push 时既推 client 持有的 conn,
@@ -280,6 +286,7 @@ func (a *App) Stop(ctx context.Context) {
 			a.cronChecker.Stop,
 			a.logCleanupService.Stop,
 			a.requestLogService.Stop,
+			a.videoTaskWorker.Stop,
 		)
 	}
 
