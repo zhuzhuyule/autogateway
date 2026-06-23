@@ -326,3 +326,36 @@ type SyncLog struct {
 	Details      string    `gorm:"type:text" json:"details"` // 记录同步的表名/ID等元数据
 	Timestamp    time.Time `gorm:"not null;index" json:"timestamp"`
 }
+
+// VideoTask 表示一个后端托管的异步视频生成任务。
+// 状态机: pending → running → completed / failed / canceled。
+// lease_owner/lease_expires 用于 P9 mesh 多实例下的任务级租约,
+// 保证同一任务只被一个实例执行(避免重复 POST 重复扣 key 额度)。
+type VideoTask struct {
+	ID             string         `gorm:"type:varchar(64);primaryKey" json:"id"`
+	GroupName      string         `gorm:"type:varchar(255);not null;index" json:"group_name"`
+	Model          string         `gorm:"type:varchar(255);not null" json:"model"`
+	Prompt         string         `gorm:"type:text;not null" json:"prompt"`
+	Params         string         `gorm:"type:text" json:"params"` // JSON: num_frames/frame_rate 等
+	Status         string         `gorm:"type:varchar(20);not null;index;default:'pending'" json:"status"`
+	UpstreamTaskID string         `gorm:"type:varchar(255)" json:"upstream_task_id"`
+	VideoURL       string         `gorm:"type:text" json:"video_url"`
+	Progress       int            `gorm:"default:0" json:"progress"`
+	Error          string         `gorm:"type:text" json:"error"`
+	LeaseOwner     string         `gorm:"type:varchar(64);index" json:"-"`
+	LeaseExpires   *time.Time     `json:"-"`
+	StartedAt      *time.Time     `json:"started_at"`
+	CompletedAt    *time.Time     `json:"completed_at"`
+	CreatedAt      time.Time      `json:"created_at"`
+	UpdatedAt      time.Time      `json:"updated_at"`
+	DeletedAt      gorm.DeletedAt `gorm:"index" json:"-"`
+}
+
+// VideoTask 状态常量
+const (
+	VideoTaskPending   = "pending"
+	VideoTaskRunning   = "running"
+	VideoTaskCompleted = "completed"
+	VideoTaskFailed    = "failed"
+	VideoTaskCanceled  = "canceled"
+)

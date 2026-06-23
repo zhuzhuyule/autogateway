@@ -244,6 +244,19 @@ func BuildContainer() (*dig.Container, error) {
 		return nil, err
 	}
 
+	// Video Task Queue (异步视频生成: service + 后台 worker + REST handler)
+	if err := container.Provide(func(database *gorm.DB) *services.VideoTaskService {
+		return services.NewVideoTaskService(database)
+	}); err != nil {
+		return nil, err
+	}
+	if err := container.Provide(services.NewVideoTaskWorkerWithChannel); err != nil {
+		return nil, err
+	}
+	if err := container.Provide(handler.NewVideoTaskHandler); err != nil {
+		return nil, err
+	}
+
 	// Proxy & Router
 	if err := container.Provide(proxy.NewProxyServer); err != nil {
 		return nil, err

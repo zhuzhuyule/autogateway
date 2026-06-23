@@ -56,6 +56,7 @@ func NewRouter(
 	syncHandler *handler.SyncHandler,
 	versionHandler *handler.VersionHandler,
 	upgradeHandler *handler.UpgradeHandler,
+	videoTaskHandler *handler.VideoTaskHandler,
 	buildFS embed.FS,
 	indexPage []byte,
 ) *gin.Engine {
@@ -78,7 +79,7 @@ func NewRouter(
 
 	// 注册路由
 	registerSystemRoutes(router, serverHandler)
-	registerAPIRoutes(router, serverHandler, configManager, aliasHandler, aliasSuggestionHandler, routingSettingsHandler, modelCatalogHandler, dedupHandler, upstreamProbeHandler, freeModelsHandler, backupHandler, syncHandler, versionHandler, upgradeHandler)
+	registerAPIRoutes(router, serverHandler, configManager, aliasHandler, aliasSuggestionHandler, routingSettingsHandler, modelCatalogHandler, dedupHandler, upstreamProbeHandler, freeModelsHandler, backupHandler, syncHandler, versionHandler, upgradeHandler, videoTaskHandler)
 	registerProxyRoutes(router, proxyServer, groupManager, serverHandler, selector)
 	registerFrontendRoutes(router, buildFS, indexPage)
 
@@ -106,6 +107,7 @@ func registerAPIRoutes(
 	syncHandler *handler.SyncHandler,
 	versionHandler *handler.VersionHandler,
 	upgradeHandler *handler.UpgradeHandler,
+	videoTaskHandler *handler.VideoTaskHandler,
 ) {
 	api := router.Group("/api")
 	api.Use(i18n.Middleware())
@@ -119,7 +121,7 @@ func registerAPIRoutes(
 	// 用户在 UI 改完即时生效,无需重启
 	protectedAPI := api.Group("")
 	protectedAPI.Use(middleware.Auth(serverHandler.SettingsManager))
-	registerProtectedAPIRoutes(protectedAPI, serverHandler, aliasHandler, aliasSuggestionHandler, routingSettingsHandler, modelCatalogHandler, dedupHandler, upstreamProbeHandler, freeModelsHandler, backupHandler, syncHandler, upgradeHandler)
+	registerProtectedAPIRoutes(protectedAPI, serverHandler, aliasHandler, aliasSuggestionHandler, routingSettingsHandler, modelCatalogHandler, dedupHandler, upstreamProbeHandler, freeModelsHandler, backupHandler, syncHandler, upgradeHandler, videoTaskHandler)
 }
 
 func registerSyncRoutes(api *gin.RouterGroup, syncHandler *handler.SyncHandler) {
@@ -151,6 +153,7 @@ func registerProtectedAPIRoutes(
 	backupHandler *handler.BackupHandler,
 	syncHandler *handler.SyncHandler,
 	upgradeHandler *handler.UpgradeHandler,
+	videoTaskHandler *handler.VideoTaskHandler,
 ) {
 	api.GET("/channel-types", serverHandler.CommonHandler.GetChannelTypes)
 
@@ -288,6 +291,17 @@ func registerProtectedAPIRoutes(
 		backupGroup.POST("/export", backupHandler.Export)
 		backupGroup.POST("/preview", backupHandler.Preview)
 		backupGroup.POST("/import", backupHandler.Import)
+	}
+
+	// Video Task Queue (Playground 异步视频生成: 入队/查询/取消/重试/删除)
+	videoTasks := api.Group("/video-tasks")
+	{
+		videoTasks.POST("", videoTaskHandler.Create)
+		videoTasks.GET("", videoTaskHandler.List)
+		videoTasks.GET("/:id", videoTaskHandler.Get)
+		videoTasks.POST("/:id/cancel", videoTaskHandler.Cancel)
+		videoTasks.POST("/:id/retry", videoTaskHandler.Retry)
+		videoTasks.DELETE("/:id", videoTaskHandler.Delete)
 	}
 }
 
