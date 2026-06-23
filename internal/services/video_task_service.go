@@ -123,39 +123,51 @@ func (s *VideoTaskService) Claim(id, owner string, lease time.Duration) (bool, e
 }
 
 // UpdateProgress 更新进度与上游任务 id(异步轮询阶段调用)。
+// 仅在任务仍 running 时写入 —— 若已被用户取消/置终态, 这次写入静默 no-op,
+// 避免覆盖取消状态(I1: 防止"取消后 worker 又更新进度"的竞态)。
 func (s *VideoTaskService) UpdateProgress(id string, progress int, upstreamTaskID string) error {
 	updates := map[string]any{"progress": progress}
 	if upstreamTaskID != "" {
 		updates["upstream_task_id"] = upstreamTaskID
 	}
-	return s.db.Model(&models.VideoTask{}).Where("id = ?", id).Updates(updates).Error
+	return s.db.Model(&models.VideoTask{}).
+		Where("id = ? AND status = ?", id, models.VideoTaskRunning).
+		Updates(updates).Error
 }
 
 // MarkCompleted 置任务为完成态并写入视频 URL。
+// 仅当任务仍 running 时生效 —— 若用户已取消(status=canceled), 这次写入 no-op,
+// 不会把已取消的任务"复活"成 completed(I1: 租约设计要防的核心竞态)。
 func (s *VideoTaskService) MarkCompleted(id, videoURL string) error {
 	now := time.Now()
-	return s.db.Model(&models.VideoTask{}).Where("id = ?", id).Updates(map[string]any{
-		"status":       models.VideoTaskCompleted,
-		"video_url":    videoURL,
-		"progress":     100,
-		"completed_at": now,
-	}).Error
+	return s.db.Model(&models.VideoTask{}).
+		Where("id = ? AND status = ?", id, models.VideoTaskRunning).
+		Updates(map[string]any{
+			"status":       models.VideoTaskCompleted,
+			"video_url":    videoURL,
+			"progress":     100,
+			"completed_at": now,
+		}).Error
 }
 
 // MarkFailed 置任务为失败态并记录错误。
+// 同 MarkCompleted, 仅在 running 时生效, 不覆盖已取消任务(I1)。
 func (s *VideoTaskService) MarkFailed(id, errMsg string) error {
 	now := time.Now()
-	return s.db.Model(&models.VideoTask{}).Where("id = ?", id).Updates(map[string]any{
-		"status":       models.VideoTaskFailed,
-		"error":        errMsg,
-		"completed_at": now,
-	}).Error
+	return s.db.Model(&models.VideoTask{}).
+		Where("id = ? AND status = ?", id, models.VideoTaskRunning).
+		Updates(map[string]any{
+			"status":       models.VideoTaskFailed,
+			"error":        errMsg,
+			"completed_at": now,
+		}).Error
 }
 
 // RenewLease 续约,防止长任务执行中租约到期被别的实例抢走。
+// 仅对仍 running 的任务续约(M2: 终态任务无需续约, 显式表达意图)。
 func (s *VideoTaskService) RenewLease(id, owner string, lease time.Duration) error {
 	return s.db.Model(&models.VideoTask{}).
-		Where("id = ? AND lease_owner = ?", id, owner).
+		Where("id = ? AND lease_owner = ? AND status = ?", id, owner, models.VideoTaskRunning).
 		Update("lease_expires", time.Now().Add(lease)).Error
 }
 
@@ -169,6 +181,8 @@ func (s *VideoTaskService) Cancel(id string) error {
 }
 
 // IsCanceled 供 worker 在轮询循环中检测取消。
+// M3: DB 出错时 fail-open 返回 false(视为未取消, 让 worker 继续) —— 对
+// "是否停止工作"的判断, 宁可多跑一轮也不要因瞬时 DB 抖动误停。
 func (s *VideoTaskService) IsCanceled(id string) bool {
 	var task models.VideoTask
 	if err := s.db.Select("status").First(&task, "id = ?", id).Error; err != nil {

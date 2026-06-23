@@ -210,3 +210,32 @@ func TestVideoTaskService_CancelAndRetryAndDelete(t *testing.T) {
 		t.Fatal("expected deleted task to be gone")
 	}
 }
+
+// I1: 用户取消后, worker 迟到的 MarkCompleted/MarkFailed/UpdateProgress 不得
+// 把已取消任务"复活"成 completed/failed, 也不得覆盖进度。
+func TestVideoTaskService_TerminalWritesDoNotResurrectCanceled(t *testing.T) {
+	db := newVideoTaskTestDB(t)
+	svc := NewVideoTaskService(db)
+	task, _ := svc.Create("g", "m", "p", "")
+	_, _ = svc.Claim(task.ID, "A", 10*time.Minute) // running
+	_ = svc.Cancel(task.ID)                         // 用户取消
+
+	// worker 迟到的写入都应 no-op(任务非 running)
+	if err := svc.UpdateProgress(task.ID, 80, "up-1"); err != nil {
+		t.Fatalf("update progress: %v", err)
+	}
+	if err := svc.MarkCompleted(task.ID, "https://x/v.mp4"); err != nil {
+		t.Fatalf("mark completed: %v", err)
+	}
+	if err := svc.MarkFailed(task.ID, "boom"); err != nil {
+		t.Fatalf("mark failed: %v", err)
+	}
+
+	got, _ := svc.Get(task.ID)
+	if got.Status != models.VideoTaskCanceled {
+		t.Fatalf("canceled task must stay canceled, got %s", got.Status)
+	}
+	if got.VideoURL != "" || got.Progress != 0 {
+		t.Fatalf("canceled task must not be mutated, got url=%q progress=%d", got.VideoURL, got.Progress)
+	}
+}
