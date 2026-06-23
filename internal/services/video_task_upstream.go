@@ -101,10 +101,14 @@ func (u *channelUpstream) doRequest(ctx context.Context, group string, method, p
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode >= 400 {
-		u.keypool.UpdateStatus(key, g, false, fmt.Sprintf("status %d", resp.StatusCode))
+		// I1: 传真实上游错误 body(而非合成的 "status NNN"), 让 keypool 的
+		// IsUnCounted/ParseUpstreamError 能识别 429 限流等"不该计入 key 失败"
+		// 的错误, 与代理路径(proxy/server.go)行为一致, 避免污染健康 key。
+		u.keypool.UpdateStatus(key, g, false, string(raw))
 		return nil, fmt.Errorf("upstream status %d: %s", resp.StatusCode, string(raw))
 	}
-	u.keypool.UpdateStatus(key, g, true, "")
+	// M2: 成功不上报(与 proxy 一致, "请求成功不再重置成功次数, 减少 IO 消耗"),
+	// 否则每个 poll 周期都触发一次 handleSuccess 的 DB 写。
 	var out agnesResponse
 	if err := json.Unmarshal(raw, &out); err != nil {
 		return nil, fmt.Errorf("decode upstream response: %w", err)
@@ -121,6 +125,10 @@ func (u *channelUpstream) Create(ctx context.Context, task *models.VideoTask) (v
 			for k, v := range extra {
 				payload[k] = v
 			}
+		} else {
+			// M4: 不静默吞掉 —— 坏的 Params 会让视频退化为默认设置, 记一笔便于排查
+			logrus.WithError(err).WithField("task", task.ID).
+				Warn("video create: invalid task.Params JSON, ignored")
 		}
 	}
 	body, _ := json.Marshal(payload)

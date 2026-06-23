@@ -209,9 +209,6 @@ func (a *App) Start() error {
 		a.requestLogService.Start()
 		a.logCleanupService.Start()
 		a.cronChecker.Start()
-		// 视频任务后台 worker (claim pending → 调 agnes → 回填终态)。
-		// 仅 master 启动: 任务级租约保证多实例下同一任务只被一个实例执行。
-		a.videoTaskWorker.Start()
 		// 启动同步管理器前清理 30 天以上的 sync_logs, 避免无限增长
 		a.syncPeerManager.PurgeOldLogs(30)
 		// Gap 3: 双向 mesh 注入 broadcaster, push 时既推 client 持有的 conn,
@@ -224,6 +221,13 @@ func (a *App) Start() error {
 		a.syncPeerManager.SetBroadcaster(a.syncHandler)
 		a.syncPeerManager.Start(context.Background())
 	}
+
+	// 视频任务后台 worker 在所有节点启动 —— 与 cronChecker 那种 master-only
+	// 服务不同: video_tasks 的任务级租约(DB 条件 UPDATE)保证同一任务只被一个
+	// 实例执行, 且某实例崩溃后其过期租约任务可被其它节点重新 claim 接管。这正是
+	// spec 选择"任务级租约而非全局 leader"的目的; master-only 会让接管落空。
+	// (多实例接管依赖共享 DB/Redis 部署 —— P9 mesh 的标准形态。)
+	a.videoTaskWorker.Start()
 
 	// 显示配置并启动所有后台服务
 	a.configManager.DisplayServerConfig()
@@ -279,6 +283,8 @@ func (a *App) Stop(ctx context.Context) {
 	stoppableServices := []func(context.Context){
 		a.groupManager.Stop,
 		a.settingsManager.Stop,
+		// 视频 worker 在所有节点启动, 故所有节点都要 Stop(与 Start 对称)。
+		a.videoTaskWorker.Stop,
 	}
 
 	if serverConfig.IsMaster {
@@ -286,7 +292,6 @@ func (a *App) Stop(ctx context.Context) {
 			a.cronChecker.Stop,
 			a.logCleanupService.Stop,
 			a.requestLogService.Stop,
-			a.videoTaskWorker.Stop,
 		)
 	}
 
