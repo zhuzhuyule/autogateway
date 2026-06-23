@@ -41,13 +41,14 @@ type VideoTaskWorker struct {
 	leaseTTL     time.Duration
 	maxDuration  time.Duration
 
-	sem    chan struct{}
-	stopCh chan struct{}
-	wg     sync.WaitGroup
+	sem      chan struct{}
+	stopCh   chan struct{}
+	stopOnce sync.Once
+	wg       sync.WaitGroup
 }
 
 func NewVideoTaskWorker(svc *VideoTaskService, upstream videoUpstream) *VideoTaskWorker {
-	return &VideoTaskWorker{
+	w := &VideoTaskWorker{
 		svc:          svc,
 		upstream:     upstream,
 		owner:        uuid.NewString(),
@@ -56,21 +57,24 @@ func NewVideoTaskWorker(svc *VideoTaskService, upstream videoUpstream) *VideoTas
 		pollInterval: 5 * time.Second,
 		leaseTTL:     20 * time.Minute,
 		maxDuration:  15 * time.Minute,
-		sem:          make(chan struct{}, 4),
 		stopCh:       make(chan struct{}),
 	}
+	// I2: sem 只初始化一次, 容量绑定 concurrency。Start() 不再重建,
+	// 避免"Start 替换 sem 引用导致旧 goroutine 释放到旧 channel"的隐患。
+	w.sem = make(chan struct{}, w.concurrency)
+	return w
 }
 
 // Start 启动后台扫描循环。
 func (w *VideoTaskWorker) Start() {
-	w.sem = make(chan struct{}, w.concurrency)
 	w.wg.Add(1)
 	go w.runLoop()
 }
 
-// Stop 停止扫描并等待在途任务退出。
+// Stop 停止扫描并等待在途任务退出。可安全重复调用(I3: sync.Once 防止
+// close 已关闭 channel 的 panic)。
 func (w *VideoTaskWorker) Stop(ctx context.Context) {
-	close(w.stopCh)
+	w.stopOnce.Do(func() { close(w.stopCh) })
 	done := make(chan struct{})
 	go func() { w.wg.Wait(); close(done) }()
 	select {
@@ -94,18 +98,26 @@ func (w *VideoTaskWorker) runLoop() {
 }
 
 // processOnce 扫描一批可 claim 的任务,逐个尝试 claim 并并发执行。
+// I1: 先用非阻塞 select 抢一个并发槽, 抢不到立即返回(余下任务留给下一轮),
+// 绝不在 runLoop 里阻塞等待槽位 —— 否则 Stop 无法及时响应, 且会 claim 下
+// 无法立即执行的任务。槽位抢到后再 Claim, Claim 失败则归还槽位。
 func (w *VideoTaskWorker) processOnce(ctx context.Context) {
-	ids, err := w.svc.FindClaimable(w.concurrency * 2)
+	ids, err := w.svc.FindClaimable(w.concurrency)
 	if err != nil {
 		logrus.WithError(err).Warn("video worker: find claimable failed")
 		return
 	}
 	for _, id := range ids {
+		select {
+		case w.sem <- struct{}{}:
+		default:
+			return // 本轮已无空闲槽, 余下任务下一轮再处理
+		}
 		ok, err := w.svc.Claim(id, w.owner, w.leaseTTL)
 		if err != nil || !ok {
-			continue // 被别的实例抢走或出错,跳过
+			<-w.sem // 归还槽位:被别的实例抢走或出错
+			continue
 		}
-		w.sem <- struct{}{}
 		w.wg.Add(1)
 		go func(taskID string) {
 			defer w.wg.Done()
