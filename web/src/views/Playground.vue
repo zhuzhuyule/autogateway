@@ -980,7 +980,7 @@ async function sendImage(groupName: string, modelName: string, prompt: string) {
 // 走兼容端点 /v1/videos/{task_id} (在 /v1 下, 适配现有代理; 文档推荐的
 // /agnesapi?video_id= 在根域, 现有 /proxy/{group}/* 代理拼不出来)。
 const VIDEO_POLL_INTERVAL_MS = 5000;
-const VIDEO_POLL_MAX = 60; // 5s × 60 = 5min 上限
+const VIDEO_POLL_MAX = 180; // 5s × 180 = 15min 上限 (含上游排队)
 
 async function sendVideo(groupName: string, modelName: string, prompt: string) {
   const s = active.value;
@@ -1011,7 +1011,8 @@ async function sendVideo(groupName: string, modelName: string, prompt: string) {
   scrollToBottom();
 
   try {
-    // 1. 创建视频任务
+    // 1. 创建视频任务 (agnes 的 POST 可能同步阻塞数分钟直到生成完, 先给进度提示)
+    asst.content = t("playground.videoSubmitting");
     const createResp = await fetch(
       `/proxy/${encodeURIComponent(groupName)}/v1/videos`,
       {
@@ -1040,7 +1041,26 @@ async function sendVideo(groupName: string, modelName: string, prompt: string) {
     const created = (await createResp.json()) as {
       task_id?: string;
       video_id?: string;
+      status?: string;
+      remixed_from_video_id?: string;
+      error?: unknown;
     };
+    // agnes 的 POST 实为同步阻塞: 返回时往往已 completed, 响应体直接带视频 URL.
+    // 优先用 POST 响应里的终态, 命中则跳过轮询.
+    if (created.status === "completed" && created.remixed_from_video_id) {
+      asst.content = `![](${created.remixed_from_video_id})`;
+      asst.firstByteAt = Date.now();
+      asst.phase = "done";
+      asst.doneAt = Date.now();
+      return;
+    }
+    if (created.status === "failed") {
+      asst.content = `[video failed] ${JSON.stringify(created.error ?? {})}`;
+      asst.error = true;
+      asst.phase = "done";
+      asst.doneAt = Date.now();
+      return;
+    }
     const taskId = created.task_id || created.video_id;
     if (!taskId) {
       asst.content = `${t("playground.requestFailed")} (no task_id)`;

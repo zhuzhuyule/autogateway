@@ -1484,6 +1484,7 @@ export default {
     pickModelExpired: "Model selection expired, please pick again",
     imagePromptRequired: "Image generation needs a prompt — please describe what to draw",
     videoPromptRequired: "Video generation needs a prompt — please describe the scene",
+    videoSubmitting: "Submitted. Video generation may take several minutes, please wait…",
     videoGenerating: "Generating video… {p}%",
     videoTimeout: "Video generation timed out, please retry later",
     modalityChatLabel: "Chat",

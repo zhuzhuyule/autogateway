@@ -1434,6 +1434,7 @@ export default {
     pickModelExpired: "model 選択が無効、再選択してください",
     imagePromptRequired: "画像生成には prompt が必要です — 描く内容を入力してください",
     videoPromptRequired: "動画生成には prompt が必要です — シーンを入力してください",
+    videoSubmitting: "送信しました。動画生成には数分かかる場合があります。お待ちください…",
     videoGenerating: "動画生成中… {p}%",
     videoTimeout: "動画生成がタイムアウトしました。後でもう一度お試しください",
     modalityChatLabel: "チャット",
