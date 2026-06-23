@@ -1447,7 +1447,7 @@ export default {
     videoQueueStatusCompleted: "完了",
     videoQueueStatusFailed: "失敗",
     videoQueueStatusCanceled: "キャンセル済み",
-    videoGenerating: "動画生成中… {p}%",
+    videoGenerating: "バックグラウンド生成中… 経過 {t}",
     videoTimeout: "動画生成がタイムアウトしました。後でもう一度お試しください",
     modalityChatLabel: "チャット",
     modalityImageLabel: "画像",

@@ -1497,7 +1497,7 @@ export default {
     videoQueueStatusCompleted: "Completed",
     videoQueueStatusFailed: "Failed",
     videoQueueStatusCanceled: "Canceled",
-    videoGenerating: "Generating video… {p}%",
+    videoGenerating: "Generating in background… {t} elapsed",
     videoTimeout: "Video generation timed out, please retry later",
     modalityChatLabel: "Chat",
     modalityImageLabel: "Image",

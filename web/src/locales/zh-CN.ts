@@ -1484,7 +1484,7 @@ export default {
     videoQueueStatusCompleted: "已完成",
     videoQueueStatusFailed: "失败",
     videoQueueStatusCanceled: "已取消",
-    videoGenerating: "视频生成中… {p}%",
+    videoGenerating: "后台生成中… 已等待 {t}",
     videoTimeout: "视频生成超时, 请稍后重试或缩短时长",
     modalityChatLabel: "对话",
     modalityImageLabel: "图像",

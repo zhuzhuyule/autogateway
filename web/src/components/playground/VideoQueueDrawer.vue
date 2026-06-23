@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch } from "vue";
+import { ref, watch, onBeforeUnmount } from "vue";
 import { useI18n } from "vue-i18n";
 import { NDrawer, NDrawerContent, NList, NListItem, NTag, NButton, NPopconfirm, NSpin, NEmpty, NIcon } from "naive-ui";
 import { RefreshOutline } from "@vicons/ionicons5";
@@ -10,6 +10,7 @@ import {
   deleteVideoTask,
   type VideoTask,
 } from "@/api/videoTasks";
+import { fmtElapsed, elapsedSeconds } from "@/utils/videoTaskReconcile";
 
 const props = defineProps<{ open: boolean; authKey: string }>();
 const emit = defineEmits<{ (e: "update:open", v: boolean): void }>();
@@ -17,6 +18,7 @@ const { t } = useI18n();
 
 const tasks = ref<VideoTask[]>([]);
 const loading = ref(false);
+const now = ref(Date.now()); // 驱动"已等待时长"实时刷新
 
 async function refresh() {
   loading.value = true;
@@ -28,12 +30,36 @@ async function refresh() {
   }
 }
 
+// 打开期间每 5s 自动刷新列表 + 更新已等待时长, 关闭时停掉
+const REFRESH_MS = 5000;
+let timer: number | undefined;
+function startAutoRefresh() {
+  stopAutoRefresh();
+  timer = window.setInterval(() => {
+    now.value = Date.now();
+    void refresh();
+  }, REFRESH_MS);
+}
+function stopAutoRefresh() {
+  if (timer) {
+    window.clearInterval(timer);
+    timer = undefined;
+  }
+}
+
 watch(
   () => props.open,
   (v) => {
-    if (v) void refresh();
+    if (v) {
+      now.value = Date.now();
+      void refresh();
+      startAutoRefresh();
+    } else {
+      stopAutoRefresh();
+    }
   },
 );
+onBeforeUnmount(stopAutoRefresh);
 
 function statusText(s: string): string {
   const map: Record<string, string> = {
@@ -101,7 +127,7 @@ async function onDelete(id: string) {
                   {{ statusText(tk.status) }}
                 </n-tag>
                 <span class="vq-prompt" :title="tk.prompt">{{ tk.prompt }}</span>
-                <span v-if="tk.status === 'running'" class="vq-progress">{{ tk.progress }}%</span>
+                <span v-if="tk.status === 'running' || tk.status === 'pending'" class="vq-progress">{{ fmtElapsed(elapsedSeconds(tk, now)) }}</span>
               </div>
               <div v-if="tk.error" class="vq-error">{{ tk.error }}</div>
               <div class="vq-actions">

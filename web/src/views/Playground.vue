@@ -30,7 +30,7 @@ import {
   type Modality,
 } from "@/data/freeProviders";
 import { createVideoTask, getVideoTasksByIds } from "@/api/videoTasks";
-import { reconcileMessage, collectPendingTaskIds } from "@/utils/videoTaskReconcile";
+import { reconcileMessage, collectPendingTaskIds, fmtElapsed } from "@/utils/videoTaskReconcile";
 import { putImage, getImages, deleteImages } from "@/utils/imageStore";
 import VideoQueueDrawer from "@/components/playground/VideoQueueDrawer.vue";
 
@@ -621,6 +621,9 @@ onBeforeUnmount(() => {
 const VIDEO_RECONCILE_MS = 30000;
 let videoReconcileTimer: number | undefined;
 
+// 进行中(排队/生成中)的视频任务数 — 给队列入口按钮做角标, 让后台任务可感知
+const pendingVideoCount = computed(() => collectPendingTaskIds(sessions.value).length);
+
 async function reconcileVideoTasks() {
   if (document.hidden) return; // 后台标签页跳过本轮
   const ids = collectPendingTaskIds(sessions.value);
@@ -632,16 +635,17 @@ async function reconcileVideoTasks() {
     return; // 单次失败下轮重试
   }
   const byId = new Map(tasks.map(tk => [tk.id, tk]));
+  // agnes 同步阻塞无中间进度, 用"已等待时长"代替无意义的 0%
   const texts = {
-    generating: (p: number) => t("playground.videoGenerating", { p }),
+    generating: (sec: number) => t("playground.videoGenerating", { t: fmtElapsed(sec) }),
     failed: t("playground.requestFailed"),
-    timeout: t("playground.videoTimeout"),
   };
+  const now = Date.now();
   for (const s of sessions.value) {
     for (const m of s.messages) {
       if (!m.videoTaskId || m.phase === "done") continue;
       const tk = byId.get(m.videoTaskId);
-      if (tk) reconcileMessage(m, tk, texts);
+      if (tk) reconcileMessage(m, tk, texts, now);
     }
   }
 }
@@ -1565,9 +1569,14 @@ function modalityLabel(m: Modality): string {
         <n-icon :component="AddOutline" :size="14" />
         {{ t("playground.newSession") }}
       </button>
-      <button class="pg__new pg__queue" @click="videoQueueOpen = true">
+      <button
+        class="pg__new pg__queue"
+        :class="{ 'pg__queue--active': pendingVideoCount > 0 }"
+        @click="videoQueueOpen = true"
+      >
         <n-icon :component="ListOutline" :size="14" />
         {{ t("playground.videoQueueOpen") }}
+        <span v-if="pendingVideoCount > 0" class="pg__queue-badge">{{ pendingVideoCount }}</span>
       </button>
       <div class="pg__list">
         <div
@@ -2256,6 +2265,24 @@ function modalityLabel(m: Modality): string {
 }
 .pg__queue {
   margin-top: 0;
+  position: relative;
+}
+/* 有后台任务在跑时, 入口高亮提示 */
+.pg__queue--active {
+  border-color: var(--v3-accent, #2b5cff);
+  color: var(--v3-accent, #2b5cff);
+}
+.pg__queue-badge {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--v3-accent, #2b5cff);
+  color: #fff;
+  font-size: 11px;
+  line-height: 18px;
+  text-align: center;
+  font-weight: 600;
 }
 .pg__list {
   flex: 1;
