@@ -127,6 +127,7 @@ func (a *App) Start() error {
 			&models.ModelAlias{},
 			&models.SyncPeer{},
 			&models.SyncLog{},
+			&models.VideoTask{},
 		); err != nil {
 			return fmt.Errorf("database auto-migration failed: %w", err)
 		}
