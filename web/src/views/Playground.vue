@@ -31,6 +31,7 @@ import {
 } from "@/data/freeProviders";
 import { createVideoTask, getVideoTasksByIds } from "@/api/videoTasks";
 import { reconcileMessage, collectPendingTaskIds } from "@/utils/videoTaskReconcile";
+import VideoQueueDrawer from "@/components/playground/VideoQueueDrawer.vue";
 
 const { t } = useI18n();
 
@@ -68,6 +69,7 @@ function renderMarkdown(text: string): string {
 
 const message = useMessage();
 const authKey = useAuthKey();
+const videoQueueOpen = ref(false);
 
 interface Attachment {
   // 仅 image 走 OpenAI multimodal 协议; 视频协议各家不同 (Gemini 有 video_url
@@ -1499,6 +1501,10 @@ function modalityLabel(m: Modality): string {
         <n-icon :component="AddOutline" :size="14" />
         {{ t("playground.newSession") }}
       </button>
+      <button class="pg__new pg__queue" @click="videoQueueOpen = true">
+        <n-icon :component="ListOutline" :size="14" />
+        {{ t("playground.videoQueueOpen") }}
+      </button>
       <div class="pg__list">
         <div
           v-for="s in sessions"
@@ -2130,6 +2136,8 @@ function modalityLabel(m: Modality): string {
         </button>
       </div>
     </NModal>
+
+    <VideoQueueDrawer v-model:open="videoQueueOpen" :auth-key="authKey || ''" />
   </div>
 </template>
 
@@ -2170,6 +2178,9 @@ function modalityLabel(m: Modality): string {
 .pg__new:hover {
   border-color: var(--v3-accent, #2b5cff);
   color: var(--v3-accent, #2b5cff);
+}
+.pg__queue {
+  margin-top: 0;
 }
 .pg__list {
   flex: 1;
