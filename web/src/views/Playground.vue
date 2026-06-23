@@ -29,6 +29,7 @@ import {
   modalityOf,
   type Modality,
 } from "@/data/freeProviders";
+import { createVideoTask } from "@/api/videoTasks";
 
 const { t } = useI18n();
 
@@ -100,6 +101,8 @@ interface ChatMessage {
   firstByteAt?: number; // 第一个 token 到达 (用于算 TTFB)
   doneAt?: number; // stream 完成时刻
   usage?: ChatUsage; // 上游回报的 token 用量 (最后一帧)
+  // 后端视频任务 id — 关联后端异步队列;随 localStorage 持久化, 刷新后仍可回填
+  videoTaskId?: string;
 }
 
 // modelKey 编码: "<group_name>::<kind>::<name>"
@@ -974,14 +977,9 @@ async function sendImage(groupName: string, modelName: string, prompt: string) {
   }
 }
 
-// Video generation: agnes 异步任务式。POST /v1/videos 建任务 → 轮询
-// /v1/videos/{task_id} 至 completed → remixed_from_video_id 为视频 URL,
-// 转 markdown image 塞 assistant message, renderMarkdown 自动渲染 <video> 播放器。
-// 走兼容端点 /v1/videos/{task_id} (在 /v1 下, 适配现有代理; 文档推荐的
-// /agnesapi?video_id= 在根域, 现有 /proxy/{group}/* 代理拼不出来)。
-const VIDEO_POLL_INTERVAL_MS = 5000;
-const VIDEO_POLL_MAX = 180; // 5s × 180 = 15min 上限 (含上游排队)
-
+// Video generation: 入队后端异步任务队列。POST /api/video-tasks 拿 task_id 存入
+// assistant message, 顶层 30s 轮询按 videoTaskId 回填终态 (见 reconcileVideoTasks)。
+// 完成后 video_url 转 markdown image 塞消息, renderMarkdown 自动渲染 <video> 播放器。
 async function sendVideo(groupName: string, modelName: string, prompt: string) {
   const s = active.value;
   if (!s) {
@@ -995,8 +993,8 @@ async function sendVideo(groupName: string, modelName: string, prompt: string) {
   s.messages.push({ role: "user", content: prompt, sentAt: now });
   s.messages.push({
     role: "assistant",
-    content: "",
-    phase: "thinking",
+    content: t("playground.videoSubmitting"),
+    phase: "thinking", // 入队后用 thinking 显示 spinner, 等顶层轮询回填
     sentAt: now,
   });
   const asst = s.messages[s.messages.length - 1];
@@ -1011,119 +1009,14 @@ async function sendVideo(groupName: string, modelName: string, prompt: string) {
   scrollToBottom();
 
   try {
-    // 1. 创建视频任务 (agnes 的 POST 可能同步阻塞数分钟直到生成完, 先给进度提示)
-    asst.content = t("playground.videoSubmitting");
-    const createResp = await fetch(
-      `/proxy/${encodeURIComponent(groupName)}/v1/videos`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${authKey.value || ""}`,
-          "X-Playground-Trial": "1",
-        },
-        body: JSON.stringify({
-          model: modelName,
-          prompt,
-          num_frames: 121,
-          frame_rate: 24,
-        }),
-      },
-    );
-    if (!createResp.ok) {
-      const errText = await createResp.text().catch(() => "");
-      asst.content = `[${createResp.status} ${createResp.statusText}] ${errText || t("playground.requestFailed")}`;
-      asst.error = true;
-      asst.phase = "done";
-      asst.doneAt = Date.now();
-      return;
-    }
-    const created = (await createResp.json()) as {
-      task_id?: string;
-      video_id?: string;
-      status?: string;
-      remixed_from_video_id?: string;
-      error?: unknown;
-    };
-    // agnes 的 POST 实为同步阻塞: 返回时往往已 completed, 响应体直接带视频 URL.
-    // 优先用 POST 响应里的终态, 命中则跳过轮询.
-    if (created.status === "completed" && created.remixed_from_video_id) {
-      asst.content = `![](${created.remixed_from_video_id})`;
-      asst.firstByteAt = Date.now();
-      asst.phase = "done";
-      asst.doneAt = Date.now();
-      return;
-    }
-    if (created.status === "failed") {
-      asst.content = `[video failed] ${JSON.stringify(created.error ?? {})}`;
-      asst.error = true;
-      asst.phase = "done";
-      asst.doneAt = Date.now();
-      return;
-    }
-    const taskId = created.task_id || created.video_id;
-    if (!taskId) {
-      asst.content = `${t("playground.requestFailed")} (no task_id)`;
-      asst.error = true;
-      asst.phase = "done";
-      asst.doneAt = Date.now();
-      return;
-    }
-    // 2. 轮询任务状态
-    asst.content = t("playground.videoGenerating", { p: 0 });
-    for (let i = 0; i < VIDEO_POLL_MAX; i++) {
-      await new Promise(r => setTimeout(r, VIDEO_POLL_INTERVAL_MS));
-      let pollResp: Response;
-      try {
-        pollResp = await fetch(
-          `/proxy/${encodeURIComponent(groupName)}/v1/videos/${encodeURIComponent(taskId)}`,
-          {
-            headers: {
-              Authorization: `Bearer ${authKey.value || ""}`,
-              "X-Playground-Trial": "1",
-            },
-          },
-        );
-      } catch {
-        continue; // 单次网络抖动, 继续轮询
-      }
-      if (!pollResp.ok) {
-        continue;
-      }
-      const r = (await pollResp.json()) as {
-        status?: string;
-        progress?: number;
-        remixed_from_video_id?: string;
-        error?: unknown;
-      };
-      if (r.status === "completed") {
-        const url = r.remixed_from_video_id;
-        if (url) {
-          asst.content = `![](${url})`; // renderMarkdown 把 .mp4 转 <video>
-          asst.firstByteAt = Date.now();
-        } else {
-          asst.content = `${t("playground.requestFailed")} (no video url)`;
-          asst.error = true;
-        }
-        asst.phase = "done";
-        asst.doneAt = Date.now();
-        return;
-      }
-      if (r.status === "failed") {
-        asst.content = `[video failed] ${JSON.stringify(r.error ?? {})}`;
-        asst.error = true;
-        asst.phase = "done";
-        asst.doneAt = Date.now();
-        return;
-      }
-      // queued / in_progress → 更新进度
-      asst.content = t("playground.videoGenerating", { p: r.progress ?? 0 });
-    }
-    // 轮询上限仍未完成
-    asst.content = t("playground.videoTimeout");
-    asst.error = true;
-    asst.phase = "done";
-    asst.doneAt = Date.now();
+    const task = await createVideoTask(authKey.value || "", {
+      group: groupName,
+      model: modelName,
+      prompt,
+      params: { num_frames: 121, frame_rate: 24 },
+    });
+    asst.videoTaskId = task.id;
+    asst.content = t("playground.videoQueued");
   } catch (e) {
     asst.content = `[network error] ${(e as Error).message}`;
     asst.error = true;

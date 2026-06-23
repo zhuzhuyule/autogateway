@@ -1472,6 +1472,7 @@ export default {
     imagePromptRequired: "图像生成需要 prompt, 请输入描述",
     videoPromptRequired: "视频生成需要 prompt, 请输入描述",
     videoSubmitting: "已提交, 视频生成可能需要数分钟, 请耐心等待…",
+    videoQueued: "已加入队列, 后台生成中…",
     videoGenerating: "视频生成中… {p}%",
     videoTimeout: "视频生成超时, 请稍后重试或缩短时长",
     modalityChatLabel: "对话",
