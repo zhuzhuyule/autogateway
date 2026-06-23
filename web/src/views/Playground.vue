@@ -29,7 +29,8 @@ import {
   modalityOf,
   type Modality,
 } from "@/data/freeProviders";
-import { createVideoTask } from "@/api/videoTasks";
+import { createVideoTask, getVideoTasksByIds } from "@/api/videoTasks";
+import { reconcileMessage, collectPendingTaskIds } from "@/utils/videoTaskReconcile";
 
 const { t } = useI18n();
 
@@ -605,6 +606,44 @@ onMounted(() => document.addEventListener("mousedown", onDocClick));
 onBeforeUnmount(() => {
   document.removeEventListener("mousedown", onDocClick);
   document.body.classList.remove("pg-route-active");
+});
+
+// 顶层 30s 轮询: 扫描所有会话里仍未完成、带 videoTaskId 的消息, 批量查后端
+// 状态并用 reconcileMessage 原地回填 (排队中 / 进度 / 终态 video 播放器).
+const VIDEO_RECONCILE_MS = 30000;
+let videoReconcileTimer: number | undefined;
+
+async function reconcileVideoTasks() {
+  if (document.hidden) return; // 后台标签页跳过本轮
+  const ids = collectPendingTaskIds(sessions.value);
+  if (ids.length === 0) return;
+  let tasks;
+  try {
+    tasks = await getVideoTasksByIds(authKey.value || "", ids);
+  } catch {
+    return; // 单次失败下轮重试
+  }
+  const byId = new Map(tasks.map(tk => [tk.id, tk]));
+  const texts = {
+    generating: (p: number) => t("playground.videoGenerating", { p }),
+    failed: t("playground.requestFailed"),
+    timeout: t("playground.videoTimeout"),
+  };
+  for (const s of sessions.value) {
+    for (const m of s.messages) {
+      if (!m.videoTaskId || m.phase === "done") continue;
+      const tk = byId.get(m.videoTaskId);
+      if (tk) reconcileMessage(m, tk, texts);
+    }
+  }
+}
+
+onMounted(() => {
+  videoReconcileTimer = window.setInterval(reconcileVideoTasks, VIDEO_RECONCILE_MS);
+  void reconcileVideoTasks(); // 进入页面立即对一次 (刷新后快速恢复)
+});
+onBeforeUnmount(() => {
+  if (videoReconcileTimer) window.clearInterval(videoReconcileTimer);
 });
 
 async function reloadAliases() {
