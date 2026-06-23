@@ -31,6 +31,7 @@ import {
 } from "@/data/freeProviders";
 import { createVideoTask, getVideoTasksByIds } from "@/api/videoTasks";
 import { reconcileMessage, collectPendingTaskIds } from "@/utils/videoTaskReconcile";
+import { putImage, getImages, deleteImages } from "@/utils/imageStore";
 import VideoQueueDrawer from "@/components/playground/VideoQueueDrawer.vue";
 
 const { t } = useI18n();
@@ -74,10 +75,11 @@ const videoQueueOpen = ref(false);
 interface Attachment {
   // 仅 image 走 OpenAI multimodal 协议; 视频协议各家不同 (Gemini 有 video_url
   // 但非标准), 先不做.
+  id: string; // 持久化主键 — dataUrl 存 IndexedDB, localStorage 只留元数据
   kind: "image";
   name: string;
   mime: string;
-  dataUrl: string; // base64 data URL — 不持久化到 localStorage(太大)
+  dataUrl: string; // base64 data URL — 存 IndexedDB(按 id), localStorage 不存
 }
 interface ChatUsage {
   prompt_tokens?: number;
@@ -127,6 +129,8 @@ const activeId = ref<string | null>(localStorage.getItem(ACTIVE_ID_KEY));
 watch(activeId, v => {
   if (v) {
     localStorage.setItem(ACTIVE_ID_KEY, v);
+    // 切换会话后滚到最后一条 (nextTick 等新会话消息渲染完)
+    void nextTick(() => scrollToBottom());
   } else {
     localStorage.removeItem(ACTIVE_ID_KEY);
   }
@@ -147,7 +151,9 @@ function loadRecentImages() {
   try {
     const raw = localStorage.getItem(RECENT_IMAGES_KEY);
     if (raw) {
-      recentImages.value = JSON.parse(raw);
+      const arr = JSON.parse(raw) as Attachment[];
+      // 兼容旧数据(无 id): 补一个 id, 保证后续持久化/预览 key 稳定
+      recentImages.value = arr.map(a => (a.id ? a : { ...a, id: crypto.randomUUID() }));
     }
   } catch {
     // ignore
@@ -795,26 +801,36 @@ function loadSessions() {
     const raw = localStorage.getItem(SESS_KEY);
     if (raw) {
       sessions.value = JSON.parse(raw);
+      // 异步从 IndexedDB 回填历史图片(localStorage 只存了元数据)
+      void hydrateSessionImages();
     }
   } catch {
     // ignore
   }
 }
 
-// 持久化时 strip 掉 attachments 字段 — base64 数据动辄几 MB, 撑爆 5MB
-// localStorage. 当前会话刷新后图片消失但文字和元信息保留, 可接受的折衷.
+// 持久化: base64 dataUrl 动辄几 MB 会撑爆 5MB localStorage, 所以把图片体
+// (dataUrl)存进 IndexedDB(按 attachment id), localStorage 只保留附件元数据
+// (id/kind/name/mime)。加载时再从 IndexedDB hydrate 回 dataUrl, 这样刷新/
+// 重开聊天后历史图片仍可见。
 watch(
   sessions,
   () => {
     const slim = sessions.value.map(s => ({
       ...s,
       messages: s.messages.map(m => {
-        if (!m.attachments) {
+        if (!m.attachments || !m.attachments.length) {
           return m;
         }
-        // eslint-disable-next-line @typescript-eslint/no-unused-vars
-        const { attachments, ...rest } = m;
-        return rest;
+        // dataUrl 落 IndexedDB(fire-and-forget, 失败则该图刷新后丢, 不阻断 UI),
+        // localStorage 只存去掉 dataUrl 的元数据。
+        const metaAtts = m.attachments.map(a => {
+          if (a.dataUrl) {
+            void putImage(a.id, a.dataUrl).catch(() => {});
+          }
+          return { id: a.id, kind: a.kind, name: a.name, mime: a.mime, dataUrl: "" };
+        });
+        return { ...m, attachments: metaAtts };
       }),
     }));
     try {
@@ -825,6 +841,38 @@ watch(
   },
   { deep: true },
 );
+
+// hydrateSessionImages 从 IndexedDB 把 dataUrl 回填到所有缺图的 attachment 上。
+// loadSessions 后异步调用 —— 回填是响应式写入, 触发气泡里 <img> 重新渲染。
+async function hydrateSessionImages() {
+  const need: string[] = [];
+  for (const s of sessions.value) {
+    for (const m of s.messages) {
+      if (!m.attachments) continue;
+      for (const a of m.attachments) {
+        if (a.id && !a.dataUrl) need.push(a.id);
+      }
+    }
+  }
+  if (!need.length) return;
+  let map: Map<string, string>;
+  try {
+    map = await getImages(need);
+  } catch {
+    return; // IndexedDB 不可用(隐私模式等), 降级: 历史图片不显示, 不崩
+  }
+  for (const s of sessions.value) {
+    for (const m of s.messages) {
+      if (!m.attachments) continue;
+      for (const a of m.attachments) {
+        if (!a.dataUrl) {
+          const url = map.get(a.id);
+          if (url) a.dataUrl = url;
+        }
+      }
+    }
+  }
+}
 
 function newSession() {
   const id = `s-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
@@ -843,6 +891,17 @@ function newSession() {
 }
 
 function deleteSession(id: string) {
+  // 清理该会话图片在 IndexedDB 的副本, 避免无限增长
+  const gone = sessions.value.find(s => s.id === id);
+  if (gone) {
+    const ids: string[] = [];
+    for (const m of gone.messages) {
+      for (const a of m.attachments ?? []) {
+        if (a.id) ids.push(a.id);
+      }
+    }
+    if (ids.length) void deleteImages(ids).catch(() => {});
+  }
   sessions.value = sessions.value.filter(s => s.id !== id);
   if (activeId.value === id) {
     activeId.value = sessions.value[0]?.id || null;
@@ -899,6 +958,7 @@ async function onFileChange(e: Event) {
     try {
       const dataUrl = await readAsDataUrl(f);
       const att: Attachment = {
+        id: crypto.randomUUID(),
         kind: "image",
         name: f.name,
         mime: f.type || "image/png",
@@ -1103,6 +1163,7 @@ async function onPaste(e: ClipboardEvent) {
     try {
       const dataUrl = await readAsDataUrl(f);
       const att: Attachment = {
+        id: crypto.randomUUID(),
         kind: "image",
         name: f.name || `${t("playground.pastedImage")}-${Date.now()}.png`,
         mime: f.type || "image/png",
@@ -1361,6 +1422,9 @@ onMounted(async () => {
 
   loadSessions();
   loadRecentImages();
+  // 初次进入聊天: 等会话消息渲染完后滚到最后一条
+  await nextTick();
+  scrollToBottom();
   try {
     // 用完整 getGroups (不是 listGroups), 因为我们要 exposed_models /
     // available_models 把 group 自带的可调用模型也展示出来 — alias 反推只能
@@ -1588,13 +1652,18 @@ function modalityLabel(m: Modality): string {
 
             <!-- user 附件缩略图 (图片) -->
             <div v-if="m.role === 'user' && m.attachments && m.attachments.length" class="pg__atts">
-              <img
-                v-for="(a, ai) in m.attachments"
-                :key="ai"
-                :src="a.dataUrl"
-                :alt="a.name"
-                class="pg__att-thumb"
-              />
+              <n-image-group>
+                <n-image
+                  v-for="(a, ai) in m.attachments"
+                  v-show="a.dataUrl"
+                  :key="ai"
+                  :src="a.dataUrl"
+                  :alt="a.name"
+                  :width="96"
+                  object-fit="cover"
+                  class="pg__att-thumb"
+                />
+              </n-image-group>
             </div>
             <!-- 正文: markdown 渲染 (assistant 才走 markdown) -->
             <div
@@ -1638,7 +1707,13 @@ function modalityLabel(m: Modality): string {
               :key="ai"
               class="pg__pending-item"
             >
-              <img :src="a.dataUrl" :alt="a.name" class="pg__pending-thumb" />
+              <n-image
+                :src="a.dataUrl"
+                :alt="a.name"
+                :width="56"
+                object-fit="cover"
+                class="pg__pending-thumb"
+              />
               <button
                 class="pg__pending-rm"
                 :title="t('playground.attachmentRemove')"
