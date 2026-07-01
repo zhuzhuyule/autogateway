@@ -1322,7 +1322,9 @@ const editKeySaving = ref(false);
 
 function openEditKeyDialog(k: KeyRow) {
   editingKey.value = k;
-  editKeyValueInput.value = ""; // 始终留空 — 不预填 mask 避免覆盖真值
+  // 预填原密钥明文 (后端 ListKeysInGroup 已解密返回 key_value), 编辑时能看到原密钥
+  // — 尤其同步产生多个同名/同值 key 时便于辨别。没改就只更新 notes。
+  editKeyValueInput.value = k.key_value || "";
   editNotesInput.value = k.notes || "";
   keyEditDialogShow.value = true;
 }
@@ -1332,20 +1334,23 @@ async function saveKeyEdit() {
     return;
   }
   const k = editingKey.value;
-  const newKeyValue = editKeyValueInput.value.trim();
+  const trimmedKey = editKeyValueInput.value.trim();
+  const original = (k.key_value || "").trim();
+  // 预填了原密钥, 只有真改动才提交新 key (避免无谓重新加密 + status 重置)
+  const keyChanged = trimmedKey !== "" && trimmedKey !== original;
   const newNotes = editNotesInput.value.trim();
   editKeySaving.value = true;
   const previousNotes = k.notes;
   k.notes = newNotes;
   try {
-    await keysApi.updateKey(k.id, newKeyValue, newNotes);
+    await keysApi.updateKey(k.id, keyChanged ? trimmedKey : "", newNotes);
     message.success(
-      newKeyValue
+      keyChanged
         ? t("keys.keyUpdated") || "Key updated"
         : t("keys.notesUpdated") || "Notes updated",
     );
     keyEditDialogShow.value = false;
-    if (newKeyValue) {
+    if (keyChanged) {
       // status 被后端重置 active, key_value 也变了 — 重新拉列表
       loadKeys();
     }
@@ -2703,7 +2708,7 @@ const filterCounts = computed(() => ({
       @remove-exposed="removeFromExposed"
     />
 
-    <!-- Key 编辑弹窗 (P11.33): key value 留空 = 只改 notes; 填了走 in-place rotate -->
+    <!-- Key 编辑弹窗: 预填原密钥明文, 未改动只更新 notes; 改了走 in-place rotate -->
     <n-modal
       v-model:show="keyEditDialogShow"
       preset="dialog"
