@@ -186,6 +186,10 @@ function isSubmitDisabled() {
           </div>
         </div>
 
+        <div v-if="inputMode === 'text'" class="v3-format-hint">
+          {{ t("keys.labelFormatHint") }}
+        </div>
+
         <div v-else class="v3-upload-wrapper">
           <n-upload
             v-model:file-list="fileList"
@@ -374,6 +378,12 @@ function isSubmitDisabled() {
 .v3-key-hint__badge.warn {
   background: oklch(0.96 0.05 80);
   color: oklch(0.5 0.15 80);
+}
+
+.v3-format-hint {
+  font: 400 11.5px/1.5 var(--v3-sans);
+  color: var(--v3-ink-3);
+  margin-top: -8px;
 }
 
 .v3-modal-footer {
