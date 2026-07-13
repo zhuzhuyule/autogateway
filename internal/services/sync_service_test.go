@@ -449,3 +449,56 @@ func TestSyncService_ProcessPayload_PreservesLocalProxyURL(t *testing.T) {
 		t.Errorf("new group from remote must NOT inherit proxy_url, got %v", v)
 	}
 }
+
+
+// 删除 key 后, 其墓碑必须能被增量导出(deleted_at > since), 否则对端收不到
+// 删除、会把 active 记录同步补回 —— 这是"删除后又被同步回来"的根因修复。
+func TestSyncService_ExportPayload_IncludesTombstone(t *testing.T) {
+	db := newSyncTestDB(t)
+	cfg := &mockConfigManager{masterKey: "test-node-1"}
+	svc := NewSyncService(db, cfg, NewNodeKeypairService(), nil)
+	ctx := context.Background()
+
+	twoHoursAgo := time.Now().Add(-2 * time.Hour)
+	oneHourAgo := time.Now().Add(-1 * time.Hour)
+
+	// key 很久前创建/更新, updated_at = 2h 前
+	key := models.APIKey{
+		ID: 1, GroupID: 1, KeyValue: "sk-x", Status: "active",
+		CreatedAt: twoHoursAgo, UpdatedAt: twoHoursAgo,
+	}
+	if err := db.Create(&key).Error; err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	// 删除前增量导出(since=1h前): active key 的 updated_at=2h前 < since, 不应出现
+	before, err := svc.ExportPayload(ctx, &oneHourAgo)
+	if err != nil {
+		t.Fatalf("export before: %v", err)
+	}
+	for _, k := range before.APIKeys {
+		if k.ID == 1 {
+			t.Fatalf("未变化的 active key 不应出现在增量导出")
+		}
+	}
+
+	// GORM soft delete: 只写 deleted_at, updated_at 仍是 2h 前
+	if err := db.Delete(&models.APIKey{}, uint(1)).Error; err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+
+	// 删除后增量导出: updated_at=2h前 < since, 但 deleted_at=now > since → 墓碑必须导出
+	after, err := svc.ExportPayload(ctx, &oneHourAgo)
+	if err != nil {
+		t.Fatalf("export after: %v", err)
+	}
+	found := false
+	for _, k := range after.APIKeys {
+		if k.ID == 1 && k.DeletedAt.Valid {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("删除墓碑应被增量导出(deleted_at > since), 但没找到; 导出 %d 条 key", len(after.APIKeys))
+	}
+}

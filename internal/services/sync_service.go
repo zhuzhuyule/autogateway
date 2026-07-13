@@ -160,7 +160,10 @@ func (s *SyncService) ExportPayload(ctx context.Context, since *time.Time) (*Syn
 		var items []models.SystemSetting
 		query := s.db.WithContext(ctx).Unscoped()
 		if since != nil {
-			query = query.Where("updated_at > ?", *since)
+			// 增量必须同时看 deleted_at: GORM soft delete 只写 deleted_at 不动
+			// updated_at, 只按 updated_at 过滤会漏掉删除墓碑 → 对端收不到删除 →
+			// 把 active 记录同步补回。deleted_at 为 NULL 时该条件恒 false, 不影响 active。
+			query = query.Where("updated_at > ? OR deleted_at > ?", *since, *since)
 		}
 		if err := query.Find(&items).Error; err != nil {
 			return nil, fmt.Errorf("failed to export system settings: %w", err)
@@ -173,7 +176,10 @@ func (s *SyncService) ExportPayload(ctx context.Context, since *time.Time) (*Syn
 		var items []models.Group
 		query := s.db.WithContext(ctx).Unscoped()
 		if since != nil {
-			query = query.Where("updated_at > ?", *since)
+			// 增量必须同时看 deleted_at: GORM soft delete 只写 deleted_at 不动
+			// updated_at, 只按 updated_at 过滤会漏掉删除墓碑 → 对端收不到删除 →
+			// 把 active 记录同步补回。deleted_at 为 NULL 时该条件恒 false, 不影响 active。
+			query = query.Where("updated_at > ? OR deleted_at > ?", *since, *since)
 		}
 		if err := query.Find(&items).Error; err != nil {
 			return nil, fmt.Errorf("failed to export groups: %w", err)
@@ -186,7 +192,10 @@ func (s *SyncService) ExportPayload(ctx context.Context, since *time.Time) (*Syn
 		var items []models.GroupSubGroup
 		query := s.db.WithContext(ctx).Unscoped()
 		if since != nil {
-			query = query.Where("updated_at > ?", *since)
+			// 增量必须同时看 deleted_at: GORM soft delete 只写 deleted_at 不动
+			// updated_at, 只按 updated_at 过滤会漏掉删除墓碑 → 对端收不到删除 →
+			// 把 active 记录同步补回。deleted_at 为 NULL 时该条件恒 false, 不影响 active。
+			query = query.Where("updated_at > ? OR deleted_at > ?", *since, *since)
 		}
 		if err := query.Find(&items).Error; err != nil {
 			return nil, fmt.Errorf("failed to export group subgroups: %w", err)
@@ -199,7 +208,10 @@ func (s *SyncService) ExportPayload(ctx context.Context, since *time.Time) (*Syn
 		var items []models.ModelAlias
 		query := s.db.WithContext(ctx).Unscoped()
 		if since != nil {
-			query = query.Where("updated_at > ?", *since)
+			// 增量必须同时看 deleted_at: GORM soft delete 只写 deleted_at 不动
+			// updated_at, 只按 updated_at 过滤会漏掉删除墓碑 → 对端收不到删除 →
+			// 把 active 记录同步补回。deleted_at 为 NULL 时该条件恒 false, 不影响 active。
+			query = query.Where("updated_at > ? OR deleted_at > ?", *since, *since)
 		}
 		if err := query.Find(&items).Error; err != nil {
 			return nil, fmt.Errorf("failed to export model aliases: %w", err)
@@ -212,7 +224,10 @@ func (s *SyncService) ExportPayload(ctx context.Context, since *time.Time) (*Syn
 		var items []models.APIKey
 		query := s.db.WithContext(ctx).Unscoped()
 		if since != nil {
-			query = query.Where("updated_at > ?", *since)
+			// 增量必须同时看 deleted_at: GORM soft delete 只写 deleted_at 不动
+			// updated_at, 只按 updated_at 过滤会漏掉删除墓碑 → 对端收不到删除 →
+			// 把 active 记录同步补回。deleted_at 为 NULL 时该条件恒 false, 不影响 active。
+			query = query.Where("updated_at > ? OR deleted_at > ?", *since, *since)
 		}
 		if err := query.Find(&items).Error; err != nil {
 			return nil, fmt.Errorf("failed to export api keys: %w", err)
