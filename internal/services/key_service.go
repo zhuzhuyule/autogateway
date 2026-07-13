@@ -62,7 +62,7 @@ func NewKeyService(db *gorm.DB, keyProvider *keypool.KeyProvider, keyValidator *
 // AddMultipleKeys handles the business logic of creating new keys from a text block.
 // deprecated: use KeyImportService for large imports
 func (s *KeyService) AddMultipleKeys(groupID uint, keysText string) (*AddKeysResult, error) {
-	keys := s.ParseKeysFromText(keysText)
+	keys, notesByKey := s.parseKeysWithNotes(keysText)
 	if len(keys) > maxRequestKeys {
 		return nil, fmt.Errorf("batch size exceeds the limit of %d keys, got %d", maxRequestKeys, len(keys))
 	}
@@ -70,7 +70,7 @@ func (s *KeyService) AddMultipleKeys(groupID uint, keysText string) (*AddKeysRes
 		return nil, fmt.Errorf("no valid keys found in the input text")
 	}
 
-	addedCount, ignoredCount, err := s.processAndCreateKeys(groupID, keys, nil)
+	addedCount, ignoredCount, err := s.processAndCreateKeys(groupID, keys, notesByKey, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -88,9 +88,12 @@ func (s *KeyService) AddMultipleKeys(groupID uint, keysText string) (*AddKeysRes
 }
 
 // processAndCreateKeys is the lowest-level reusable function for adding keys.
+// notesByKey (optional, may be nil) maps a trimmed key value to a per-key note
+// captured from the `key,备注` input format; the note is stored on APIKey.Notes.
 func (s *KeyService) processAndCreateKeys(
 	groupID uint,
 	keys []string,
+	notesByKey map[string]string,
 	progressCallback func(processed int),
 ) (addedCount int, ignoredCount int, err error) {
 	// 1. Get existing key hashes in the group for deduplication
@@ -131,6 +134,7 @@ func (s *KeyService) processAndCreateKeys(
 			KeyValue: encryptedKey,
 			KeyHash:  keyHash,
 			Status:   models.KeyStatusActive,
+			Notes:    notesByKey[trimmedKey],
 		})
 	}
 
@@ -180,6 +184,73 @@ func (s *KeyService) ParseKeysFromText(text string) []string {
 	}
 
 	return s.filterValidKeys(keys)
+}
+
+// keyNotesLineSplitter splits a note-less line into individual keys, preserving
+// the legacy ParseKeysFromText behaviour (whitespace / semicolon separated).
+var keyNotesLineSplitter = regexp.MustCompile(`[\s;]+`)
+
+// parseKeysWithNotes parses keysText for the "add keys" flow, supporting an
+// optional per-key note on each line:
+//
+//	sk-xxx              -> note ""
+//	sk-xxx,my label     -> note "my label"
+//	sk-xxx<TAB>my label -> note "my label"
+//
+// The FIRST comma or tab on a line separates the key from its note; the note may
+// contain spaces and further commas, and is trimmed + truncated to 255 runes.
+// Lines without a comma/tab keep the legacy behaviour (whitespace/semicolon may
+// separate several keys, all with empty notes), so plain-key input is unchanged.
+// A JSON array of key strings is also still accepted (notes empty).
+//
+// Returns the key slice (order preserved) plus a map of trimmed key -> note; keys
+// without a note have no map entry.
+func (s *KeyService) parseKeysWithNotes(text string) ([]string, map[string]string) {
+	notesByKey := make(map[string]string)
+
+	// Legacy: a JSON array of key strings carries no per-key notes.
+	var jsonKeys []string
+	if json.Unmarshal([]byte(text), &jsonKeys) == nil && len(jsonKeys) > 0 {
+		return s.filterValidKeys(jsonKeys), notesByKey
+	}
+
+	var keys []string
+	for _, rawLine := range strings.Split(text, "\n") {
+		line := strings.TrimSpace(strings.TrimRight(rawLine, "\r"))
+		if line == "" {
+			continue
+		}
+
+		if idx := strings.IndexAny(line, ",\t"); idx >= 0 {
+			key := strings.TrimSpace(line[:idx])
+			if !s.isValidKeyFormat(key) {
+				continue
+			}
+			if note := truncateRunes(strings.TrimSpace(line[idx+1:]), 255); note != "" {
+				notesByKey[key] = note
+			}
+			keys = append(keys, key)
+			continue
+		}
+
+		// No note separator: legacy multi-key line (whitespace / semicolon split).
+		for _, tok := range keyNotesLineSplitter.Split(line, -1) {
+			if tok = strings.TrimSpace(tok); s.isValidKeyFormat(tok) {
+				keys = append(keys, tok)
+			}
+		}
+	}
+
+	return keys, notesByKey
+}
+
+// truncateRunes returns s truncated to at most maxRunes runes.
+func truncateRunes(s string, maxRunes int) string {
+	r := []rune(s)
+	if len(r) <= maxRunes {
+		return s
+	}
+	return string(r[:maxRunes])
 }
 
 // filterValidKeys validates and filters potential API keys
