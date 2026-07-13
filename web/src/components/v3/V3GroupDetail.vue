@@ -1363,6 +1363,49 @@ async function saveKeyEdit() {
   }
 }
 
+// === Label(notes) 卡片内 inline 编辑 ===
+// 点击 Label 变输入框, 失焦/回车保存, Esc 取消。只改 notes 走轻量
+// updateKeyNotes 接口, 保存后本地更新 k.notes 不整列表 reload — 保持
+// 稳定排序下的卡片位置不跳。改 key value 仍走笔图标弹窗。
+const vFocus = {
+  mounted: (el: HTMLInputElement) => {
+    el.focus();
+    el.select();
+  },
+};
+const inlineNotesEditId = ref<number | null>(null);
+const inlineNotesDraft = ref("");
+
+function startInlineNotes(k: KeyRow) {
+  inlineNotesEditId.value = k.id;
+  inlineNotesDraft.value = k.notes || "";
+}
+
+function cancelInlineNotes() {
+  // 仅关闭编辑态, 丢弃草稿; 输入框卸载触发的 blur 会因 editId 已清空而空转
+  inlineNotesEditId.value = null;
+}
+
+async function commitInlineNotes(k: KeyRow) {
+  if (inlineNotesEditId.value !== k.id) {
+    return; // 已被 Esc / 二次事件关闭, 避免重复保存
+  }
+  const next = inlineNotesDraft.value.trim();
+  inlineNotesEditId.value = null; // 先关闭编辑态, 阻止 blur 二次进入
+  if (next === (k.notes || "")) {
+    return; // 无改动, 不打接口
+  }
+  const previousNotes = k.notes;
+  k.notes = next;
+  try {
+    await keysApi.updateKeyNotes(k.id, next);
+  } catch (e) {
+    k.notes = previousNotes;
+    console.error("update key notes failed", e);
+    message.error(t("common.requestFailed"));
+  }
+}
+
 async function copyText(value: string, msg = "Copied") {
   const ok = await copyToClipboard(value);
   if (ok) {
@@ -1955,9 +1998,29 @@ const filterCounts = computed(() => ({
                   {{ t("v5.kcPillTip") }}
                 </n-tooltip>
 
-                <!-- 有 Label(notes): Label + key 首尾 并排, 便于核对; 无 Label: 只显示首尾 -->
+                <!-- 有 Label(notes): Label(点击 inline 编辑) + key 首尾 并排; 无 Label: 只显示首尾 -->
                 <div v-if="k.notes" class="v5-keycard__idwrap">
-                  <span class="v5-keycard__label" :title="k.notes">{{ k.notes }}</span>
+                  <input
+                    v-if="inlineNotesEditId === k.id"
+                    v-focus
+                    v-model="inlineNotesDraft"
+                    class="v5-keycard__label-input"
+                    maxlength="255"
+                    spellcheck="false"
+                    @blur="commitInlineNotes(k)"
+                    @keydown.enter.prevent="commitInlineNotes(k)"
+                    @keydown.esc.prevent="cancelInlineNotes()"
+                  />
+                  <n-tooltip v-else placement="top">
+                    <template #trigger>
+                      <span
+                        class="v5-keycard__label v5-keycard__label--editable"
+                        :title="k.notes"
+                        @click.stop="startInlineNotes(k)"
+                      >{{ k.notes }}</span>
+                    </template>
+                    {{ t("keys.editLabelTip") || "Click to edit label" }}
+                  </n-tooltip>
                   <code class="v5-keycard__mask v5-keycard__mask--inrow" :title="maskKey(k.key_value)">
                     {{ maskKey(k.key_value) }}
                   </code>
