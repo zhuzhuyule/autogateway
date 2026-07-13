@@ -109,39 +109,44 @@ func SystemRoleForChannelType(channelType string) string {
 
 // Group 对应 groups 表
 type Group struct {
-	ID                  uint                 `gorm:"primaryKey;autoIncrement" json:"id"`
-	EffectiveConfig     types.SystemSettings `gorm:"-" json:"effective_config,omitempty"`
+	ID              uint                 `gorm:"primaryKey;autoIncrement" json:"id"`
+	EffectiveConfig types.SystemSettings `gorm:"-" json:"effective_config,omitempty"`
 	// Name 唯一性约束改走 migration partial index (WHERE deleted_at IS NULL).
 	// 软删的 group 不再占用 name; 业务侧创建/重命名只检查 active groups.
 	// 见 internal/db/migrations/v2_5_17_PartialUniqueGroupName.go
-	Name                string               `gorm:"type:varchar(255);not null;index" json:"name"`
-	Endpoint            string               `gorm:"-" json:"endpoint"`
-	DisplayName         string               `gorm:"type:varchar(255)" json:"display_name"`
-	ProxyKeys           string               `gorm:"type:text" json:"proxy_keys"`
-	Description         string               `gorm:"type:varchar(512)" json:"description"`
-	GroupType           string               `gorm:"type:varchar(50);default:'standard'" json:"group_type"` // 'standard' or 'aggregate'
-	IsSystem            bool                 `gorm:"default:false;index" json:"is_system"`
-	SystemRole          string               `gorm:"type:varchar(50);default:'';index" json:"system_role"`
-	Upstreams           datatypes.JSON       `gorm:"type:json;not null" json:"upstreams"`
-	ValidationEndpoint  string               `gorm:"type:varchar(255)" json:"validation_endpoint"`
-	ChannelType         string               `gorm:"type:varchar(50);not null" json:"channel_type"`
-	Sort                int                  `gorm:"default:0" json:"sort"`
-	TestModel           string               `gorm:"type:varchar(255);not null" json:"test_model"`
-	ParamOverrides      datatypes.JSONMap    `gorm:"type:json" json:"param_overrides"`
-	Config              datatypes.JSONMap    `gorm:"type:json" json:"config"`
-	HeaderRules         datatypes.JSON       `gorm:"type:json" json:"header_rules"`
-	ModelRedirectRules  datatypes.JSONMap    `gorm:"type:json" json:"model_redirect_rules"`
-	ModelRedirectStrict bool                 `gorm:"default:false" json:"model_redirect_strict"`
-	APIKeys             []APIKey             `gorm:"foreignKey:GroupID" json:"api_keys"`
-	KeyCount            int64                `gorm:"-" json:"key_count"`
-	SubGroups           []GroupSubGroup      `gorm:"-" json:"sub_groups,omitempty"`
-	LastValidatedAt     *time.Time           `json:"last_validated_at"`
-	AvailableModels     datatypes.JSON       `gorm:"type:json" json:"available_models"` // 由上游 /v1/models 缓存的真实模型列表
+	Name                string            `gorm:"type:varchar(255);not null;index" json:"name"`
+	Endpoint            string            `gorm:"-" json:"endpoint"`
+	DisplayName         string            `gorm:"type:varchar(255)" json:"display_name"`
+	ProxyKeys           string            `gorm:"type:text" json:"proxy_keys"`
+	Description         string            `gorm:"type:varchar(512)" json:"description"`
+	GroupType           string            `gorm:"type:varchar(50);default:'standard'" json:"group_type"` // 'standard' or 'aggregate'
+	IsSystem            bool              `gorm:"default:false;index" json:"is_system"`
+	SystemRole          string            `gorm:"type:varchar(50);default:'';index" json:"system_role"`
+	Upstreams           datatypes.JSON    `gorm:"type:json;not null" json:"upstreams"`
+	ValidationEndpoint  string            `gorm:"type:varchar(255)" json:"validation_endpoint"`
+	ChannelType         string            `gorm:"type:varchar(50);not null" json:"channel_type"`
+	Sort                int               `gorm:"default:0" json:"sort"`
+	TestModel           string            `gorm:"type:varchar(255);not null" json:"test_model"`
+	ParamOverrides      datatypes.JSONMap `gorm:"type:json" json:"param_overrides"`
+	Config              datatypes.JSONMap `gorm:"type:json" json:"config"`
+	HeaderRules         datatypes.JSON    `gorm:"type:json" json:"header_rules"`
+	ModelRedirectRules  datatypes.JSONMap `gorm:"type:json" json:"model_redirect_rules"`
+	ModelRedirectStrict bool              `gorm:"default:false" json:"model_redirect_strict"`
+	// ConfigVersions 为 Config / ParamOverrides / ModelRedirectRules 三个 JSON 列
+	// 记录每个字段最后一次变更(设置 or 删除)的毫秒时间戳, 键为 "<列>.<字段>"。
+	// 同步据此做字段级 LWW, 让"删字段"能压过对端仍留着的旧值(见 field_merge.go)。
+	// 空 map(升级前的老数据)时同步回退到记录级 LWW, 零回归。
+	ConfigVersions  datatypes.JSONMap `gorm:"type:json" json:"config_versions,omitempty"`
+	APIKeys         []APIKey          `gorm:"foreignKey:GroupID" json:"api_keys"`
+	KeyCount        int64             `gorm:"-" json:"key_count"`
+	SubGroups       []GroupSubGroup   `gorm:"-" json:"sub_groups,omitempty"`
+	LastValidatedAt *time.Time        `json:"last_validated_at"`
+	AvailableModels datatypes.JSON    `gorm:"type:json" json:"available_models"` // 由上游 /v1/models 缓存的真实模型列表
 	// FreeModels 是 AvailableModels 中通过 FreeModelsRegistry 严格匹配出的免费子集.
 	// 跟 AvailableModels 同一刷新时机产生: provider-aware ID 归一化后跟 Registry 求交.
 	// 保留原样 ID (含 ":free" 等后缀); 前端读它直接判 Free badge, 零本地算法.
-	FreeModels          datatypes.JSON       `gorm:"type:json" json:"free_models"`
-	ModelsRefreshedAt   *time.Time           `json:"models_refreshed_at"`
+	FreeModels        datatypes.JSON `gorm:"type:json" json:"free_models"`
+	ModelsRefreshedAt *time.Time     `json:"models_refreshed_at"`
 	// ModelRoutingMode controls model routing strictness:
 	//   "passthrough" — 所有上游模型直通 (默认, 兼容老分组)
 	//   "specified"   — 只允许 ExposedModels 列出的模型, 否则 405
@@ -176,12 +181,12 @@ type ModelAlias struct {
 	// triple. Each row is one candidate; resubmitting the same triple via the
 	// quick-setup UI must be rejected as DUPLICATE_RESOURCE, not silently
 	// duplicated (which would double the SWRR weight).
-	Alias      string    `gorm:"type:varchar(255);not null;index:idx_alias_enabled;uniqueIndex:idx_alias_group_model,priority:1" json:"alias"`
-	GroupID    uint      `gorm:"not null;index;uniqueIndex:idx_alias_group_model,priority:2" json:"group_id"`
-	RealModel  string    `gorm:"type:varchar(255);not null;uniqueIndex:idx_alias_group_model,priority:3" json:"real_model"`
-	Weight     int       `gorm:"not null;default:1" json:"weight"`
-	Priority   int       `gorm:"not null;default:100" json:"priority"`
-	Enabled    bool      `gorm:"not null;default:true;index:idx_alias_enabled" json:"enabled"`
+	Alias      string         `gorm:"type:varchar(255);not null;index:idx_alias_enabled;uniqueIndex:idx_alias_group_model,priority:1" json:"alias"`
+	GroupID    uint           `gorm:"not null;index;uniqueIndex:idx_alias_group_model,priority:2" json:"group_id"`
+	RealModel  string         `gorm:"type:varchar(255);not null;uniqueIndex:idx_alias_group_model,priority:3" json:"real_model"`
+	Weight     int            `gorm:"not null;default:1" json:"weight"`
+	Priority   int            `gorm:"not null;default:100" json:"priority"`
+	Enabled    bool           `gorm:"not null;default:true;index:idx_alias_enabled" json:"enabled"`
 	IsReserved bool           `gorm:"not null;default:false" json:"is_reserved"`
 	CreatedAt  time.Time      `json:"created_at"`
 	UpdatedAt  time.Time      `json:"updated_at"`
@@ -193,14 +198,14 @@ func (ModelAlias) TableName() string { return "model_aliases" }
 
 // APIKey 对应 api_keys 表
 type APIKey struct {
-	ID           uint       `gorm:"primaryKey;autoIncrement;index:idx_api_keys_group_last_used_id,priority:3" json:"id"`
-	KeyValue     string     `gorm:"type:text;not null" json:"key_value"`
-	KeyHash      string     `gorm:"type:varchar(128);index" json:"key_hash"`
-	GroupID      uint       `gorm:"not null;index;index:idx_api_keys_group_last_used_id,priority:1" json:"group_id"`
-	Status       string     `gorm:"type:varchar(50);not null;default:'active';index" json:"status"`
-	Notes        string     `gorm:"type:varchar(255);default:''" json:"notes"`
-	RequestCount int64      `gorm:"not null;default:0" json:"request_count"`
-	FailureCount int64      `gorm:"not null;default:0" json:"failure_count"`
+	ID           uint           `gorm:"primaryKey;autoIncrement;index:idx_api_keys_group_last_used_id,priority:3" json:"id"`
+	KeyValue     string         `gorm:"type:text;not null" json:"key_value"`
+	KeyHash      string         `gorm:"type:varchar(128);index" json:"key_hash"`
+	GroupID      uint           `gorm:"not null;index;index:idx_api_keys_group_last_used_id,priority:1" json:"group_id"`
+	Status       string         `gorm:"type:varchar(50);not null;default:'active';index" json:"status"`
+	Notes        string         `gorm:"type:varchar(255);default:''" json:"notes"`
+	RequestCount int64          `gorm:"not null;default:0" json:"request_count"`
+	FailureCount int64          `gorm:"not null;default:0" json:"failure_count"`
 	LastUsedAt   *time.Time     `gorm:"index:idx_api_keys_group_last_used_id,priority:2" json:"last_used_at"`
 	CreatedAt    time.Time      `json:"created_at"`
 	UpdatedAt    time.Time      `json:"updated_at"`
@@ -293,27 +298,27 @@ type GroupHourlyStat struct {
 
 // SyncPeer 对应 sync_peers 表，用于管理多端同步节点
 type SyncPeer struct {
-	ID             string         `gorm:"type:varchar(255);primaryKey" json:"id"`
-	Name           string         `gorm:"type:varchar(255);not null" json:"name"`
-	URL            string         `gorm:"type:varchar(512);not null" json:"url"`
-	SyncKey        string         `gorm:"type:varchar(512);not null" json:"sync_key"`
-	Role           string         `gorm:"type:varchar(50);not null;default:'client'" json:"role"`        // 'server' or 'client'
-	Status         string         `gorm:"type:varchar(50);not null;default:'disconnected'" json:"status"`
-	LastSyncedAt   *time.Time     `json:"last_synced_at"`
+	ID           string     `gorm:"type:varchar(255);primaryKey" json:"id"`
+	Name         string     `gorm:"type:varchar(255);not null" json:"name"`
+	URL          string     `gorm:"type:varchar(512);not null" json:"url"`
+	SyncKey      string     `gorm:"type:varchar(512);not null" json:"sync_key"`
+	Role         string     `gorm:"type:varchar(50);not null;default:'client'" json:"role"` // 'server' or 'client'
+	Status       string     `gorm:"type:varchar(50);not null;default:'disconnected'" json:"status"`
+	LastSyncedAt *time.Time `json:"last_synced_at"`
 	// LastPulledAt 仅在成功 pull 后更新, 用作下次 pull 的 since 下限.
 	// 跟 LastSyncedAt 分开存, 防止 push 把 since 推到 now 导致 pull 永远 empty.
-	LastPulledAt   *time.Time     `json:"last_pulled_at"`
+	LastPulledAt *time.Time `json:"last_pulled_at"`
 	// P9.1 兼容性闸门: 握手成功后填入, UI 用于展示对端版本徽章 + 提示版本差异.
-	PeerVersion    string         `gorm:"type:varchar(50)" json:"peer_version"`
-	PeerSchemaHash string         `gorm:"type:varchar(32)" json:"peer_schema_hash"`
+	PeerVersion    string `gorm:"type:varchar(50)" json:"peer_version"`
+	PeerSchemaHash string `gorm:"type:varchar(32)" json:"peer_schema_hash"`
 	// P9.x 非对称密钥模型: 添加 peer 时用户输入 PinnedFingerprint (期望对端公钥指纹).
 	// 握手时从对端 /api/version 拿 PublicKeyX25519, 比对指纹一致才接受.
 	// 加密用 nacl/box(my_priv + peer_pub), 不再用全局 SyncSecret.
-	PublicKeyX25519    string `gorm:"type:varchar(64)" json:"public_key_x25519"`
-	PinnedFingerprint  string `gorm:"type:varchar(32)" json:"pinned_fingerprint"`
-	CreatedAt      time.Time      `json:"created_at"`
-	UpdatedAt      time.Time      `json:"updated_at"`
-	DeletedAt      gorm.DeletedAt `gorm:"index" json:"-"`
+	PublicKeyX25519   string         `gorm:"type:varchar(64)" json:"public_key_x25519"`
+	PinnedFingerprint string         `gorm:"type:varchar(32)" json:"pinned_fingerprint"`
+	CreatedAt         time.Time      `json:"created_at"`
+	UpdatedAt         time.Time      `json:"updated_at"`
+	DeletedAt         gorm.DeletedAt `gorm:"index" json:"-"`
 }
 
 // SyncLog 对应 sync_logs 表，用于记录配置同步历史与状态

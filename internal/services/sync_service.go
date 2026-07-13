@@ -65,7 +65,7 @@ type WSMessage struct {
 	Type        string `json:"type"`
 	Version     string `json:"version,omitempty"`
 	SchemaHash  string `json:"schema_hash,omitempty"`
-	PublicKey   string `json:"public_key,omitempty"`    // X25519 公钥 (b64), hello 时客户端发, welcome/warning 时服务端回
+	PublicKey   string `json:"public_key,omitempty"` // X25519 公钥 (b64), hello 时客户端发, welcome/warning 时服务端回
 	PeerVersion string `json:"peer_version,omitempty"`
 	PeerSchema  string `json:"peer_schema,omitempty"`
 	MyVersion   string `json:"my_version,omitempty"`
@@ -323,11 +323,31 @@ func (s *SyncService) ProcessPayload(ctx context.Context, payload *SyncPayload) 
 				}
 			} else {
 				groupIDMap[incoming.ID] = existing.ID
-				if effectiveTime(incoming.UpdatedAt, incoming.DeletedAt).After(effectiveTime(existing.UpdatedAt, existing.DeletedAt)) {
+				recordWinnerIncoming := effectiveTime(incoming.UpdatedAt, incoming.DeletedAt).
+					After(effectiveTime(existing.UpdatedAt, existing.DeletedAt))
+
+				// 三个 JSON 列走字段级 LWW 合并(与 record 谁新无关): 让"删字段"能按
+				// 字段版本胜出, 即便对端整条 record 更旧。无字段版本的列回退记录级 LWW。
+				cfg, pov, mrr, mergedVers := mergeGroupJSONColumns(&existing, &incoming, recordWinnerIncoming)
+
+				// base: 非 JSON 字段按记录级 LWW —— 对端赢用对端整条, 本端赢拷贝本端。
+				var base *models.Group
+				if recordWinnerIncoming {
 					incoming.ID = existing.ID // 保留本端 id, 不要让 Save 改主键
-					// 代理按机器: 保留本机 proxy_url, 不被远端覆盖(双向对称)
-					preserveLocalProxyURL(&incoming, &existing)
-					if err := tx.Unscoped().Save(&incoming).Error; err != nil {
+					base = &incoming
+				} else {
+					b := existing
+					base = &b
+				}
+				base.Config, base.ParamOverrides = cfg, pov
+				base.ModelRedirectRules, base.ConfigVersions = mrr, mergedVers
+				// 代理按机器: 保留本机 proxy_url, 不被远端覆盖(读原 existing)
+				preserveLocalProxyURL(base, &existing)
+
+				// 对端 record 赢一定写; 本端 record 赢仅当字段级合并真的改了 JSON 列才写,
+				// 避免无变化的伪写入引起 updated_at 抖动 / 同步 churn。
+				if recordWinnerIncoming || !sameGroupJSONColumns(&existing, base) {
+					if err := tx.Unscoped().Save(base).Error; err != nil {
 						return fmt.Errorf("failed to update group %s: %w", incoming.Name, err)
 					}
 				}

@@ -467,9 +467,9 @@ func (s *GroupService) RefreshAvailableModels(ctx context.Context, groupID uint)
 		logrus.WithContext(ctx).WithError(err).Warn("invalidate group cache after refresh-models failed")
 	}
 	logrus.WithFields(logrus.Fields{
-		"group_id":      group.ID,
-		"available":     len(modelIDs),
-		"free":          len(freeIDs),
+		"group_id":  group.ID,
+		"available": len(modelIDs),
+		"free":      len(freeIDs),
 	}).Info("refresh-models: persisted available + free subset")
 	return modelIDs, nil
 }
@@ -638,6 +638,12 @@ func (s *GroupService) UpdateGroup(ctx context.Context, id uint, params GroupUpd
 		return nil, app_errors.ParseDBError(err)
 	}
 
+	// 快照三个 JSON 列的旧值(在任何 mutation 之前), 用于给字段级同步盖版本。
+	// 下面对 group.Config 等都是整体重新赋值(非原地改), 故旧 map 引用安全。
+	oldConfigSnap := group.Config
+	oldParamSnap := group.ParamOverrides
+	oldRedirectSnap := group.ModelRedirectRules
+
 	tx := s.db.WithContext(ctx).Begin()
 	if err := tx.Error; err != nil {
 		return nil, app_errors.ErrDatabase
@@ -802,6 +808,16 @@ func (s *GroupService) UpdateGroup(ctx context.Context, id uint, params GroupUpd
 		}
 		group.HeaderRules = headerRulesJSON
 	}
+
+	// 给本次变更的字段盖版本(新增 / 修改 / 删除), 让"删字段"带上更新的版本,
+	// 同步时按字段级 LWW 胜过对端仍留着的旧值。未变字段保留旧版本, 不引起 churn。
+	if group.ConfigVersions == nil {
+		group.ConfigVersions = datatypes.JSONMap{}
+	}
+	nowMs := time.Now().UnixMilli()
+	stampConfigVersions(group.ConfigVersions, "config", oldConfigSnap, group.Config, nowMs)
+	stampConfigVersions(group.ConfigVersions, "param_overrides", oldParamSnap, group.ParamOverrides, nowMs)
+	stampConfigVersions(group.ConfigVersions, "model_redirect_rules", oldRedirectSnap, group.ModelRedirectRules, nowMs)
 
 	if err := tx.Save(&group).Error; err != nil {
 		return nil, app_errors.ParseDBError(err)

@@ -2,8 +2,8 @@ package services
 
 import (
 	"context"
-	"fmt"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -116,6 +116,129 @@ func TestSyncService_EncryptDecrypt(t *testing.T) {
 	_, err = svc.DecryptPayload(ciphertext, "wrong-key")
 	if err == nil {
 		t.Fatal("decrypt with wrong key should have failed")
+	}
+}
+
+// TestSyncService_ProcessPayload_FieldDeletionSurvivesStalePeer 复现并锁定
+// "删 Config 字段后被同步还原": 本端记录整体更新(record updated_at 更新, 但
+// 没碰 rpm_limit), 对端记录整体更旧、却带着"更新的 rpm_limit 删除版本"。
+// 旧的记录级 LWW 会因对端 record 更旧而整块跳过 → rpm_limit 复活(bug)。
+// 字段级 LWW 应让删除按字段版本胜出。
+func TestSyncService_ProcessPayload_FieldDeletionSurvivesStalePeer(t *testing.T) {
+	db := newSyncTestDB(t)
+	cfg := &mockConfigManager{masterKey: "test-node-1"}
+	svc := NewSyncService(db, cfg, NewNodeKeypairService(), nil)
+	ctx := context.Background()
+
+	justNow := time.Now()
+	oneHourAgo := justNow.Add(-1 * time.Hour)
+
+	// 本端: rpm_limit 仍在(旧字段版本 100), 但 record 最近被动过(justNow)
+	existing := models.Group{
+		ID:             10,
+		Name:           "group-fld",
+		ChannelType:    "openai",
+		TestModel:      "gpt-4o",
+		Upstreams:      []byte("[]"),
+		Config:         datatypes.JSONMap{"rpm_limit": 500},
+		ConfigVersions: datatypes.JSONMap{"config.rpm_limit": int64(100)},
+		CreatedAt:      oneHourAgo,
+		UpdatedAt:      justNow,
+	}
+	if err := db.Create(&existing).Error; err != nil {
+		t.Fatalf("seed failed: %v", err)
+	}
+
+	// 对端: 已删除 rpm_limit(字段版本 200 更新), 但整条 record 更旧(oneHourAgo)
+	incoming := &SyncPayload{
+		SourcePeerID: "remote-node-2",
+		Timestamp:    justNow,
+		Groups: []models.Group{{
+			ID:             10,
+			Name:           "group-fld",
+			ChannelType:    "openai",
+			TestModel:      "gpt-4o",
+			Upstreams:      []byte("[]"),
+			Config:         datatypes.JSONMap{}, // rpm_limit 已删
+			ConfigVersions: datatypes.JSONMap{"config.rpm_limit": int64(200)},
+			CreatedAt:      oneHourAgo,
+			UpdatedAt:      oneHourAgo,
+		}},
+	}
+	if err := svc.ProcessPayload(ctx, incoming); err != nil {
+		t.Fatalf("ProcessPayload failed: %v", err)
+	}
+
+	var got models.Group
+	if err := db.Where("name = ?", "group-fld").First(&got).Error; err != nil {
+		t.Fatalf("find failed: %v", err)
+	}
+	if _, ok := got.Config["rpm_limit"]; ok {
+		t.Fatalf("rpm_limit 应保持删除(对端删除字段版本更新), 却复活为 %v", got.Config["rpm_limit"])
+	}
+}
+
+// TestSyncService_ProcessPayload_ConcurrentEditDoesNotResurrect 锁定"对端整条
+// record 更新(编辑了别的字段、且仍留着被删字段)时, 本端的字段删除不被还原"。
+// 这是 record 赢方 = 对端的路径: 非 JSON 字段用对端, 但被删字段按字段级版本仍归本端。
+func TestSyncService_ProcessPayload_ConcurrentEditDoesNotResurrect(t *testing.T) {
+	db := newSyncTestDB(t)
+	cfg := &mockConfigManager{masterKey: "test-node-1"}
+	svc := NewSyncService(db, cfg, NewNodeKeypairService(), nil)
+	ctx := context.Background()
+
+	justNow := time.Now()
+	oneHourAgo := justNow.Add(-1 * time.Hour)
+
+	// 本端: 已删除 b(字段版本 200), record 整体较旧
+	existing := models.Group{
+		ID:          10,
+		Name:        "group-cc",
+		ChannelType: "openai",
+		TestModel:   "gpt-4o",
+		Upstreams:   []byte("[]"),
+		Config:      datatypes.JSONMap{"a": 1},
+		ConfigVersions: datatypes.JSONMap{
+			"config.a": int64(50), "config.b": int64(200), // b 于 200 被删
+		},
+		CreatedAt: oneHourAgo,
+		UpdatedAt: oneHourAgo,
+	}
+	if err := db.Create(&existing).Error; err != nil {
+		t.Fatalf("seed failed: %v", err)
+	}
+
+	// 对端: 编辑了 c(record 整体更新 justNow), 但从没见过 b 的删除, 仍带 b=2(旧版本 100)
+	incoming := &SyncPayload{
+		SourcePeerID: "remote-node-2",
+		Timestamp:    justNow,
+		Groups: []models.Group{{
+			ID:          10,
+			Name:        "group-cc",
+			ChannelType: "openai",
+			TestModel:   "gpt-4o",
+			Upstreams:   []byte("[]"),
+			Config:      datatypes.JSONMap{"a": 1, "b": 2, "c": 9},
+			ConfigVersions: datatypes.JSONMap{
+				"config.a": int64(50), "config.b": int64(100), "config.c": int64(300),
+			},
+			CreatedAt: oneHourAgo,
+			UpdatedAt: justNow, // record 整体更新 → 对端赢记录级
+		}},
+	}
+	if err := svc.ProcessPayload(ctx, incoming); err != nil {
+		t.Fatalf("ProcessPayload failed: %v", err)
+	}
+
+	var got models.Group
+	if err := db.Where("name = ?", "group-cc").First(&got).Error; err != nil {
+		t.Fatalf("find failed: %v", err)
+	}
+	if _, ok := got.Config["b"]; ok {
+		t.Fatalf("b 应保持删除(本端删除版本 200 > 对端 100), 却复活为 %v", got.Config["b"])
+	}
+	if v, ok := got.Config["c"]; !ok || toInt64Version(v) != 9 {
+		t.Fatalf("c 应为对端新增的 9(对端字段版本更新), 得到 %v(存在=%v)", got.Config["c"], ok)
 	}
 }
 
@@ -376,7 +499,6 @@ func TestPayloadSummary(t *testing.T) {
 	}
 }
 
-
 // 代理按机器: proxy_url 是机器本地配置, 同步 merge 不得跨机器覆盖。
 func TestSyncService_ProcessPayload_PreservesLocalProxyURL(t *testing.T) {
 	db := newSyncTestDB(t)
@@ -449,7 +571,6 @@ func TestSyncService_ProcessPayload_PreservesLocalProxyURL(t *testing.T) {
 		t.Errorf("new group from remote must NOT inherit proxy_url, got %v", v)
 	}
 }
-
 
 // 删除 key 后, 其墓碑必须能被增量导出(deleted_at > since), 否则对端收不到
 // 删除、会把 active 记录同步补回 —— 这是"删除后又被同步回来"的根因修复。
