@@ -427,6 +427,32 @@
   cursor: help;
 }
 
+/* Row-1 identity: Label(notes) + key fingerprint shown together for quick check */
+.v5-keycard__idwrap {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+/* Label = human name, primary weight, truncates when long */
+.v5-keycard__label {
+  flex: 1;
+  min-width: 0;
+  font: 600 12.5px/1.2 var(--v3-sans);
+  color: var(--v3-ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Key fingerprint next to a Label — muted mono, shrinks to its content */
+.v5-keycard__mask--inrow {
+  flex: 0 1 auto;
+  font-size: 12px;
+  color: var(--v3-ink-3);
+  background: var(--v3-surface-2);
+}
+
 /* Inline icon button (no border, gray → ink on hover) */
 .v5-keycard__iconbtn {
   background: transparent;

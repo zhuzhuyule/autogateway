@@ -1906,7 +1906,7 @@ const filterCounts = computed(() => ({
                     : 'v5-keycard--unverified',
               ]"
             >
-              <!-- Row 1: pill (click → test) + (notes OR mask) + edit + copy -->
+              <!-- Row 1: pill (click → test) + Label(notes) & key 首尾 + edit + copy -->
               <div class="v5-keycard__row">
                 <n-tooltip>
                   <template #trigger>
@@ -1955,14 +1955,13 @@ const filterCounts = computed(() => ({
                   {{ t("v5.kcPillTip") }}
                 </n-tooltip>
 
-                <n-tooltip v-if="k.notes" placement="top">
-                  <template #trigger>
-                    <code class="v5-keycard__mask v5-keycard__mask--notes">{{ k.notes }}</code>
-                  </template>
-                  <span style="font-family: var(--v3-mono); font-size: 11.5px">
+                <!-- 有 Label(notes): Label + key 首尾 并排, 便于核对; 无 Label: 只显示首尾 -->
+                <div v-if="k.notes" class="v5-keycard__idwrap">
+                  <span class="v5-keycard__label" :title="k.notes">{{ k.notes }}</span>
+                  <code class="v5-keycard__mask v5-keycard__mask--inrow" :title="maskKey(k.key_value)">
                     {{ maskKey(k.key_value) }}
-                  </span>
-                </n-tooltip>
+                  </code>
+                </div>
                 <code v-else class="v5-keycard__mask">{{ maskKey(k.key_value) }}</code>
                 <n-tooltip>
                   <template #trigger>
