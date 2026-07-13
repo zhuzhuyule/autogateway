@@ -1632,16 +1632,6 @@ const filterCounts = computed(() => ({
         <!-- Actions -->
         <div class="v5-hero__actions">
           <a
-            v-if="!isAggregate && matchedProvider?.signupUrl"
-            :href="matchedProvider.signupUrl"
-            target="_blank"
-            rel="noopener"
-            class="v5-hero__btn v5-hero__btn--accent"
-          >
-            <n-icon :component="KeyOutline" :size="13" />
-            {{ t("v3.getMoreKeys") || "Get API key" }} →
-          </a>
-          <a
             v-if="!isAggregate && matchedProvider?.docsUrl"
             :href="matchedProvider.docsUrl"
             target="_blank"
@@ -1885,6 +1875,16 @@ const filterCounts = computed(() => ({
               <n-icon :component="RemoveCircleOutline" :size="11" />
               {{ t("v3.batchDelete") || "Batch delete" }}
             </button>
+            <a
+              v-if="!isAggregate && matchedProvider?.signupUrl"
+              :href="matchedProvider.signupUrl"
+              target="_blank"
+              rel="noopener"
+              class="v3-btn v3-btn--sm"
+            >
+              <n-icon :component="KeyOutline" :size="11" />
+              {{ t("v3.getMoreKeys") || "Get API key" }} →
+            </a>
             <button class="v3-btn v3-btn--accent v3-btn--sm" @click="showAddKey = true">
               <n-icon :component="AddOutline" :size="11" />
               {{ t("v3.addKey") || "Add key" }}
