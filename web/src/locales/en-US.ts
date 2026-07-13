@@ -1296,6 +1296,7 @@ export default {
     kcFail: "fail ",
     kcUnverified: "Unverified",
     kcTesting: "Testing…",
+    kcTest: "Test",
     kcPillTip: "Click to re-test",
     kcConfirmDelete: "Click again to confirm",
     mcAliasTip: "weight {weight} · priority {priority}",

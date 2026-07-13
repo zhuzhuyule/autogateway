@@ -1283,6 +1283,7 @@ export default {
     kcFail: "失败 ",
     kcUnverified: "未验证",
     kcTesting: "测试中…",
+    kcTest: "测试",
     kcPillTip: "点击重新测试",
     kcConfirmDelete: "再点一次确认删除",
     mcAliasTip: "权重 {weight} · 优先级 {priority}",

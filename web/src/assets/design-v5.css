@@ -427,6 +427,41 @@
   cursor: help;
 }
 
+/* Row-2 status — colored chip + icon (纯展示; 测试已移到 Row-3 actions) */
+.v5-keycard__status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 11px;
+  border-radius: 999px;
+  font: 600 12px/1 var(--v3-sans);
+  flex-shrink: 0;
+}
+.v5-keycard__status--ok {
+  background: var(--v3-ok-soft);
+  color: oklch(from var(--v3-ok) calc(l - 0.15) c h);
+}
+.v5-keycard__status--invalid {
+  background: var(--v3-danger-soft);
+  color: oklch(from var(--v3-danger) calc(l - 0.1) c h);
+}
+.v5-keycard__status--unverified {
+  background: var(--v3-surface-3);
+  color: var(--v3-ink-3);
+}
+/* Row-1 无 Label 时 mask 可点击加 Label */
+.v5-keycard__mask--editable {
+  cursor: text;
+}
+.v5-keycard__mask--editable:hover {
+  border-color: var(--v3-line-strong);
+  background: var(--v3-surface-2);
+}
+/* Row-3 actions 独占一行, 图标按钮靠左紧凑 */
+.v5-keycard__row.v5-keycard__actions {
+  gap: 4px;
+}
+
 /* Row-1 identity: Label(notes) + key fingerprint shown together for quick check */
 .v5-keycard__idwrap {
   flex: 1;

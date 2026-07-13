@@ -19,6 +19,7 @@ import {
   CopyOutline,
   CubeOutline,
   DownloadOutline,
+  FlashOutline,
   HelpCircleOutline,
   KeyOutline,
   LinkOutline,
@@ -1949,56 +1950,8 @@ const filterCounts = computed(() => ({
                     : 'v5-keycard--unverified',
               ]"
             >
-              <!-- Row 1: pill (click → test) + Label(notes) & key 首尾 + edit + copy -->
-              <div class="v5-keycard__row">
-                <n-tooltip>
-                  <template #trigger>
-                    <button
-                      :class="[
-                        'v5-keycard__pill',
-                        'v5-keycard__pill--clickable',
-                        k.status === 'active'
-                          ? 'v5-keycard__pill--ok'
-                          : k.status === 'invalid'
-                            ? 'v5-keycard__pill--invalid'
-                            : 'v5-keycard__pill--unverified',
-                        testingKeyId === k.id ? 'v5-keycard__pill--testing' : '',
-                      ]"
-                      :disabled="testingKeyId === k.id"
-                      @click.stop="testKey(k)"
-                    >
-                      <n-icon
-                        v-if="testingKeyId === k.id"
-                        :component="RefreshOutline"
-                        :size="13"
-                        class="v5-keycard__pill-spin"
-                      />
-                      <n-icon
-                        v-else
-                        :component="
-                          k.status === 'active'
-                            ? CheckmarkCircle
-                            : k.status === 'invalid'
-                              ? CloseOutline
-                              : HelpCircleOutline
-                        "
-                        :size="13"
-                      />
-                      {{
-                        testingKeyId === k.id
-                          ? t("v5.kcTesting")
-                          : k.status === "active"
-                            ? t("keys.valid") || "Valid"
-                            : k.status === "invalid"
-                              ? t("keys.invalid") || "Invalid"
-                              : t("v5.kcUnverified")
-                      }}
-                    </button>
-                  </template>
-                  {{ t("v5.kcPillTip") }}
-                </n-tooltip>
-
-                <!-- 有 Label(notes): Label(点击 inline 编辑) + key 首尾 并排; 无 Label: 只显示首尾 -->
+              <!-- Row 1: 名称(Label inline 编辑) - 密钥(key 首尾) -->
+              <div class="v5-keycard__row v5-keycard__row--id">
                 <div v-if="k.notes" class="v5-keycard__idwrap">
                   <input
                     v-if="inlineNotesEditId === k.id"
@@ -2025,27 +1978,44 @@ const filterCounts = computed(() => ({
                     {{ maskKey(k.key_value) }}
                   </code>
                 </div>
-                <code v-else class="v5-keycard__mask">{{ maskKey(k.key_value) }}</code>
-                <n-tooltip>
-                  <template #trigger>
-                    <button class="v5-keycard__iconbtn" @click.stop="openEditKeyDialog(k)">
-                      <n-icon :component="PencilOutline" :size="14" />
-                    </button>
-                  </template>
-                  {{ t("keys.editKeyTitle") }}
-                </n-tooltip>
-                <n-tooltip>
-                  <template #trigger>
-                    <button class="v5-keycard__iconbtn" @click.stop="copyKey(k)">
-                      <n-icon :component="CopyOutline" :size="14" />
-                    </button>
-                  </template>
-                  {{ t("v5.copy") }}
-                </n-tooltip>
+                <code
+                  v-else
+                  class="v5-keycard__mask v5-keycard__mask--editable"
+                  :title="t('keys.editLabelTip') || 'Click to add label'"
+                  @click.stop="startInlineNotes(k)"
+                >{{ maskKey(k.key_value) }}</code>
               </div>
 
-              <!-- Row 2: stats + icon actions -->
+              <!-- Row 2: 状态 chip(色块+图标) + stats -->
               <div class="v5-keycard__row">
+                <span
+                  :class="[
+                    'v5-keycard__status',
+                    k.status === 'active'
+                      ? 'v5-keycard__status--ok'
+                      : k.status === 'invalid'
+                        ? 'v5-keycard__status--invalid'
+                        : 'v5-keycard__status--unverified',
+                  ]"
+                >
+                  <n-icon
+                    :component="
+                      k.status === 'active'
+                        ? CheckmarkCircle
+                        : k.status === 'invalid'
+                          ? CloseOutline
+                          : HelpCircleOutline
+                    "
+                    :size="13"
+                  />
+                  {{
+                    k.status === "active"
+                      ? t("keys.valid") || "Valid"
+                      : k.status === "invalid"
+                        ? t("keys.invalid") || "Invalid"
+                        : t("v5.kcUnverified")
+                  }}
+                </span>
                 <div class="v5-keycard__inline">
                   <span>
                     {{ t("v5.kcReq") }}
@@ -2057,39 +2027,70 @@ const filterCounts = computed(() => ({
                   </span>
                   <span>{{ formatRelative(k.last_used_at) }}</span>
                 </div>
-                <div class="v5-keycard__actions">
-                  <n-tooltip v-if="k.status === 'invalid'">
-                    <template #trigger>
-                      <button
-                        class="v5-keycard__iconbtn v5-keycard__iconbtn--lg"
-                        @click="restoreKey(k)"
-                      >
-                        <n-icon :component="RefreshOutline" :size="16" />
-                      </button>
-                    </template>
-                    {{ t("keys.restoreKey") || "Restore" }}
-                  </n-tooltip>
-                  <n-tooltip>
-                    <template #trigger>
-                      <button
-                        :class="[
-                          'v5-keycard__iconbtn',
-                          'v5-keycard__iconbtn--lg',
-                          'v5-keycard__iconbtn--danger',
-                          confirmingDeleteId === k.id ? 'v5-keycard__iconbtn--armed' : '',
-                        ]"
-                        @click="deleteKey(k)"
-                      >
-                        <n-icon :component="Trash" :size="16" />
-                      </button>
-                    </template>
-                    {{
-                      confirmingDeleteId === k.id
-                        ? t("v5.kcConfirmDelete")
-                        : t("common.delete") || "Delete"
-                    }}
-                  </n-tooltip>
-                </div>
+              </div>
+
+              <!-- Row 3: actions — 测试 · 编辑 · 复制 · 恢复(invalid) · 删除 -->
+              <div class="v5-keycard__row v5-keycard__actions">
+                <n-tooltip>
+                  <template #trigger>
+                    <button
+                      class="v5-keycard__iconbtn v5-keycard__iconbtn--lg"
+                      :disabled="testingKeyId === k.id"
+                      @click.stop="testKey(k)"
+                    >
+                      <n-icon
+                        :component="testingKeyId === k.id ? RefreshOutline : FlashOutline"
+                        :size="16"
+                        :class="testingKeyId === k.id ? 'v5-keycard__pill-spin' : ''"
+                      />
+                    </button>
+                  </template>
+                  {{ testingKeyId === k.id ? t("v5.kcTesting") : t("v5.kcTest") || "Test" }}
+                </n-tooltip>
+                <n-tooltip>
+                  <template #trigger>
+                    <button class="v5-keycard__iconbtn v5-keycard__iconbtn--lg" @click.stop="openEditKeyDialog(k)">
+                      <n-icon :component="PencilOutline" :size="16" />
+                    </button>
+                  </template>
+                  {{ t("keys.editKeyTitle") }}
+                </n-tooltip>
+                <n-tooltip>
+                  <template #trigger>
+                    <button class="v5-keycard__iconbtn v5-keycard__iconbtn--lg" @click.stop="copyKey(k)">
+                      <n-icon :component="CopyOutline" :size="16" />
+                    </button>
+                  </template>
+                  {{ t("v5.copy") }}
+                </n-tooltip>
+                <n-tooltip v-if="k.status === 'invalid'">
+                  <template #trigger>
+                    <button class="v5-keycard__iconbtn v5-keycard__iconbtn--lg" @click="restoreKey(k)">
+                      <n-icon :component="RefreshOutline" :size="16" />
+                    </button>
+                  </template>
+                  {{ t("keys.restoreKey") || "Restore" }}
+                </n-tooltip>
+                <n-tooltip>
+                  <template #trigger>
+                    <button
+                      :class="[
+                        'v5-keycard__iconbtn',
+                        'v5-keycard__iconbtn--lg',
+                        'v5-keycard__iconbtn--danger',
+                        confirmingDeleteId === k.id ? 'v5-keycard__iconbtn--armed' : '',
+                      ]"
+                      @click="deleteKey(k)"
+                    >
+                      <n-icon :component="Trash" :size="16" />
+                    </button>
+                  </template>
+                  {{
+                    confirmingDeleteId === k.id
+                      ? t("v5.kcConfirmDelete")
+                      : t("common.delete") || "Delete"
+                  }}
+                </n-tooltip>
               </div>
             </div>
           </div>

@@ -1243,6 +1243,7 @@ export default {
     kcFail: "fail ",
     kcUnverified: "未検証",
     kcTesting: "テスト中…",
+    kcTest: "テスト",
     kcPillTip: "クリックで再テスト",
     kcConfirmDelete: "もう一度クリックで削除確定",
     mcAliasTip: "weight {weight} · priority {priority}",
