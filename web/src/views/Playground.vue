@@ -590,6 +590,14 @@ const useModalPicker = computed(() => totalEntries.value > PICKER_MODAL_THRESHOL
 // 通过 computed lazy 求值, 运行时引用安全).
 const activeTabGroupId = ref<number | null>(null);
 
+// provider 来源列显示条件: "全部" tab, 或当前 tab 是聚合组(其 model 跨多个真实
+// 上游 provider, 需要标明每行来源)。单一 provider tab 下同源, 不必显示。
+const showProviderCol = computed(() => {
+  if (activeTabGroupId.value === null) return true;
+  const g = groups.value.find(x => x.id === activeTabGroupId.value);
+  return g?.group_type === "aggregate";
+});
+
 function onDocClick(e: MouseEvent) {
   const target = e.target as Node;
   // Modal 模式时 picker 在 body 上 teleport 出来, click outside 应该交给
@@ -2035,7 +2043,7 @@ function modalityLabel(m: Modality): string {
                     </span>
                   </div>
                   <div class="pg-card__row">
-                    <span v-if="activeTabGroupId === null" class="pg-card__group">{{ e.groupDisplay }}</span>
+                    <span v-if="showProviderCol" class="pg-card__group">{{ e.groupDisplay }}</span>
                     <span v-if="e.hint" class="pg-card__hint" :title="e.hint">{{ e.hint }}</span>
                   </div>
                 </div>
@@ -2089,7 +2097,7 @@ function modalityLabel(m: Modality): string {
           <template v-if="!groupByKind">
             <div
               class="pg-modal__list"
-              :class="{ 'pg-modal__list--with-provider': activeTabGroupId === null }"
+              :class="{ 'pg-modal__list--with-provider': showProviderCol }"
             >
               <div class="pg-list-head">
                 <div
@@ -2103,7 +2111,7 @@ function modalityLabel(m: Modality): string {
                   <span v-else class="pg-list-head__arrow pg-list-head__arrow--idle">⇅</span>
                 </div>
                 <div class="pg-list-head__cell">{{ t("playground.colType") }}</div>
-                <div v-if="activeTabGroupId === null" class="pg-list-head__cell">
+                <div v-if="showProviderCol" class="pg-list-head__cell">
                   {{ t("playground.colProvider") }}
                 </div>
                 <div class="pg-list-head__cell">{{ t("playground.colDescription") }}</div>
@@ -2129,7 +2137,7 @@ function modalityLabel(m: Modality): string {
                     {{ t("playground.freeTag") }}
                   </span>
                 </div>
-                <div v-if="activeTabGroupId === null" class="pg-list-row__provider">
+                <div v-if="showProviderCol" class="pg-list-row__provider">
                   <ProviderLogo
                     :hint="logoHintForGroup({ name: e.groupName, display: e.groupDisplay }) || e.groupName"
                     :host="e.groupHost"
@@ -2159,12 +2167,12 @@ function modalityLabel(m: Modality): string {
                 </div>
                 <div
                   class="pg-modal__list"
-                  :class="{ 'pg-modal__list--with-provider': activeTabGroupId === null }"
+                  :class="{ 'pg-modal__list--with-provider': showProviderCol }"
                 >
                   <div class="pg-list-head">
                     <div class="pg-list-head__cell">{{ t("playground.colName") }}</div>
                     <div class="pg-list-head__cell">{{ t("playground.colType") }}</div>
-                    <div v-if="activeTabGroupId === null" class="pg-list-head__cell">
+                    <div v-if="showProviderCol" class="pg-list-head__cell">
                       {{ t("playground.colProvider") }}
                     </div>
                     <div class="pg-list-head__cell">{{ t("playground.colDescription") }}</div>
@@ -2182,7 +2190,7 @@ function modalityLabel(m: Modality): string {
                         {{ t("playground.aliasTag") }}
                       </span>
                     </div>
-                    <div v-if="activeTabGroupId === null" class="pg-list-row__provider">
+                    <div v-if="showProviderCol" class="pg-list-row__provider">
                       <ProviderLogo
                         v-if="logoHintForGroup({ name: e.groupName, display: e.groupDisplay })"
                         :hint="logoHintForGroup({ name: e.groupName, display: e.groupDisplay })!"
