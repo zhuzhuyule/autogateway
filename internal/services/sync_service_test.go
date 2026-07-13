@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"fmt"
 	"errors"
 	"testing"
 	"time"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/glebarez/sqlite"
 	"github.com/sirupsen/logrus"
+	"gorm.io/datatypes"
 	"gorm.io/gorm"
 )
 
@@ -371,5 +373,79 @@ func TestPayloadSummary(t *testing.T) {
 				t.Errorf("payloadSummary() = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+
+// 代理按机器: proxy_url 是机器本地配置, 同步 merge 不得跨机器覆盖。
+func TestSyncService_ProcessPayload_PreservesLocalProxyURL(t *testing.T) {
+	db := newSyncTestDB(t)
+	cfg := &mockConfigManager{masterKey: "test-node-1"}
+	svc := NewSyncService(db, cfg, NewNodeKeypairService(), nil)
+	ctx := context.Background()
+	oneHourAgo := time.Now().Add(-1 * time.Hour)
+	justNow := time.Now()
+
+	// 本机已有 group-a, 配了本机代理 + 一个普通 config
+	local := models.Group{
+		ID: 10, Name: "group-a", DisplayName: "本地", ChannelType: "openai",
+		TestModel: "gpt-4o", Upstreams: []byte("[]"),
+		Config:    datatypes.JSONMap{"proxy_url": "http://127.0.0.1:7890", "max_retries": float64(3)},
+		CreatedAt: oneHourAgo, UpdatedAt: oneHourAgo,
+	}
+	if err := db.Create(&local).Error; err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	// 远端推来更新的 group-a: 带远端代理 + 改了 max_retries
+	incoming := &SyncPayload{
+		SourcePeerID: "remote", Timestamp: justNow,
+		Groups: []models.Group{{
+			ID: 10, Name: "group-a", DisplayName: "远端", ChannelType: "openai",
+			TestModel: "gpt-4o", Upstreams: []byte("[]"),
+			Config:    datatypes.JSONMap{"proxy_url": "http://vps:8080", "max_retries": float64(9)},
+			CreatedAt: oneHourAgo, UpdatedAt: justNow,
+		}},
+	}
+	if err := svc.ProcessPayload(ctx, incoming); err != nil {
+		t.Fatalf("ProcessPayload: %v", err)
+	}
+
+	var g models.Group
+	if err := db.Where("name = ?", "group-a").First(&g).Error; err != nil {
+		t.Fatalf("find group-a: %v", err)
+	}
+	// proxy_url 保留本机(代理按机器)
+	if g.Config["proxy_url"] != "http://127.0.0.1:7890" {
+		t.Errorf("proxy_url should stay local, got %v", g.Config["proxy_url"])
+	}
+	// 其它 config 字段仍同步远端
+	if fmt.Sprint(g.Config["max_retries"]) != "9" {
+		t.Errorf("max_retries should sync from remote, got %v", g.Config["max_retries"])
+	}
+	// 非 config 字段仍 LWW
+	if g.DisplayName != "远端" {
+		t.Errorf("other fields should LWW, got %s", g.DisplayName)
+	}
+
+	// 新 group-b 从远端来: proxy_url 不继承(本机没配过)
+	incoming2 := &SyncPayload{
+		SourcePeerID: "remote", Timestamp: justNow,
+		Groups: []models.Group{{
+			ID: 20, Name: "group-b", ChannelType: "openai", TestModel: "gpt-4o",
+			Upstreams: []byte("[]"),
+			Config:    datatypes.JSONMap{"proxy_url": "http://vps:8080"},
+			CreatedAt: justNow, UpdatedAt: justNow,
+		}},
+	}
+	if err := svc.ProcessPayload(ctx, incoming2); err != nil {
+		t.Fatalf("ProcessPayload2: %v", err)
+	}
+	var gb models.Group
+	if err := db.Where("name = ?", "group-b").First(&gb).Error; err != nil {
+		t.Fatalf("find group-b: %v", err)
+	}
+	if v, ok := gb.Config["proxy_url"]; ok {
+		t.Errorf("new group from remote must NOT inherit proxy_url, got %v", v)
 	}
 }

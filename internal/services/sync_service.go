@@ -13,8 +13,33 @@ import (
 	"autogateway/internal/types"
 
 	"github.com/sirupsen/logrus"
+	"gorm.io/datatypes"
 	"gorm.io/gorm"
 )
+
+// preserveLocalProxyURL 让 group config 里的 proxy_url 按"机器本地"保留 —
+// 同步 merge 永不用远端值覆盖它。代理地址(如 http://127.0.0.1:7890 或某台机
+// 器专属的出口代理)是机器本地的, 跨机器无意义, 所以:
+//   - 本机已有 proxy_url → 保留本机值(existing 传本机现有 group)
+//   - 本机没有 / 首次从远端接收(existing=nil) → 清掉远端带来的值, 留空由本机自配
+func preserveLocalProxyURL(incoming *models.Group, existing *models.Group) {
+	var local any
+	hasLocal := false
+	if existing != nil && existing.Config != nil {
+		local, hasLocal = existing.Config["proxy_url"]
+	}
+	if incoming.Config == nil {
+		if !hasLocal {
+			return
+		}
+		incoming.Config = datatypes.JSONMap{}
+	}
+	if hasLocal {
+		incoming.Config["proxy_url"] = local
+	} else {
+		delete(incoming.Config, "proxy_url")
+	}
+}
 
 // SyncPayload 定义了多端同步的明文数据体，直接使用数据库实体以完整保留主键 ID 与所有时间戳（含 DeletedAt 软删除墓碑）
 type SyncPayload struct {
@@ -272,6 +297,8 @@ func (s *SyncService) ProcessPayload(ctx context.Context, payload *SyncPayload) 
 				if errors.Is(err, gorm.ErrRecordNotFound) {
 					oldID := incoming.ID
 					incoming.ID = 0 // 让本端自增分配新 id
+					// 新 group 从远端来: proxy_url 是远端机器的本地配置, 本机不继承
+					preserveLocalProxyURL(&incoming, nil)
 					if err := tx.Create(&incoming).Error; err != nil {
 						return fmt.Errorf("failed to create group %s: %w", incoming.Name, err)
 					}
@@ -283,6 +310,8 @@ func (s *SyncService) ProcessPayload(ctx context.Context, payload *SyncPayload) 
 				groupIDMap[incoming.ID] = existing.ID
 				if effectiveTime(incoming.UpdatedAt, incoming.DeletedAt).After(effectiveTime(existing.UpdatedAt, existing.DeletedAt)) {
 					incoming.ID = existing.ID // 保留本端 id, 不要让 Save 改主键
+					// 代理按机器: 保留本机 proxy_url, 不被远端覆盖(双向对称)
+					preserveLocalProxyURL(&incoming, &existing)
 					if err := tx.Unscoped().Save(&incoming).Error; err != nil {
 						return fmt.Errorf("failed to update group %s: %w", incoming.Name, err)
 					}
