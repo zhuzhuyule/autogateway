@@ -369,12 +369,10 @@ func (s *KeyService) ListKeysInGroupQuery(groupID uint, statusFilter string, sea
 		query = query.Where("key_hash = ?", searchHash)
 	}
 
-	orderBy := "last_used_at desc, id desc"
-	if s.DB.Dialector.Name() == "postgres" {
-		orderBy = "last_used_at desc nulls last, id desc"
-	}
-
-	query = query.Order(orderBy)
+	// 稳定排序: 按创建顺序(id asc)固定位置。此前用 last_used_at desc 会让"刚测试
+	// 过/刚被使用"的 key 跳到最前, 导致测试、添加密钥后列表位置乱跳。用户需要位置
+	// 稳定(所见即所在), 故改为按 id 升序 —— 测试/使用不改位置, 新增 key 追加末尾。
+	query = query.Order("id asc")
 
 	return query
 }
