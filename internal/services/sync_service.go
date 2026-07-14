@@ -145,6 +145,27 @@ func effectiveTime(updatedAt time.Time, deletedAt gorm.DeletedAt) time.Time {
 	return updatedAt
 }
 
+// syncMergeSave 执行同步合并的落库写入。除 Unscoped(跳过软删 scope, 让"复活 /
+// 重新软删"都能命中已软删行)外, 关键点是走 SkipHooks:
+//
+// GORM 对 struct 形式的 Save/Updates 会无条件把 AutoUpdateTime 字段(即 UpdatedAt)
+// 改写成 NowFunc()(见 gorm callbacks/update.go 的 struct 分支, 仅当 stmt.SkipHooks
+// 才跳过)。若不阻止, 合并胜出记录的 updated_at 会被抬到"本机 merge 时刻", 直接
+// 破坏 LWW 语义:
+//   - 时钟前移 → 旧编辑被覆盖: 一条 T=10 的旧编辑合并后 updated_at 变成 now,
+//     之后一条真正更新的 T=50 编辑因 effectiveTime(50) < effectiveTime(now) 反被
+//     判为更旧 → 用户的新改动被旧值覆盖(审计点 1 的核心危害)。
+//   - 无限 churn: merge 后 updated_at=now > since, 每轮增量导出都重新命中该记录,
+//     两端来回抬时间戳, 永不收敛。
+//
+// SkipHooks 让 payload 携带的 UpdatedAt / DeletedAt 原样落库。本仓库这几张表均未
+// 定义 GORM model hook(BeforeSave 等), 注册的 sync_notify 回调不属于 model hook、
+// 不受 SkipHooks 影响(且合并时本就靠 IsSyncMerge 短路防回环), 故 SkipHooks 对这
+// 些写入无其它副作用。软删仍由 struct 里显式的 DeletedAt 列驱动, 不依赖 hook。
+func syncMergeSave(tx *gorm.DB, value any) error {
+	return tx.Session(&gorm.Session{SkipHooks: true}).Unscoped().Save(value).Error
+}
+
 // ExportPayload 查询数据库中自 `since` 时间戳以来发生变更（包含被软删除的墓碑记录）的所有核心配置.
 //
 // 启用同步即同步全部内容 (含 api_keys), 不再有细粒度开关. 用户对"是否同步密钥"
@@ -285,7 +306,9 @@ func (s *SyncService) ProcessPayload(ctx context.Context, payload *SyncPayload) 
 					// Unscoped: 跳过 GORM 默认 `deleted_at IS NULL` scope, 让对软删行
 					// 的覆盖 (复活 / 重新软删) 都能落地. 否则 Save by PK 在 existing
 					// 已软删时 no-op, sync 删除信号永远 land 不下.
-					if err := tx.Unscoped().Save(&existing).Error; err != nil {
+					// SkipHooks(见 syncMergeSave): 阻止 GORM 把 updated_at 抬成 now,
+					// 保留对端 LWW 时间戳。
+					if err := syncMergeSave(tx, &existing); err != nil {
 						return fmt.Errorf("failed to update system setting %s: %w", incoming.SettingKey, err)
 					}
 				}
@@ -347,7 +370,7 @@ func (s *SyncService) ProcessPayload(ctx context.Context, payload *SyncPayload) 
 				// 对端 record 赢一定写; 本端 record 赢仅当字段级合并真的改了 JSON 列才写,
 				// 避免无变化的伪写入引起 updated_at 抖动 / 同步 churn。
 				if recordWinnerIncoming || !sameGroupJSONColumns(&existing, base) {
-					if err := tx.Unscoped().Save(base).Error; err != nil {
+					if err := syncMergeSave(tx, base); err != nil {
 						return fmt.Errorf("failed to update group %s: %w", incoming.Name, err)
 					}
 				}
@@ -384,7 +407,7 @@ func (s *SyncService) ProcessPayload(ctx context.Context, payload *SyncPayload) 
 			} else {
 				if effectiveTime(incoming.UpdatedAt, incoming.DeletedAt).After(effectiveTime(existing.UpdatedAt, existing.DeletedAt)) {
 					incoming.ID = existing.ID
-					if err := tx.Unscoped().Save(&incoming).Error; err != nil {
+					if err := syncMergeSave(tx, &incoming); err != nil {
 						return fmt.Errorf("failed to update subgroup assoc (g=%d sub=%d): %w",
 							incoming.GroupID, incoming.SubGroupID, err)
 					}
@@ -413,7 +436,7 @@ func (s *SyncService) ProcessPayload(ctx context.Context, payload *SyncPayload) 
 			} else {
 				if effectiveTime(incoming.UpdatedAt, incoming.DeletedAt).After(effectiveTime(existing.UpdatedAt, existing.DeletedAt)) {
 					incoming.ID = existing.ID
-					if err := tx.Unscoped().Save(&incoming).Error; err != nil {
+					if err := syncMergeSave(tx, &incoming); err != nil {
 						return fmt.Errorf("failed to update alias %s/%d/%s: %w",
 							incoming.Alias, incoming.GroupID, incoming.RealModel, err)
 					}
@@ -447,7 +470,7 @@ func (s *SyncService) ProcessPayload(ctx context.Context, payload *SyncPayload) 
 			} else {
 				if effectiveTime(incoming.UpdatedAt, incoming.DeletedAt).After(effectiveTime(existing.UpdatedAt, existing.DeletedAt)) {
 					incoming.ID = existing.ID
-					if err := tx.Unscoped().Save(&incoming).Error; err != nil {
+					if err := syncMergeSave(tx, &incoming); err != nil {
 						return fmt.Errorf("failed to update api key %d: %w", existing.ID, err)
 					}
 					// 软删 / status 变化 / 复活 都会影响 active_keys 列表, 标记 group

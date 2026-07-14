@@ -572,6 +572,208 @@ func TestSyncService_ProcessPayload_PreservesLocalProxyURL(t *testing.T) {
 	}
 }
 
+// TestSyncService_ProcessPayload_PreservesWinnerUpdatedAt 锁定 LWW 时间戳不被
+// merge 时刻污染。GORM 对 struct Save 会无条件把 AutoUpdateTime 字段(UpdatedAt)
+// 改写成 NowFunc()(callbacks/update.go 的 struct 分支, 除非 SkipHooks)。若合并写入
+// 不阻止它, 胜出记录的 updated_at 会被抬到"本机 merge 时刻", 造成:
+//   1. 时钟前移: 一条 T=10 的旧编辑合并后 updated_at 变成 now, 之后一条 T=50 的
+//      "真正更新"因 effectiveTime(50) < effectiveTime(now) 反被判旧 → 用户的新
+//      改动被旧值覆盖(审计点 1 的核心危害)。
+//   2. 无限 churn: merge 后 updated_at=now > since, 每轮增量导出都重新命中该记录,
+//      两端来回抬时间戳, 永不收敛。
+// 修复: 合并 Save 走 SkipHooks, 保留 payload 携带的 UpdatedAt。
+func TestSyncService_ProcessPayload_PreservesWinnerUpdatedAt(t *testing.T) {
+	db := newSyncTestDB(t)
+	cfg := &mockConfigManager{masterKey: "test-node-1"}
+	svc := NewSyncService(db, cfg, NewNodeKeypairService(), nil)
+	ctx := context.Background()
+
+	oneHourAgo := time.Now().Add(-1 * time.Hour).Truncate(time.Second)
+	// 胜出方的编辑时刻: 比本地新(30 分钟前 > 1 小时前), 但明显不是"现在"。
+	remoteEdit := time.Now().Add(-30 * time.Minute).Truncate(time.Second)
+
+	// ---- Group ----
+	if err := db.Create(&models.Group{
+		ID: 10, Name: "group-ts", DisplayName: "本地", ChannelType: "openai",
+		TestModel: "gpt-4o", Upstreams: []byte("[]"),
+		CreatedAt: oneHourAgo, UpdatedAt: oneHourAgo,
+	}).Error; err != nil {
+		t.Fatalf("seed group: %v", err)
+	}
+
+	// ---- APIKey ----
+	if err := db.Create(&models.APIKey{
+		ID: 1, GroupID: 10, KeyValue: "sk-x", KeyHash: "h-x", Status: "active",
+		CreatedAt: oneHourAgo, UpdatedAt: oneHourAgo,
+	}).Error; err != nil {
+		t.Fatalf("seed key: %v", err)
+	}
+
+	incoming := &SyncPayload{
+		SourcePeerID: "remote-node-2",
+		Timestamp:    time.Now(),
+		Groups: []models.Group{{
+			ID: 10, Name: "group-ts", DisplayName: "远端", ChannelType: "openai",
+			TestModel: "gpt-4o", Upstreams: []byte("[]"),
+			CreatedAt: oneHourAgo, UpdatedAt: remoteEdit,
+		}},
+		APIKeys: []models.APIKey{{
+			ID: 1, GroupID: 10, KeyValue: "sk-x", KeyHash: "h-x", Status: "disabled",
+			CreatedAt: oneHourAgo, UpdatedAt: remoteEdit,
+		}},
+	}
+	if err := svc.ProcessPayload(ctx, incoming); err != nil {
+		t.Fatalf("ProcessPayload: %v", err)
+	}
+
+	var g models.Group
+	if err := db.Where("name = ?", "group-ts").First(&g).Error; err != nil {
+		t.Fatalf("find group: %v", err)
+	}
+	if g.DisplayName != "远端" {
+		t.Fatalf("group LWW should have applied, got %s", g.DisplayName)
+	}
+	// 关键断言: updated_at 必须保留远端编辑时刻, 不能被抬到 now。
+	if drift := g.UpdatedAt.Sub(remoteEdit); drift > time.Minute || drift < -time.Minute {
+		t.Fatalf("group updated_at 被污染: 期望≈%v(远端编辑时刻), 实得 %v (drift=%v) —— GORM 把它改写成了 now",
+			remoteEdit, g.UpdatedAt, drift)
+	}
+
+	var k models.APIKey
+	if err := db.First(&k, uint(1)).Error; err != nil {
+		t.Fatalf("find key: %v", err)
+	}
+	if k.Status != "disabled" {
+		t.Fatalf("key LWW should have applied, got status %s", k.Status)
+	}
+	if drift := k.UpdatedAt.Sub(remoteEdit); drift > time.Minute || drift < -time.Minute {
+		t.Fatalf("key updated_at 被污染: 期望≈%v, 实得 %v (drift=%v)", remoteEdit, k.UpdatedAt, drift)
+	}
+}
+
+// TestSyncService_ProcessPayload_NoReexportChurnAfterMerge 证明合并不制造增量导出
+// churn: 合并一条 updated_at=T 的胜出记录后, 以 since=T 增量导出不应再命中它
+// (updated_at 必须仍是 T, 而非被抬到 now)。这是"两端来回推同一条永不收敛"的根因锁。
+func TestSyncService_ProcessPayload_NoReexportChurnAfterMerge(t *testing.T) {
+	db := newSyncTestDB(t)
+	cfg := &mockConfigManager{masterKey: "test-node-1"}
+	svc := NewSyncService(db, cfg, NewNodeKeypairService(), nil)
+	ctx := context.Background()
+
+	oneHourAgo := time.Now().Add(-1 * time.Hour).Truncate(time.Second)
+	remoteEdit := time.Now().Add(-30 * time.Minute).Truncate(time.Second)
+
+	if err := db.Create(&models.Group{
+		ID: 10, Name: "group-churn", DisplayName: "本地", ChannelType: "openai",
+		TestModel: "gpt-4o", Upstreams: []byte("[]"),
+		CreatedAt: oneHourAgo, UpdatedAt: oneHourAgo,
+	}).Error; err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	incoming := &SyncPayload{
+		SourcePeerID: "remote", Timestamp: time.Now(),
+		Groups: []models.Group{{
+			ID: 10, Name: "group-churn", DisplayName: "远端", ChannelType: "openai",
+			TestModel: "gpt-4o", Upstreams: []byte("[]"),
+			CreatedAt: oneHourAgo, UpdatedAt: remoteEdit,
+		}},
+	}
+	if err := svc.ProcessPayload(ctx, incoming); err != nil {
+		t.Fatalf("ProcessPayload: %v", err)
+	}
+
+	// 以远端编辑时刻为 since 增量导出: 该记录 updated_at 应恰为 remoteEdit(非 >),
+	// 因此不应被重新导出。若被 GORM 抬成 now, 它会重新命中 → churn。
+	since := remoteEdit
+	out, err := svc.ExportPayload(ctx, &since)
+	if err != nil {
+		t.Fatalf("export: %v", err)
+	}
+	for _, gr := range out.Groups {
+		if gr.Name == "group-churn" {
+			t.Fatalf("合并后的记录被重新增量导出 → 说明 updated_at 被抬到 now, 造成 churn")
+		}
+	}
+}
+
+// TestSyncService_ProcessPayload_UpdateVsDelete_EffectiveTime 锁定审计点 1/2:
+// 更新与删除跨端竞争时, 按 effectiveTime=max(updated_at, deleted_at) 谁新谁赢。
+// GORM 软删只写 deleted_at 不动 updated_at, 所以只看 updated_at 会漏删除信号。
+func TestSyncService_ProcessPayload_UpdateVsDelete_EffectiveTime(t *testing.T) {
+	newSvc := func(t *testing.T) (*SyncService, *gorm.DB) {
+		db := newSyncTestDB(t)
+		cfg := &mockConfigManager{masterKey: "test-node-1"}
+		return NewSyncService(db, cfg, NewNodeKeypairService(), nil), db
+	}
+	oneHourAgo := time.Now().Add(-1 * time.Hour).Truncate(time.Second)
+	tEarly := time.Now().Add(-40 * time.Minute).Truncate(time.Second)
+	tLate := time.Now().Add(-10 * time.Minute).Truncate(time.Second)
+	ctx := context.Background()
+
+	// 场景 1: 本地更新(updated_at=tLate)晚于远端删除(deleted_at=tEarly) → 保持 active。
+	t.Run("local update newer than remote delete stays active", func(t *testing.T) {
+		svc, db := newSvc(t)
+		if err := db.Create(&models.APIKey{
+			ID: 1, GroupID: 5, KeyValue: "sk-1", KeyHash: "h1", Status: "active",
+			CreatedAt: oneHourAgo, UpdatedAt: tLate, // 本地刚更新过
+		}).Error; err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+		// 远端: 同一 key 在更早时刻被删除(纯软删, updated_at 停在 oneHourAgo)
+		incoming := &SyncPayload{
+			SourcePeerID: "remote", Timestamp: time.Now(),
+			APIKeys: []models.APIKey{{
+				ID: 1, GroupID: 5, KeyValue: "sk-1", KeyHash: "h1", Status: "active",
+				CreatedAt: oneHourAgo, UpdatedAt: oneHourAgo,
+				DeletedAt: gorm.DeletedAt{Time: tEarly, Valid: true},
+			}},
+		}
+		if err := svc.ProcessPayload(ctx, incoming); err != nil {
+			t.Fatalf("ProcessPayload: %v", err)
+		}
+		var k models.APIKey
+		if err := db.First(&k, uint(1)).Error; err != nil {
+			t.Fatalf("本地更新更新, key 应保持 active 未删, 却查不到(被删): %v", err)
+		}
+	})
+
+	// 场景 2: 远端删除(deleted_at=tLate)晚于本地更新(updated_at=tEarly) → 软删传播。
+	t.Run("remote delete newer than local update propagates", func(t *testing.T) {
+		svc, db := newSvc(t)
+		if err := db.Create(&models.APIKey{
+			ID: 1, GroupID: 5, KeyValue: "sk-1", KeyHash: "h1", Status: "active",
+			CreatedAt: oneHourAgo, UpdatedAt: tEarly,
+		}).Error; err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+		incoming := &SyncPayload{
+			SourcePeerID: "remote", Timestamp: time.Now(),
+			APIKeys: []models.APIKey{{
+				ID: 1, GroupID: 5, KeyValue: "sk-1", KeyHash: "h1", Status: "active",
+				CreatedAt: oneHourAgo, UpdatedAt: oneHourAgo,
+				DeletedAt: gorm.DeletedAt{Time: tLate, Valid: true}, // 更晚的删除
+			}},
+		}
+		if err := svc.ProcessPayload(ctx, incoming); err != nil {
+			t.Fatalf("ProcessPayload: %v", err)
+		}
+		var k models.APIKey
+		if err := db.First(&k, uint(1)).Error; err == nil {
+			t.Fatalf("远端删除更新, key 应被软删, 却仍能常规查到")
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			t.Fatalf("expected ErrRecordNotFound, got %v", err)
+		}
+		var ku models.APIKey
+		if err := db.Unscoped().First(&ku, uint(1)).Error; err != nil {
+			t.Fatalf("unscoped find: %v", err)
+		}
+		if !ku.DeletedAt.Valid {
+			t.Fatalf("expected soft-deleted tombstone")
+		}
+	})
+}
+
 // 删除 key 后, 其墓碑必须能被增量导出(deleted_at > since), 否则对端收不到
 // 删除、会把 active 记录同步补回 —— 这是"删除后又被同步回来"的根因修复。
 func TestSyncService_ExportPayload_IncludesTombstone(t *testing.T) {
