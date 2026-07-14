@@ -316,6 +316,8 @@
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
   gap: 12px;
+  /* 同一排卡片等高对齐(避免长 model 名换行导致高低不齐) */
+  grid-auto-rows: 1fr;
 }
 
 /* ============================================
@@ -327,6 +329,7 @@
    ============================================ */
 .v5-keycard {
   position: relative;
+  height: 100%; /* 撑满等高的 grid cell(与 model 卡片一致) */
   background: var(--v3-surface);
   border: 1px solid var(--v3-line);
   border-radius: var(--v3-radius-md);
@@ -691,6 +694,7 @@
 
 /* ===== Model card ===== */
 .v5-modelcard {
+  height: 100%; /* 撑满等高的 grid cell */
   background: var(--v3-surface);
   border: 1px solid var(--v3-line);
   border-radius: var(--v3-radius-md);
@@ -710,16 +714,17 @@
   align-items: center;
 }
 .v5-modelcard__name {
-  font: 600 14px/1.3 var(--v3-mono);
+  font: 600 13.5px/1.35 var(--v3-mono);
   color: var(--v3-ink);
   flex: 1;
   min-width: 0;
-  /* 长 model id 完整展示, 不允许省略号. 允许任意字符位置换行 (含 / : - 等),
-     用户能完整看到 id 全文便于复制 / 识别. */
-  overflow-wrap: anywhere;
-  word-break: break-word;
-  /* 让 user 可以 double-click 选中 / 拖选复制 (V5 卡片整体 click 是 toggle 选中,
-     name 用 cursor: copy 暗示可单击复制) */
+  /* 长 model id 最多 2 行, 超出省略(hover title + 点击复制看全) —— 避免无限换行
+     把卡片撑高、同排高低不齐。 */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-all;
   user-select: text;
   cursor: copy;
 }
