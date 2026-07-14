@@ -199,7 +199,9 @@ const subGroups = ref<SubGroupInfo[]>([]);
 const subGroupsLoading = ref(false);
 
 // Per-key UI state
-const testingKeyId = ref<number | null>(null);
+// 用 Set 记录所有"正在测试/验证中"的 key —— 批量验证(测试全部)时每一把都转圈,
+// 而非只显示最后一个(单值 ref 的老 bug)。
+const testingKeyIds = ref<Set<number>>(new Set());
 const confirmingDeleteId = ref<number | null>(null);
 let confirmDeleteTimer: number | undefined;
 // 复制成功后短暂把复制图标切成对勾, 给即时反馈 (toast 之外)
@@ -499,6 +501,7 @@ watch(
   () => appState.groupDataRefreshTrigger,
   () => {
     if (appState.lastCompletedTask && props.group?.name === appState.lastCompletedTask.groupName) {
+      testingKeyIds.value.clear(); // 批量验证任务完成 → 清除所有 per-key loading
       loadStats();
       loadKeys();
     }
@@ -1453,10 +1456,10 @@ async function copyKey(k: KeyRow) {
 }
 
 async function testKey(k: KeyRow) {
-  if (!props.group?.id || !k.key_value || testingKeyId.value === k.id) {
+  if (!props.group?.id || !k.key_value || testingKeyIds.value.has(k.id)) {
     return;
   }
-  testingKeyId.value = k.id;
+  testingKeyIds.value.add(k.id);
   try {
     const r = await keysApi.testKeys(props.group.id, k.key_value);
     const cur = r.results?.[0];
@@ -1469,7 +1472,7 @@ async function testKey(k: KeyRow) {
     triggerSyncOperationRefresh(props.group.name, "TEST_SINGLE");
     flashKey(k.id);
   } finally {
-    testingKeyId.value = null;
+    testingKeyIds.value.delete(k.id);
   }
 }
 
@@ -1541,6 +1544,15 @@ function validateAll(scope: "all" | "active" | "invalid" = "all") {
     return;
   }
   const groupId = props.group.id;
+  // 批量验证是后端异步任务; 前端把 scope 内每一把 key 都标记为验证中(转圈),
+  // 任务完成后由下方 groupDataRefreshTrigger 的 watch 统一清除。
+  keys.value.forEach(k => {
+    const inScope =
+      scope === "all" ||
+      (scope === "active" && k.status === "active") ||
+      (scope === "invalid" && k.status === "invalid");
+    if (inScope && k.id) testingKeyIds.value.add(k.id);
+  });
   keysApi.validateGroupKeys(groupId, scope === "all" ? undefined : scope).then(() => {
     localStorage.removeItem("last_closed_task");
     appState.taskPollingTrigger++;
@@ -2085,15 +2097,15 @@ const filterCounts = computed(() => ({
               <div class="v5-keycard__bar">
                 <button
                   class="v5-keycard__test"
-                  :disabled="testingKeyId === k.id"
+                  :disabled="testingKeyIds.has(k.id)"
                   @click.stop="testKey(k)"
                 >
                   <n-icon
-                    :component="testingKeyId === k.id ? RefreshOutline : FlashOutline"
+                    :component="testingKeyIds.has(k.id) ? RefreshOutline : FlashOutline"
                     :size="14"
-                    :class="testingKeyId === k.id ? 'v5-keycard__pill-spin' : ''"
+                    :class="testingKeyIds.has(k.id) ? 'v5-keycard__pill-spin' : ''"
                   />
-                  {{ testingKeyId === k.id ? t("v5.kcTesting") : t("v5.kcTest") || "Test" }}
+                  {{ testingKeyIds.has(k.id) ? t("v5.kcTesting") : t("v5.kcTest") || "Test" }}
                 </button>
                 <n-tooltip>
                   <template #trigger>
