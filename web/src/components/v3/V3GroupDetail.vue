@@ -2180,24 +2180,16 @@ const filterCounts = computed(() => ({
 
       <!-- ===== MODELS TAB ===== -->
       <div v-else-if="tab === 'models'">
-        <!-- Toolbar: mode toggle + search + free/paid filter -->
-        <div class="v5-toolbar">
+        <!-- Toolbar — two layers so users read config first, then browse -->
+        <!-- Config layer: routing mode toggle + refresh models (what this group exposes) -->
+        <div class="v5-toolbar v5-toolbar--config">
           <div class="v5-toolbar__hint">
             {{ t("v5.modelsHint") }}
             <span v-if="modelsRefreshedAtDisplay" style="margin-left: 8px; color: var(--v3-ink-4)">
               · {{ t("v5.refreshedAt") }} {{ modelsRefreshedAtDisplay }}
             </span>
           </div>
-          <div class="v5-toolbar__spacer" style="gap: 16px; flex-wrap: wrap">
-            <button
-              v-if="!isAggregate"
-              class="v3-btn v3-btn--sm"
-              :disabled="modelsRefreshing"
-              @click="refreshGroupModels"
-            >
-              <n-icon :component="RefreshOutline" :size="11" :class="modelsRefreshing ? 'v5-keycard__pill-spin' : ''" />
-              {{ modelsRefreshing ? t("common.loading") : t("keys.refreshModelsBtn") }}
-            </button>
+          <div class="v5-toolbar__spacer" style="gap: 10px">
             <div v-if="!isAggregate" class="v5-modemode">
               <button
                 class="v3-btn v3-btn--sm"
@@ -2212,37 +2204,55 @@ const filterCounts = computed(() => ({
                 @click="setRoutingMode('specified')"
               >{{ t("v3.modeSpecified") || "指定" }}</button>
             </div>
-            <div class="v5-search" style="width: 220px">
-              <n-icon :component="SearchOutline" :size="12" />
-              <input v-model="modelSearch" :placeholder="t('v3.filterModels') || 'Filter models…'" />
-            </div>
-            <div class="v5-modemode">
-              <button class="v3-btn v3-btn--sm" :class="{ 'v3-btn--accent': availFilter === 'all' }" @click="availFilter = 'all'">
-                {{ t("common.all") || "All" }}
-              </button>
-              <button class="v3-btn v3-btn--sm" :class="{ 'v3-btn--accent': availFilter === 'free' }" @click="availFilter = 'free'">
-                🆓 {{ t("v3.freeText") }}
-              </button>
-              <button
-                v-if="showTrialFilter"
-                class="v3-btn v3-btn--sm"
-                :class="{ 'v3-btn--accent': availFilter === 'trial' }"
-                @click="availFilter = 'trial'"
-              >
-                {{ t("v3.trial") || "体验" }}
-              </button>
-              <button class="v3-btn v3-btn--sm" :class="{ 'v3-btn--accent': availFilter === 'paid' }" @click="availFilter = 'paid'">
-                {{ t("v3.paid") || "收费" }}
-              </button>
-              <button
-                v-if="showRecommendedFilter"
-                class="v3-btn v3-btn--sm"
-                :class="{ 'v3-btn--accent': availFilter === 'recommended' }"
-                @click="availFilter = 'recommended'"
-              >
-                ⭐ {{ t("v3.recommended") || "推荐" }}
-              </button>
-            </div>
+            <button
+              v-if="!isAggregate"
+              class="v3-btn v3-btn--sm"
+              :disabled="modelsRefreshing"
+              @click="refreshGroupModels"
+            >
+              <n-icon :component="RefreshOutline" :size="11" :class="modelsRefreshing ? 'v5-keycard__pill-spin' : ''" />
+              {{ modelsRefreshing ? t("common.loading") : t("keys.refreshModelsBtn") }}
+            </button>
+          </div>
+        </div>
+        <!-- Mode consequence hint: spells out what the toggle above decides -->
+        <div v-if="!isAggregate" class="v5-modehint">
+          <n-icon :component="HelpCircleOutline" :size="12" />
+          <span>{{ routingMode === "specified" ? (t("v3.modeSpecifiedHint") || "指定 = 白名单:仅「已暴露」段的模型对外可调,下方「上游全部」是候选池") : (t("v3.modePassthroughHint") || "透传 = 放行:上游声明的模型全部对外可调,不做白名单筛选") }}</span>
+        </div>
+
+        <!-- Browse layer: search + filters (narrow the list you see) -->
+        <div class="v5-toolbar v5-toolbar--browse">
+          <div class="v5-search" style="width: 220px">
+            <n-icon :component="SearchOutline" :size="12" />
+            <input v-model="modelSearch" :placeholder="t('v3.filterModels') || 'Filter models…'" />
+          </div>
+          <div class="v5-modemode v5-modemode--filters">
+            <button class="v3-btn v3-btn--sm" :class="{ 'v3-btn--accent': availFilter === 'all' }" @click="availFilter = 'all'">
+              {{ t("common.all") || "All" }}
+            </button>
+            <button class="v3-btn v3-btn--sm" :class="{ 'v3-btn--accent': availFilter === 'free' }" @click="availFilter = 'free'">
+              🆓 {{ t("v3.freeText") }}
+            </button>
+            <button
+              v-if="showTrialFilter"
+              class="v3-btn v3-btn--sm"
+              :class="{ 'v3-btn--accent': availFilter === 'trial' }"
+              @click="availFilter = 'trial'"
+            >
+              {{ t("v3.trial") || "体验" }}
+            </button>
+            <button class="v3-btn v3-btn--sm" :class="{ 'v3-btn--accent': availFilter === 'paid' }" @click="availFilter = 'paid'">
+              {{ t("v3.paid") || "收费" }}
+            </button>
+            <button
+              v-if="showRecommendedFilter"
+              class="v3-btn v3-btn--sm"
+              :class="{ 'v3-btn--accent': availFilter === 'recommended' }"
+              @click="availFilter = 'recommended'"
+            >
+              ⭐ {{ t("v3.recommended") || "推荐" }}
+            </button>
           </div>
         </div>
 
@@ -2329,6 +2339,11 @@ const filterCounts = computed(() => ({
               @drop="onExposedDrop(exposedModels.indexOf(modelId))"
             >
               <div class="v5-modelcard__row" style="align-items: flex-start; gap: 6px">
+                <span
+                  class="v5-modelcard__check"
+                  :class="{ 'v5-modelcard__check--on': isSelected(modelId) }"
+                  :title="t('v5.cardSelectHint') || '点击卡片可多选，用于批量操作'"
+                />
                 <code
                   class="v5-modelcard__name"
                   style="flex: 1; min-width: 0"
@@ -2413,6 +2428,7 @@ const filterCounts = computed(() => ({
           <div class="v5-section-head" style="margin-top: 16px">
             <span class="v5-section-head__title">{{ t("v3.upstreamAll") || "上游全部" }}</span>
             <span class="v3-chip" style="font-size: 10px">{{ filteredAvailable.length }} / {{ groupModels.length }}</span>
+            <span class="v5-section-head__hint">{{ t("v3.upstreamHint") || "上游声明的全部模型 — 从这里把模型加入上方「已暴露」白名单" }}</span>
             <div class="v5-section-head__spacer" style="flex: 1"></div>
             <!-- P11.38: 当前 filtered < 30 时提供一键测试 (上限保护 provider) -->
             <button
@@ -2442,6 +2458,11 @@ const filterCounts = computed(() => ({
               @click="toggleSelected(modelId)"
             >
               <div class="v5-modelcard__row" style="align-items: flex-start; gap: 6px">
+                <span
+                  class="v5-modelcard__check"
+                  :class="{ 'v5-modelcard__check--on': isSelected(modelId) }"
+                  :title="t('v5.cardSelectHint') || '点击卡片可多选，用于批量操作'"
+                />
                 <code
                   class="v5-modelcard__name"
                   style="flex: 1; min-width: 0"
@@ -2551,6 +2572,11 @@ const filterCounts = computed(() => ({
               @click="toggleSelected(modelId)"
             >
               <div class="v5-modelcard__row" style="align-items: flex-start; gap: 6px">
+                <span
+                  class="v5-modelcard__check"
+                  :class="{ 'v5-modelcard__check--on': isSelected(modelId) }"
+                  :title="t('v5.cardSelectHint') || '点击卡片可多选，用于批量操作'"
+                />
                 <code
                   class="v5-modelcard__name"
                   style="flex: 1; min-width: 0"

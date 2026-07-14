@@ -892,6 +892,39 @@
   border-color: var(--v3-accent);
 }
 
+/* Select indicator — makes "click card = multi-select" discoverable.
+   Empty box at rest, filled accent + check when selected. Card click still
+   toggles selection (the box is a pure affordance, clicks pass through). */
+.v5-modelcard__check {
+  flex-shrink: 0;
+  width: 15px;
+  height: 15px;
+  margin-top: 1px;
+  border-radius: 5px;
+  border: 1.5px solid var(--v3-line-strong);
+  background: var(--v3-surface);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 120ms;
+}
+.v5-modelcard:hover .v5-modelcard__check {
+  border-color: var(--v3-accent);
+}
+.v5-modelcard__check--on {
+  background: var(--v3-accent);
+  border-color: var(--v3-accent);
+}
+.v5-modelcard__check--on::after {
+  content: "";
+  width: 3px;
+  height: 6px;
+  margin-top: -1px;
+  border: solid #fff;
+  border-width: 0 1.5px 1.5px 0;
+  transform: rotate(45deg);
+}
+
 /* ===== Test failure state — placed after exposed/selected so red wins ===== */
 .v5-modelcard--testfail {
   border-color: var(--v3-danger);
@@ -966,6 +999,61 @@
   display: inline-flex;
   align-items: stretch;
   gap: 4px;
+}
+
+/* ===== Models toolbar — two layers (config over browse) ===== */
+/* Config layer sits tight above its consequence hint */
+.v5-toolbar--config {
+  margin-bottom: 8px;
+}
+/* Consequence hint — plain-language read of what the mode toggle decides */
+.v5-modehint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 14px;
+  padding: 7px 10px;
+  border-radius: var(--v3-radius);
+  background: var(--v3-surface-2);
+  border: 1px solid var(--v3-line);
+  color: var(--v3-ink-3);
+  font: 400 11.5px/1.4 var(--v3-sans);
+}
+.v5-modehint .n-icon {
+  flex-shrink: 0;
+  color: var(--v3-ink-4);
+}
+/* Browse layer — search + filters, left-aligned so it never spans the row */
+.v5-toolbar--browse {
+  gap: 10px;
+}
+
+/* Compact segmented filters — same buttons, quieter/tighter than the mode toggle */
+.v5-modemode--filters {
+  gap: 2px;
+  padding: 3px;
+  background: var(--v3-surface-2);
+  border: 1px solid var(--v3-line);
+  border-radius: 7px;
+}
+.v5-modemode--filters .v3-btn {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  padding: 3px 9px;
+  min-height: 24px;
+  font-size: 11px;
+}
+.v5-modemode--filters .v3-btn:hover:not(:disabled) {
+  background: var(--v3-surface);
+  border-color: transparent;
+}
+.v5-modemode--filters .v3-btn--accent,
+.v5-modemode--filters .v3-btn--accent:hover {
+  background: var(--v3-surface);
+  color: var(--v3-accent);
+  border-color: transparent;
+  box-shadow: var(--v3-shadow-sm);
 }
 
 

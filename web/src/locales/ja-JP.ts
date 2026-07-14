@@ -1136,6 +1136,9 @@ export default {
     aliasJumpToModelTip: "このモデルの鍵ページへジャンプしてハイライト",
     modelClickToCopy: "クリックして model ID をコピー",
     modelCopied: "コピー完了",
+    modePassthroughHint: "透過 = 全許可:上流が申告するモデルはすべて呼び出し可能。ホワイトリストによる絞り込みなし",
+    modeSpecifiedHint: "指定 = ホワイトリスト:「公開中」セクションのモデルのみ呼び出し可能。並べ替え・別名付与ができ、下の「上流全体」は候補プール",
+    upstreamHint: "上流が申告する全モデル — ここから上の「公開中」ホワイトリストに追加できます",
   },
   v5: {
     // Aliases ビュー — 未識別モデル提案バナー
@@ -1188,6 +1191,7 @@ export default {
     openGroupSettings: "グループ設定を開く",
     modelsHint: "このグループがルーティングできるモデル · 上流から取得",
     refreshedAt: "更新",
+    cardSelectHint: "カードをクリックして複数選択 — 一括テスト / 公開 / ブロックに使用",
     settingsHint: "このグループの主要設定 — 編集はフォームから。",
     setChannel: "互換プロトコル",
     setChannelSub: "どの SDK スタイルで呼び出すか",
