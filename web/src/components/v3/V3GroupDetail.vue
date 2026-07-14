@@ -2054,7 +2054,6 @@ const filterCounts = computed(() => ({
 
               <!-- Zone 2 · 凭证框: key 首尾指纹 + 内嵌复制 -->
               <div class="v5-keycard__cred">
-                <n-icon class="v5-keycard__cred-ico" :component="KeyOutline" :size="13" />
                 <code class="v5-keycard__cred-val" :title="maskKey(k.key_value)">{{ maskKey(k.key_value) }}</code>
                 <n-tooltip>
                   <template #trigger>

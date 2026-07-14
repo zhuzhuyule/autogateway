@@ -319,83 +319,71 @@
 }
 
 /* ============================================
-   Key card — credential telemetry card
-   Point of view: each key is a piece of monitoring
-   hardware. A status LED + tinted rail read health at
-   a glance; the fingerprint sits in a recessed token
-   frame; usage reads as dashboard metrics; Test is the
-   heaviest verb, delete is fenced off on the far side.
-   Four stacked zones: head · credential · metrics · bar.
+   Key card — credential card
+   Aligned to the app's card language (see .v5-modelcard):
+   quiet surface, 1px line, soft state tint. Four stacked
+   zones: head · credential · metrics · bar. Decoration is
+   kept to a thin status edge; hierarchy carries the weight.
    ============================================ */
 .v5-keycard {
   position: relative;
   background: var(--v3-surface);
   border: 1px solid var(--v3-line);
   border-radius: var(--v3-radius-md);
-  padding: 13px 15px 12px 17px;
+  padding: 11px 13px;
   display: flex;
   flex-direction: column;
-  gap: 11px;
-  box-shadow: var(--v3-shadow-sm);
+  gap: 8px;
   transition:
-    border-color 160ms ease,
-    box-shadow 160ms ease,
-    transform 160ms ease;
+    border-color 120ms ease,
+    box-shadow 120ms ease,
+    transform 120ms ease;
 }
-/* Status rail — the LED strip down the left edge, tinted per state */
+/* Thin status edge — a flat 2px tint on the left, no glow, no motion */
 .v5-keycard::before {
   content: "";
   position: absolute;
   inset: 1px auto 1px 1px;
-  width: 3px;
-  border-radius: 999px;
-  background: var(--v3-ink-4);
-  transition:
-    background 160ms ease,
-    box-shadow 160ms ease;
+  width: 2px;
+  border-radius: 2px;
+  background: transparent;
+  transition: background 120ms ease;
 }
 .v5-keycard:hover {
   border-color: var(--v3-line-strong);
-  box-shadow: var(--v3-shadow-md);
-  transform: translateY(-2px);
+  box-shadow: var(--v3-shadow-sm);
+  transform: translateY(-1px);
 }
 .v5-keycard--ok {
-  border-color: oklch(from var(--v3-ok) l c h / 0.26);
-  background: oklch(from var(--v3-ok) l c h / 0.035);
+  border-color: oklch(from var(--v3-ok) l c h / 0.22);
+  background: oklch(from var(--v3-ok) l c h / 0.03);
 }
 .v5-keycard--ok::before {
   background: var(--v3-ok);
 }
-.v5-keycard--ok:hover::before {
-  box-shadow: 0 0 10px -1px oklch(from var(--v3-ok) l c h / 0.6);
-}
 .v5-keycard--invalid {
-  border-color: oklch(from var(--v3-danger) l c h / 0.28);
-  background: oklch(from var(--v3-danger) l c h / 0.04);
+  border-color: oklch(from var(--v3-danger) l c h / 0.24);
+  background: oklch(from var(--v3-danger) l c h / 0.035);
 }
 .v5-keycard--invalid::before {
   background: var(--v3-danger);
-}
-.v5-keycard--invalid:hover::before {
-  box-shadow: 0 0 10px -1px oklch(from var(--v3-danger) l c h / 0.6);
 }
 .v5-keycard--unverified {
   border-color: var(--v3-line);
   background: var(--v3-surface);
 }
-.v5-keycard--unverified::before {
-  background: var(--v3-ink-4);
-}
-/* Test-complete flash — soft accent ring so "just refreshed" is perceptible */
+/* unverified keeps no status edge — the chip alone carries the state */
+
+/* Test-complete flash — a subtle accent ring, then gone */
 .v5-keycard--flash {
-  animation: v5-keycard-flash 900ms ease-out 1;
+  animation: v5-keycard-flash 720ms ease-out 1;
 }
 @keyframes v5-keycard-flash {
   0% {
-    box-shadow: 0 0 0 0 oklch(from var(--v3-accent) l c h / 0.35);
+    box-shadow: 0 0 0 0 oklch(from var(--v3-accent) l c h / 0.2);
   }
   100% {
-    box-shadow: 0 0 0 7px oklch(from var(--v3-accent) l c h / 0);
+    box-shadow: 0 0 0 4px oklch(from var(--v3-accent) l c h / 0);
   }
 }
 
@@ -493,35 +481,44 @@
   box-shadow: 0 0 0 3px oklch(from var(--v3-accent) l c h / 0.13);
 }
 
-/* Status signal — LED dot + uppercase readout, top-right */
+/* Status chip — static soft badge, matched to .v5-modelcard__alias */
 .v5-keycard__signal {
   flex-shrink: 0;
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  padding: 3px 9px 3px 8px;
-  border-radius: 999px;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 6px;
   border: 1px solid transparent;
-  font: 700 10px/1 var(--v3-sans);
-  letter-spacing: 0.05em;
+  font: 600 10.5px/1 var(--v3-sans);
+  letter-spacing: 0.03em;
   text-transform: uppercase;
   margin-top: 1px;
 }
+/* the small ✓ / ✕ / ? glyph, inheriting the chip's state colour */
 .v5-keycard__led {
-  width: 6px;
-  height: 6px;
-  border-radius: 999px;
-  background: currentcolor;
-  box-shadow: 0 0 0 2px oklch(from currentcolor l c h / 0.18);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font: 800 10px/1 var(--v3-sans);
+}
+.v5-keycard__signal--ok .v5-keycard__led::before {
+  content: "✓";
+}
+.v5-keycard__signal--invalid .v5-keycard__led::before {
+  content: "✕";
+}
+.v5-keycard__signal--unverified .v5-keycard__led::before {
+  content: "?";
 }
 .v5-keycard__signal--ok {
   background: var(--v3-ok-soft);
-  border-color: oklch(from var(--v3-ok) l c h / 0.2);
+  border-color: oklch(from var(--v3-ok) l c h / 0.15);
   color: oklch(from var(--v3-ok) calc(l - 0.15) c h);
 }
 .v5-keycard__signal--invalid {
   background: var(--v3-danger-soft);
-  border-color: oklch(from var(--v3-danger) l c h / 0.22);
+  border-color: oklch(from var(--v3-danger) l c h / 0.18);
   color: oklch(from var(--v3-danger) calc(l - 0.08) c h);
 }
 .v5-keycard__signal--unverified {
@@ -529,48 +526,26 @@
   border-color: var(--v3-line);
   color: var(--v3-ink-3);
 }
-/* Unverified pulses gently — a "pending, please test" heartbeat */
-.v5-keycard__signal--unverified .v5-keycard__led {
-  background: var(--v3-ink-4);
-  animation: v5-led-pulse 2.2s ease-in-out infinite;
-}
-@keyframes v5-led-pulse {
-  0%,
-  100% {
-    box-shadow: 0 0 0 2px oklch(from var(--v3-ink-4) l c h / 0.12);
-    opacity: 0.7;
-  }
-  50% {
-    box-shadow: 0 0 0 3px oklch(from var(--v3-ink-4) l c h / 0.28);
-    opacity: 1;
-  }
-}
 
-/* ===== Zone 2 · Credential token: fingerprint + inline copy ===== */
+/* ===== Zone 2 · Credential: flat mono code + inline copy (see .v5-hero__path code) ===== */
 .v5-keycard__cred {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 6px 6px 10px;
-  border-radius: 8px;
+  gap: 6px;
+  padding: 3px 4px 3px 10px;
+  border-radius: 6px;
   background: var(--v3-surface-2);
   border: 1px solid var(--v3-line);
-  box-shadow: inset 0 1px 2px oklch(0 0 0 / 0.05);
-  transition: border-color 160ms ease;
+  transition: border-color 120ms ease;
 }
 .v5-keycard:hover .v5-keycard__cred {
   border-color: var(--v3-line-strong);
 }
-.v5-keycard__cred-ico {
-  flex-shrink: 0;
-  color: var(--v3-ink-4);
-}
 .v5-keycard__cred-val {
   flex: 1;
   min-width: 0;
-  font: 600 13px/1 var(--v3-mono);
-  letter-spacing: 0.03em;
-  color: var(--v3-ink);
+  font: 500 12.5px/1 var(--v3-mono);
+  color: var(--v3-ink-2);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -580,9 +555,9 @@
   flex-shrink: 0;
   display: inline-flex;
   align-items: center;
-  padding: 5px;
+  padding: 4px;
   border: 0;
-  border-radius: 6px;
+  border-radius: 5px;
   background: transparent;
   color: var(--v3-ink-3);
   cursor: pointer;
@@ -597,71 +572,44 @@
 .v5-keycard__cred-copy.is-copied {
   color: var(--v3-ok);
   background: var(--v3-ok-soft);
-  animation: v5-pop 220ms ease-out 1;
 }
 .v5-keycard__cred-copy.is-copied:hover {
   color: var(--v3-ok);
   background: var(--v3-ok-soft);
 }
-@keyframes v5-pop {
-  0% {
-    transform: scale(0.7);
-  }
-  60% {
-    transform: scale(1.15);
-  }
-  100% {
-    transform: scale(1);
-  }
-}
 
-/* ===== Zone 3 · Metrics: req / fail / last-used as dashboard tiles ===== */
+/* ===== Zone 3 · Metrics: one quiet inline row of label · value ===== */
 .v5-keycard__metrics {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 10px;
-  padding-top: 11px;
-  border-top: 1px solid var(--v3-line);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 16px;
 }
 .v5-keycard__metric {
   min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.v5-keycard__metric + .v5-keycard__metric {
-  padding-left: 10px;
-  border-left: 1px solid var(--v3-line);
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
 }
 .v5-keycard__metric-l {
-  font: 500 9.5px/1 var(--v3-sans);
-  letter-spacing: 0.07em;
+  font: 500 10px/1 var(--v3-sans);
+  letter-spacing: 0.05em;
   text-transform: uppercase;
   color: var(--v3-ink-4);
-  overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
 }
 .v5-keycard__metric-v {
-  font: 600 15px/1 var(--v3-sans);
-  letter-spacing: -0.01em;
+  font: 600 12.5px/1 var(--v3-sans);
   font-variant-numeric: tabular-nums;
-  color: var(--v3-ink);
-  overflow: hidden;
-  text-overflow: ellipsis;
+  color: var(--v3-ink-2);
   white-space: nowrap;
 }
 .v5-keycard__metric-v--time {
-  font-size: 12.5px;
-  font-weight: 600;
-  letter-spacing: 0;
-  color: var(--v3-ink-2);
+  font-weight: 500;
+  color: var(--v3-ink-3);
 }
 .v5-keycard__metric--alert .v5-keycard__metric-v {
   color: var(--v3-danger);
-}
-.v5-keycard__metric--alert .v5-keycard__metric-l {
-  color: oklch(from var(--v3-danger) l c h / 0.75);
 }
 
 /* ===== Zone 4 · Action bar: Test primary, delete fenced off ===== */
@@ -669,34 +617,28 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  padding-top: 11px;
+  padding-top: 9px;
   border-top: 1px solid var(--v3-line);
 }
-/* Test = the heaviest verb: a filled, labelled accent button */
+/* Test = the primary verb: a quiet accent-soft button, no gloss */
 .v5-keycard__test {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 13px;
-  border-radius: 7px;
-  border: 1px solid oklch(from var(--v3-accent) l c h / 0.28);
-  background: oklch(from var(--v3-accent) l c h / 0.1);
+  padding: 6px 12px;
+  border-radius: 6px;
+  border: 1px solid oklch(from var(--v3-accent) l c h / 0.22);
+  background: oklch(from var(--v3-accent) l c h / 0.08);
   color: var(--v3-accent);
   font: 600 12px/1 var(--v3-sans);
-  letter-spacing: -0.005em;
   cursor: pointer;
-  box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.08);
   transition:
     background 120ms ease,
-    border-color 120ms ease,
-    transform 90ms ease;
+    border-color 120ms ease;
 }
 .v5-keycard__test:hover:not(:disabled) {
-  background: oklch(from var(--v3-accent) l c h / 0.17);
-  border-color: oklch(from var(--v3-accent) l c h / 0.42);
-}
-.v5-keycard__test:active:not(:disabled) {
-  transform: translateY(1px);
+  background: oklch(from var(--v3-accent) l c h / 0.14);
+  border-color: oklch(from var(--v3-accent) l c h / 0.38);
 }
 .v5-keycard__test:disabled {
   cursor: progress;
@@ -765,8 +707,8 @@
 
 @media (prefers-reduced-motion: reduce) {
   .v5-keycard--flash,
-  .v5-keycard__signal--unverified .v5-keycard__led,
-  .v5-keycard__act--danger.is-armed {
+  .v5-keycard__act--danger.is-armed,
+  .v5-keycard__pill-spin {
     animation: none;
   }
 }
