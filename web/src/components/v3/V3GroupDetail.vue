@@ -2227,7 +2227,7 @@ const filterCounts = computed(() => ({
             <n-icon :component="SearchOutline" :size="12" />
             <input v-model="modelSearch" :placeholder="t('v3.filterModels') || 'Filter models…'" />
           </div>
-          <div v-if="selectedModels.size === 0" class="v5-modemode v5-modemode--filters">
+          <div class="v5-modemode v5-modemode--filters">
             <button class="v3-btn v3-btn--sm" :class="{ 'v3-btn--accent': availFilter === 'all' }" @click="availFilter = 'all'">
               {{ t("common.all") || "All" }}
             </button>
