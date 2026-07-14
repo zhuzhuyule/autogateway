@@ -14,6 +14,7 @@ import { copy as copyToClipboard } from "@/utils/clipboard";
 import { getGroupDisplayName, maskKey } from "@/utils/display";
 import {
   AddOutline,
+  Checkmark,
   CheckmarkCircle,
   CloseOutline,
   CopyOutline,
@@ -201,6 +202,23 @@ const subGroupsLoading = ref(false);
 const testingKeyId = ref<number | null>(null);
 const confirmingDeleteId = ref<number | null>(null);
 let confirmDeleteTimer: number | undefined;
+// 复制成功后短暂把复制图标切成对勾, 给即时反馈 (toast 之外)
+const copiedKeyId = ref<number | null>(null);
+let copiedTimer: number | undefined;
+// 测试完成后卡片轻微高亮一下, 让"刚更新"可感知
+const flashKeyId = ref<number | null>(null);
+let flashTimer: number | undefined;
+function flashKey(id: number) {
+  flashKeyId.value = id;
+  if (flashTimer) {
+    clearTimeout(flashTimer);
+  }
+  flashTimer = window.setTimeout(() => {
+    if (flashKeyId.value === id) {
+      flashKeyId.value = null;
+    }
+  }, 900);
+}
 
 // Aliases (loaded once for the Models tab)
 const aliases = ref<ModelAliasRow[]>([]);
@@ -1417,7 +1435,21 @@ async function copyText(value: string, msg = "Copied") {
 }
 
 async function copyKey(k: KeyRow) {
-  await copyText(k.key_value, t("keys.keyCopied") || "Key copied");
+  const ok = await copyToClipboard(k.key_value);
+  if (!ok) {
+    message.error("Copy failed");
+    return;
+  }
+  message.success(t("keys.keyCopied") || "Key copied");
+  copiedKeyId.value = k.id;
+  if (copiedTimer) {
+    clearTimeout(copiedTimer);
+  }
+  copiedTimer = window.setTimeout(() => {
+    if (copiedKeyId.value === k.id) {
+      copiedKeyId.value = null;
+    }
+  }, 1400);
 }
 
 async function testKey(k: KeyRow) {
@@ -1435,6 +1467,7 @@ async function testKey(k: KeyRow) {
     }
     refreshAll();
     triggerSyncOperationRefresh(props.group.name, "TEST_SINGLE");
+    flashKey(k.id);
   } finally {
     testingKeyId.value = null;
   }
@@ -1948,23 +1981,25 @@ const filterCounts = computed(() => ({
                   : k.status === 'invalid'
                     ? 'v5-keycard--invalid'
                     : 'v5-keycard--unverified',
+                flashKeyId === k.id ? 'v5-keycard--flash' : '',
               ]"
             >
               <!-- Row 1: 名称(Label inline 编辑) - 密钥(key 首尾) -->
               <div class="v5-keycard__row v5-keycard__row--id">
-                <div v-if="k.notes" class="v5-keycard__idwrap">
-                  <input
-                    v-if="inlineNotesEditId === k.id"
-                    v-focus
-                    v-model="inlineNotesDraft"
-                    class="v5-keycard__label-input"
-                    maxlength="255"
-                    spellcheck="false"
-                    @blur="commitInlineNotes(k)"
-                    @keydown.enter.prevent="commitInlineNotes(k)"
-                    @keydown.esc.prevent="cancelInlineNotes()"
-                  />
-                  <n-tooltip v-else placement="top">
+                <input
+                  v-if="inlineNotesEditId === k.id"
+                  v-focus
+                  v-model="inlineNotesDraft"
+                  class="v5-keycard__label-input"
+                  maxlength="255"
+                  spellcheck="false"
+                  :placeholder="t('keys.addLabelPlaceholder')"
+                  @blur="commitInlineNotes(k)"
+                  @keydown.enter.prevent="commitInlineNotes(k)"
+                  @keydown.esc.prevent="cancelInlineNotes()"
+                />
+                <div v-else-if="k.notes" class="v5-keycard__idwrap">
+                  <n-tooltip placement="top">
                     <template #trigger>
                       <span
                         class="v5-keycard__label v5-keycard__label--editable"
@@ -1978,12 +2013,20 @@ const filterCounts = computed(() => ({
                     {{ maskKey(k.key_value) }}
                   </code>
                 </div>
-                <code
-                  v-else
-                  class="v5-keycard__mask v5-keycard__mask--editable"
-                  :title="t('keys.editLabelTip') || 'Click to add label'"
-                  @click.stop="startInlineNotes(k)"
-                >{{ maskKey(k.key_value) }}</code>
+                <div v-else class="v5-keycard__idwrap">
+                  <code
+                    class="v5-keycard__mask v5-keycard__mask--editable"
+                    :title="t('keys.editLabelTip') || 'Click to add label'"
+                    @click.stop="startInlineNotes(k)"
+                  >{{ maskKey(k.key_value) }}</code>
+                  <button
+                    class="v5-keycard__addlabel"
+                    @click.stop="startInlineNotes(k)"
+                  >
+                    <n-icon :component="PencilOutline" :size="12" />
+                    {{ t("keys.addLabel") }}
+                  </button>
+                </div>
               </div>
 
               <!-- Row 2: 状态 chip(色块+图标) + stats -->
@@ -2034,7 +2077,7 @@ const filterCounts = computed(() => ({
                 <n-tooltip>
                   <template #trigger>
                     <button
-                      class="v5-keycard__iconbtn v5-keycard__iconbtn--lg"
+                      class="v5-keycard__iconbtn v5-keycard__iconbtn--lg v5-keycard__iconbtn--primary"
                       :disabled="testingKeyId === k.id"
                       @click.stop="testKey(k)"
                     >
@@ -2057,11 +2100,18 @@ const filterCounts = computed(() => ({
                 </n-tooltip>
                 <n-tooltip>
                   <template #trigger>
-                    <button class="v5-keycard__iconbtn v5-keycard__iconbtn--lg" @click.stop="copyKey(k)">
-                      <n-icon :component="CopyOutline" :size="16" />
+                    <button
+                      :class="[
+                        'v5-keycard__iconbtn',
+                        'v5-keycard__iconbtn--lg',
+                        copiedKeyId === k.id ? 'v5-keycard__iconbtn--copied' : '',
+                      ]"
+                      @click.stop="copyKey(k)"
+                    >
+                      <n-icon :component="copiedKeyId === k.id ? Checkmark : CopyOutline" :size="16" />
                     </button>
                   </template>
-                  {{ t("v5.copy") }}
+                  {{ copiedKeyId === k.id ? t("v5.copied") : t("v5.copy") }}
                 </n-tooltip>
                 <n-tooltip v-if="k.status === 'invalid'">
                   <template #trigger>
@@ -2078,6 +2128,7 @@ const filterCounts = computed(() => ({
                         'v5-keycard__iconbtn',
                         'v5-keycard__iconbtn--lg',
                         'v5-keycard__iconbtn--danger',
+                        'v5-keycard__iconbtn--push',
                         confirmingDeleteId === k.id ? 'v5-keycard__iconbtn--armed' : '',
                       ]"
                       @click="deleteKey(k)"

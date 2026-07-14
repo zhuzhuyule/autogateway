@@ -318,28 +318,64 @@
   gap: 12px;
 }
 
-/* ===== Key card (compact 2-row) ===== */
+/* ===== Key card (compact 3-row) ===== */
 .v5-keycard {
+  position: relative;
   background: var(--v3-surface);
   border: 1px solid var(--v3-line);
   border-radius: var(--v3-radius-md);
-  padding: 12px 14px;
+  padding: 12px 14px 12px 16px;
   display: flex;
   flex-direction: column;
   gap: 9px;
-  transition: all 120ms;
+  transition:
+    border-color 140ms,
+    box-shadow 140ms,
+    transform 140ms;
+}
+/* Status accent rail — peripheral scan signal echoing the outer tint */
+.v5-keycard::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  border-radius: var(--v3-radius-md) 0 0 var(--v3-radius-md);
+  background: var(--v3-line-strong);
+  transition: background 140ms;
 }
 .v5-keycard:hover {
   border-color: var(--v3-line-strong);
-  box-shadow: var(--v3-shadow-sm);
+  box-shadow: var(--v3-shadow-md);
+  transform: translateY(-1px);
 }
 .v5-keycard--ok {
   border-color: oklch(from var(--v3-ok) l c h / 0.28);
   background: oklch(from var(--v3-ok) l c h / 0.04);
 }
+.v5-keycard--ok::before {
+  background: var(--v3-ok);
+}
 .v5-keycard--invalid {
   border-color: oklch(from var(--v3-danger) l c h / 0.3);
   background: oklch(from var(--v3-danger) l c h / 0.04);
+}
+.v5-keycard--invalid::before {
+  background: var(--v3-danger);
+}
+.v5-keycard--unverified::before {
+  background: var(--v3-ink-4);
+}
+/* Test-complete flash — soft ring pulse so "just refreshed" is perceptible */
+.v5-keycard--flash {
+  animation: v5-keycard-flash 900ms ease-out 1;
+}
+@keyframes v5-keycard-flash {
+  0% {
+    box-shadow: 0 0 0 0 oklch(from var(--v3-accent) l c h / 0.35);
+  }
+  100% {
+    box-shadow: 0 0 0 7px oklch(from var(--v3-accent) l c h / 0);
+  }
 }
 .v5-keycard__row {
   display: flex;
@@ -457,6 +493,40 @@
   border-color: var(--v3-line-strong);
   background: var(--v3-surface-2);
 }
+/* "Add label" ghost — hidden at rest, revealed on card hover for discoverability */
+.v5-keycard__addlabel {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px 8px;
+  border: 1px dashed var(--v3-line-strong);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--v3-ink-3);
+  font: 500 11px/1 var(--v3-sans);
+  cursor: pointer;
+  opacity: 0;
+  transform: translateX(-4px);
+  transition:
+    opacity 120ms,
+    transform 120ms,
+    color 120ms,
+    border-color 120ms,
+    background 120ms;
+  pointer-events: none;
+}
+.v5-keycard:hover .v5-keycard__addlabel,
+.v5-keycard__addlabel:focus-visible {
+  opacity: 1;
+  transform: none;
+  pointer-events: auto;
+}
+.v5-keycard__addlabel:hover {
+  color: var(--v3-accent);
+  border-color: var(--v3-accent);
+  background: oklch(from var(--v3-accent) l c h / 0.08);
+}
 /* Row-3 actions 独占一行, 图标按钮靠左紧凑 */
 .v5-keycard__row.v5-keycard__actions {
   gap: 4px;
@@ -538,6 +608,45 @@
 }
 .v5-keycard__iconbtn--lg {
   padding: 5px;
+}
+/* Test = primary action — subtle accent tint so it reads as the main verb */
+.v5-keycard__iconbtn--primary {
+  color: var(--v3-accent);
+  background: oklch(from var(--v3-accent) l c h / 0.08);
+}
+.v5-keycard__iconbtn--primary:hover:not(:disabled) {
+  color: var(--v3-accent);
+  background: oklch(from var(--v3-accent) l c h / 0.16);
+}
+.v5-keycard__iconbtn--primary:disabled {
+  opacity: 1;
+  color: var(--v3-accent);
+  cursor: progress;
+}
+/* Copy success — flip to green check with a brief pop */
+.v5-keycard__iconbtn--copied {
+  color: var(--v3-ok);
+  background: var(--v3-ok-soft);
+  animation: v5-pop 220ms ease-out 1;
+}
+.v5-keycard__iconbtn--copied:hover {
+  color: var(--v3-ok);
+  background: var(--v3-ok-soft);
+}
+@keyframes v5-pop {
+  0% {
+    transform: scale(0.7);
+  }
+  60% {
+    transform: scale(1.15);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+/* Push destructive action to the right, apart from the safe verbs */
+.v5-keycard__iconbtn--push {
+  margin-left: auto;
 }
 .v5-keycard__iconbtn--ok {
   color: var(--v3-ok);

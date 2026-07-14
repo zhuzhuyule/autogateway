@@ -462,6 +462,8 @@ export default {
     enterKeysPlaceholder: "输入密钥，每行一个；可用 “key,备注” 为单个密钥加标签",
     labelFormatHint: "每行一个密钥。可选：在密钥后加英文逗号和备注（如 sk-xxx,生产环境）为该密钥设置标签。",
     editLabelTip: "点击编辑标签",
+    addLabel: "加标签",
+    addLabelPlaceholder: "给这个密钥起个名…",
     enterKeysToDeletePlaceholder: "输入要删除的密钥，每行一个",
     group: "分组",
     notesUpdated: "备注已更新",
@@ -1212,6 +1214,7 @@ export default {
     // Card actions
     test: "测试",
     copy: "复制",
+    copied: "已复制",
     // Empty states
     noKeysTitle: "这个分组还没有密钥",
     noKeysSub: "添加一个密钥就能开始使用。",
