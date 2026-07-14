@@ -334,45 +334,26 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
-  transition:
-    border-color 120ms ease,
-    box-shadow 120ms ease,
-    transform 120ms ease;
 }
-/* Thin status edge — a flat 2px tint on the left, no glow, no motion */
+/* 卡片无 hover 交互(用户要求): 静态卡, 不抬升/不投影。 */
+/* Thin status edge — 左侧 2.5px 纯色条, 作为状态的唯一"整卡"信号(配 chip)。 */
 .v5-keycard::before {
   content: "";
   position: absolute;
   inset: 1px auto 1px 1px;
-  width: 2px;
+  width: 2.5px;
   border-radius: 2px;
   background: transparent;
-  transition: background 120ms ease;
 }
-.v5-keycard:hover {
-  border-color: var(--v3-line-strong);
-  box-shadow: var(--v3-shadow-sm);
-  transform: translateY(-1px);
-}
-.v5-keycard--ok {
-  border-color: oklch(from var(--v3-ok) l c h / 0.22);
-  background: oklch(from var(--v3-ok) l c h / 0.03);
-}
+/* 卡片本体保持白净(与 .v5-modelcard 一致); 状态只用「左色条 + chip」两处表达,
+   不再叠加外层淡底 + 淡边框, 消除原来「边框+底+左条+chip」四重冗余。 */
 .v5-keycard--ok::before {
   background: var(--v3-ok);
-}
-.v5-keycard--invalid {
-  border-color: oklch(from var(--v3-danger) l c h / 0.24);
-  background: oklch(from var(--v3-danger) l c h / 0.035);
 }
 .v5-keycard--invalid::before {
   background: var(--v3-danger);
 }
-.v5-keycard--unverified {
-  border-color: var(--v3-line);
-  background: var(--v3-surface);
-}
-/* unverified keeps no status edge — the chip alone carries the state */
+/* unverified 无左条, 状态由灰 chip 承载 */
 
 /* Test-complete flash — a subtle accent ring, then gone */
 .v5-keycard--flash {
@@ -536,10 +517,6 @@
   border-radius: 6px;
   background: var(--v3-surface-2);
   border: 1px solid var(--v3-line);
-  transition: border-color 120ms ease;
-}
-.v5-keycard:hover .v5-keycard__cred {
-  border-color: var(--v3-line-strong);
 }
 .v5-keycard__cred-val {
   flex: 1;
@@ -617,8 +594,7 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  padding-top: 9px;
-  border-top: 1px solid var(--v3-line);
+  padding-top: 3px;
 }
 /* Test = the primary verb: a quiet accent-soft button, no gloss */
 .v5-keycard__test {
