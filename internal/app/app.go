@@ -153,6 +153,10 @@ func (a *App) Start() error {
 		if err := db.V2_5_17_PartialUniqueGroupName(a.db); err != nil {
 			return fmt.Errorf("V2_5_17 partial unique groups.name failed: %w", err)
 		}
+		// P9: 收敛同 (group_id,key_hash) 的重复活 key + 建部分唯一索引, 根治 mesh 密钥 churn.
+		if err := db.V2_5_21_DedupActiveKeys(a.db); err != nil {
+			return fmt.Errorf("V2_5_21 dedup active api keys failed: %w", err)
+		}
 		logrus.Info("Database auto-migration completed.")
 
 		// 初始化系统设置

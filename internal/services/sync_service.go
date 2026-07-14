@@ -444,37 +444,77 @@ func (s *SyncService) ProcessPayload(ctx context.Context, payload *SyncPayload) 
 			}
 		}
 
-		// 5. 合并 API 密钥 (APIKeys) — 按 (group_id, key_hash) 或 (group_id, key_value) 匹配.
-		// key_hash 一致时优先用 (索引更高效), 否则 fallback 到 key_value 全文比对.
+		// 5. 合并 API 密钥 (APIKeys) — 身份按"活记录唯一 (group_id, key_hash)"对齐,
+		// 墓碑仅作删除信号做 LWW 软删。
+		//
+		// 为何不再用 tx.Unscoped().First() 匹配(旧实现的 churn 根因): 同一 key_hash 在
+		// "delete 后重加"或"两端各建"时会存在多条(活+墓碑)。Unscoped().First() 按 id 升序
+		// 命中最小 id — 往往是墓碑, 于是 incoming 活 key 的更新落到墓碑上: ① 真正的活 key
+		// 没被同步, 两端永远不一致; ② 墓碑 updated_at 被抬成 now, 每轮增量导出都重命中 →
+		// 永不收敛的 churn。改为:
+		//   - 匹配只在"活记录"里做 (deleted_at IS NULL), 由部分唯一索引保证至多一条;
+		//   - incoming 活 → 更新本端活记录; 无活记录且无更晚墓碑才新建(新 id, 绝不复活墓碑);
+		//   - incoming 墓碑 → 只软删本端"更旧"的活 key, 更晚重加的活 key 不被误删。
+		// key_hash 为空时退化到 key_value 匹配 (老数据兼容)。
 		for _, incoming := range payload.APIKeys {
 			incoming.GroupID = remapGroupID(incoming.GroupID)
-			var existing models.APIKey
-			q := tx.Unscoped().Where("group_id = ?", incoming.GroupID)
+			incomingEff := effectiveTime(incoming.UpdatedAt, incoming.DeletedAt)
+
+			// 匹配本端"活"的同 key (部分唯一索引保证至多一条)
+			activeQ := tx.Where("group_id = ? AND deleted_at IS NULL", incoming.GroupID)
 			if incoming.KeyHash != "" {
-				q = q.Where("key_hash = ?", incoming.KeyHash)
+				activeQ = activeQ.Where("key_hash = ?", incoming.KeyHash)
 			} else {
-				q = q.Where("key_value = ?", incoming.KeyValue)
+				activeQ = activeQ.Where("key_value = ?", incoming.KeyValue)
 			}
-			err := q.First(&existing).Error
-			if err != nil {
-				if errors.Is(err, gorm.ErrRecordNotFound) {
-					incoming.ID = 0
-					if err := tx.Create(&incoming).Error; err != nil {
-						return fmt.Errorf("failed to create api key (group=%d): %w", incoming.GroupID, err)
+			var active models.APIKey
+			activeErr := activeQ.First(&active).Error
+			hasActive := activeErr == nil
+			if activeErr != nil && !errors.Is(activeErr, gorm.ErrRecordNotFound) {
+				return activeErr
+			}
+
+			if !incoming.DeletedAt.Valid {
+				// ---- incoming 是活 key ----
+				if hasActive {
+					if incomingEff.After(effectiveTime(active.UpdatedAt, active.DeletedAt)) {
+						incoming.ID = active.ID
+						if err := syncMergeSave(tx, &incoming); err != nil {
+							return fmt.Errorf("failed to update active api key %d: %w", active.ID, err)
+						}
+						affectedKeyGroups[incoming.GroupID] = true
 					}
-					// 新增 key (软删或活的都算 db 状态变化): 让 keypool 重对齐 store
-					affectedKeyGroups[incoming.GroupID] = true
+					continue
+				}
+				// 本端无活记录: 若存在"更晚"的墓碑(本端后删了这个 key), 不复活
+				var latestTomb models.APIKey
+				tombQ := tx.Unscoped().Where("group_id = ? AND deleted_at IS NOT NULL", incoming.GroupID)
+				if incoming.KeyHash != "" {
+					tombQ = tombQ.Where("key_hash = ?", incoming.KeyHash)
 				} else {
+					tombQ = tombQ.Where("key_value = ?", incoming.KeyValue)
+				}
+				if err := tombQ.Order("deleted_at DESC").First(&latestTomb).Error; err == nil {
+					if effectiveTime(latestTomb.UpdatedAt, latestTomb.DeletedAt).After(incomingEff) {
+						continue // 本端删除更晚, 不复活
+					}
+				} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 					return err
 				}
+				// 新建活 key (新 id, 绝不复用墓碑)
+				incoming.ID = 0
+				if err := tx.Create(&incoming).Error; err != nil {
+					return fmt.Errorf("failed to create api key (group=%d): %w", incoming.GroupID, err)
+				}
+				affectedKeyGroups[incoming.GroupID] = true
 			} else {
-				if effectiveTime(incoming.UpdatedAt, incoming.DeletedAt).After(effectiveTime(existing.UpdatedAt, existing.DeletedAt)) {
-					incoming.ID = existing.ID
+				// ---- incoming 是墓碑 (删除信号) ----
+				// 只软删本端"更旧"的活 key; 无活 / 活的更晚 → 忽略(不落库多余墓碑)
+				if hasActive && incomingEff.After(effectiveTime(active.UpdatedAt, active.DeletedAt)) {
+					incoming.ID = active.ID
 					if err := syncMergeSave(tx, &incoming); err != nil {
-						return fmt.Errorf("failed to update api key %d: %w", existing.ID, err)
+						return fmt.Errorf("failed to tombstone api key %d: %w", active.ID, err)
 					}
-					// 软删 / status 变化 / 复活 都会影响 active_keys 列表, 标记 group
-					// 让 keypool 在事务后重对齐. 这里保守标 — 任何更新都标, 避免漏判.
 					affectedKeyGroups[incoming.GroupID] = true
 				}
 			}
