@@ -1984,73 +1984,52 @@ const filterCounts = computed(() => ({
                 flashKeyId === k.id ? 'v5-keycard--flash' : '',
               ]"
             >
-              <!-- Row 1: 名称(Label inline 编辑) - 密钥(key 首尾) -->
-              <div class="v5-keycard__row v5-keycard__row--id">
-                <input
-                  v-if="inlineNotesEditId === k.id"
-                  v-focus
-                  v-model="inlineNotesDraft"
-                  class="v5-keycard__label-input"
-                  maxlength="255"
-                  spellcheck="false"
-                  :placeholder="t('keys.addLabelPlaceholder')"
-                  @blur="commitInlineNotes(k)"
-                  @keydown.enter.prevent="commitInlineNotes(k)"
-                  @keydown.esc.prevent="cancelInlineNotes()"
-                />
-                <div v-else-if="k.notes" class="v5-keycard__idwrap">
-                  <n-tooltip placement="top">
+              <!-- Zone 1 · Header: Label 主标题(inline 编辑) + 状态信号灯 -->
+              <div class="v5-keycard__head">
+                <div class="v5-keycard__titlewrap">
+                  <input
+                    v-if="inlineNotesEditId === k.id"
+                    v-focus
+                    v-model="inlineNotesDraft"
+                    class="v5-keycard__title-input"
+                    maxlength="255"
+                    spellcheck="false"
+                    :placeholder="t('keys.addLabelPlaceholder')"
+                    @blur="commitInlineNotes(k)"
+                    @keydown.enter.prevent="commitInlineNotes(k)"
+                    @keydown.esc.prevent="cancelInlineNotes()"
+                  />
+                  <n-tooltip v-else-if="k.notes" placement="top">
                     <template #trigger>
-                      <span
-                        class="v5-keycard__label v5-keycard__label--editable"
+                      <button
+                        class="v5-keycard__title"
                         :title="k.notes"
                         @click.stop="startInlineNotes(k)"
-                      >{{ k.notes }}</span>
+                      >{{ k.notes }}</button>
                     </template>
                     {{ t("keys.editLabelTip") || "Click to edit label" }}
                   </n-tooltip>
-                  <code class="v5-keycard__mask v5-keycard__mask--inrow" :title="maskKey(k.key_value)">
-                    {{ maskKey(k.key_value) }}
-                  </code>
-                </div>
-                <div v-else class="v5-keycard__idwrap">
-                  <code
-                    class="v5-keycard__mask v5-keycard__mask--editable"
+                  <button
+                    v-else
+                    class="v5-keycard__title v5-keycard__title--empty"
                     :title="t('keys.editLabelTip') || 'Click to add label'"
                     @click.stop="startInlineNotes(k)"
-                  >{{ maskKey(k.key_value) }}</code>
-                  <button
-                    class="v5-keycard__addlabel"
-                    @click.stop="startInlineNotes(k)"
                   >
-                    <n-icon :component="PencilOutline" :size="12" />
+                    <n-icon :component="PencilOutline" :size="11" />
                     {{ t("keys.addLabel") }}
                   </button>
                 </div>
-              </div>
-
-              <!-- Row 2: 状态 chip(色块+图标) + stats -->
-              <div class="v5-keycard__row">
                 <span
                   :class="[
-                    'v5-keycard__status',
+                    'v5-keycard__signal',
                     k.status === 'active'
-                      ? 'v5-keycard__status--ok'
+                      ? 'v5-keycard__signal--ok'
                       : k.status === 'invalid'
-                        ? 'v5-keycard__status--invalid'
-                        : 'v5-keycard__status--unverified',
+                        ? 'v5-keycard__signal--invalid'
+                        : 'v5-keycard__signal--unverified',
                   ]"
                 >
-                  <n-icon
-                    :component="
-                      k.status === 'active'
-                        ? CheckmarkCircle
-                        : k.status === 'invalid'
-                          ? CloseOutline
-                          : HelpCircleOutline
-                    "
-                    :size="13"
-                  />
+                  <span class="v5-keycard__led"></span>
                   {{
                     k.status === "active"
                       ? t("keys.valid") || "Valid"
@@ -2059,81 +2038,92 @@ const filterCounts = computed(() => ({
                         : t("v5.kcUnverified")
                   }}
                 </span>
-                <div class="v5-keycard__inline">
-                  <span>
-                    {{ t("v5.kcReq") }}
-                    <b>{{ (k.request_count ?? 0).toLocaleString() }}</b>
-                  </span>
-                  <span :class="(k.failure_count || 0) > 0 ? 'v5-keycard__inline-fail--err' : ''">
-                    {{ t("v5.kcFail") }}
-                    <b>{{ k.failure_count ?? 0 }}</b>
-                  </span>
-                  <span>{{ formatRelative(k.last_used_at) }}</span>
-                </div>
               </div>
 
-              <!-- Row 3: actions — 测试 · 编辑 · 复制 · 恢复(invalid) · 删除 -->
-              <div class="v5-keycard__row v5-keycard__actions">
-                <n-tooltip>
-                  <template #trigger>
-                    <button
-                      class="v5-keycard__iconbtn v5-keycard__iconbtn--lg v5-keycard__iconbtn--primary"
-                      :disabled="testingKeyId === k.id"
-                      @click.stop="testKey(k)"
-                    >
-                      <n-icon
-                        :component="testingKeyId === k.id ? RefreshOutline : FlashOutline"
-                        :size="16"
-                        :class="testingKeyId === k.id ? 'v5-keycard__pill-spin' : ''"
-                      />
-                    </button>
-                  </template>
-                  {{ testingKeyId === k.id ? t("v5.kcTesting") : t("v5.kcTest") || "Test" }}
-                </n-tooltip>
-                <n-tooltip>
-                  <template #trigger>
-                    <button class="v5-keycard__iconbtn v5-keycard__iconbtn--lg" @click.stop="openEditKeyDialog(k)">
-                      <n-icon :component="PencilOutline" :size="16" />
-                    </button>
-                  </template>
-                  {{ t("keys.editKeyTitle") }}
-                </n-tooltip>
+              <!-- Zone 2 · 凭证框: key 首尾指纹 + 内嵌复制 -->
+              <div class="v5-keycard__cred">
+                <n-icon class="v5-keycard__cred-ico" :component="KeyOutline" :size="13" />
+                <code class="v5-keycard__cred-val" :title="maskKey(k.key_value)">{{ maskKey(k.key_value) }}</code>
                 <n-tooltip>
                   <template #trigger>
                     <button
                       :class="[
-                        'v5-keycard__iconbtn',
-                        'v5-keycard__iconbtn--lg',
-                        copiedKeyId === k.id ? 'v5-keycard__iconbtn--copied' : '',
+                        'v5-keycard__cred-copy',
+                        copiedKeyId === k.id ? 'is-copied' : '',
                       ]"
                       @click.stop="copyKey(k)"
                     >
-                      <n-icon :component="copiedKeyId === k.id ? Checkmark : CopyOutline" :size="16" />
+                      <n-icon :component="copiedKeyId === k.id ? Checkmark : CopyOutline" :size="14" />
                     </button>
                   </template>
                   {{ copiedKeyId === k.id ? t("v5.copied") : t("v5.copy") }}
                 </n-tooltip>
+              </div>
+
+              <!-- Zone 3 · 指标: 请求 / 失败 / 活跃时间 -->
+              <div class="v5-keycard__metrics">
+                <div class="v5-keycard__metric">
+                  <span class="v5-keycard__metric-l">{{ t("v5.kcReqLabel") }}</span>
+                  <span class="v5-keycard__metric-v">{{ (k.request_count ?? 0).toLocaleString() }}</span>
+                </div>
+                <div
+                  :class="[
+                    'v5-keycard__metric',
+                    (k.failure_count || 0) > 0 ? 'v5-keycard__metric--alert' : '',
+                  ]"
+                >
+                  <span class="v5-keycard__metric-l">{{ t("v5.kcFailLabel") }}</span>
+                  <span class="v5-keycard__metric-v">{{ k.failure_count ?? 0 }}</span>
+                </div>
+                <div class="v5-keycard__metric">
+                  <span class="v5-keycard__metric-l">{{ t("v5.kcActiveLabel") }}</span>
+                  <span class="v5-keycard__metric-v v5-keycard__metric-v--time">{{ formatRelative(k.last_used_at) }}</span>
+                </div>
+              </div>
+
+              <!-- Zone 4 · 操作: 测试(主) · 编辑 · 恢复(invalid) | 删除(隔离) -->
+              <div class="v5-keycard__bar">
+                <button
+                  class="v5-keycard__test"
+                  :disabled="testingKeyId === k.id"
+                  @click.stop="testKey(k)"
+                >
+                  <n-icon
+                    :component="testingKeyId === k.id ? RefreshOutline : FlashOutline"
+                    :size="14"
+                    :class="testingKeyId === k.id ? 'v5-keycard__pill-spin' : ''"
+                  />
+                  {{ testingKeyId === k.id ? t("v5.kcTesting") : t("v5.kcTest") || "Test" }}
+                </button>
+                <n-tooltip>
+                  <template #trigger>
+                    <button class="v5-keycard__act" @click.stop="openEditKeyDialog(k)">
+                      <n-icon :component="PencilOutline" :size="15" />
+                    </button>
+                  </template>
+                  {{ t("keys.editKeyTitle") }}
+                </n-tooltip>
                 <n-tooltip v-if="k.status === 'invalid'">
                   <template #trigger>
-                    <button class="v5-keycard__iconbtn v5-keycard__iconbtn--lg" @click="restoreKey(k)">
-                      <n-icon :component="RefreshOutline" :size="16" />
+                    <button class="v5-keycard__act v5-keycard__act--restore" @click="restoreKey(k)">
+                      <n-icon :component="RefreshOutline" :size="15" />
                     </button>
                   </template>
                   {{ t("keys.restoreKey") || "Restore" }}
                 </n-tooltip>
+                <span class="v5-keycard__bar-gap"></span>
+                <i class="v5-keycard__bar-div"></i>
                 <n-tooltip>
                   <template #trigger>
                     <button
                       :class="[
-                        'v5-keycard__iconbtn',
-                        'v5-keycard__iconbtn--lg',
-                        'v5-keycard__iconbtn--danger',
-                        'v5-keycard__iconbtn--push',
-                        confirmingDeleteId === k.id ? 'v5-keycard__iconbtn--armed' : '',
+                        'v5-keycard__act',
+                        'v5-keycard__act--danger',
+                        confirmingDeleteId === k.id ? 'is-armed' : '',
                       ]"
                       @click="deleteKey(k)"
                     >
-                      <n-icon :component="Trash" :size="16" />
+                      <n-icon :component="Trash" :size="15" />
                     </button>
                   </template>
                   {{
