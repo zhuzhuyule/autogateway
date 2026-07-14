@@ -5,11 +5,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"strconv"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"time"
 
 	"autogateway/internal/channel"
@@ -138,6 +138,13 @@ func (ps *ProxyServer) HandleProxy(c *gin.Context) {
 	}
 	c.Request.Body.Close()
 	requestedModel := extractRequestedModel(c.GetHeader("Content-Type"), bodyBytes)
+
+	// 聚合分组的 model-list 请求 (GET /v1/models 等): 直接返回所有子分组"可调模型"的并集
+	// + 全局别名, 不再随机 SWRR 命中单个子分组转发 (那会导致列表随机漂移/不完整).
+	if originalGroup.GroupType == "aggregate" && shouldInterceptModelList(c.Request.URL.Path, c.Request.Method) {
+		ps.handleAggregateModelList(c, originalGroup)
+		return
+	}
 
 	// P4 智能路由: aggregate group 上先解析 candidates (alias > family > raw).
 	// 命中候选池则用第一个 candidate 钉死 sub-group + 改写 body.model, 剩余

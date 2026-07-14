@@ -103,3 +103,32 @@ func appendAliasModels(response map[string]any, aliasNames []string) {
 
 	response["data"] = data
 }
+
+// handleAggregateModelList 为聚合分组的 model-list 请求返回所有子分组"可调模型"的并集,
+// 再附加全局别名. 纯读缓存、不转发上游 —— 保证列表完整, 且每次请求返回一致(不再随
+// SWRR 命中的单个子分组而漂移). available_models 缓存由后台定时刷新服务保持新鲜.
+func (ps *ProxyServer) handleAggregateModelList(c *gin.Context, aggregateGroup *models.Group) {
+	ids := ps.groupManager.AggregateCandidateModels(aggregateGroup)
+	data := make([]any, 0, len(ids))
+	for _, id := range ids {
+		data = append(data, map[string]any{
+			"id":       id,
+			"object":   "model",
+			"created":  0,
+			"owned_by": aggregateGroup.Name,
+		})
+	}
+	response := map[string]any{
+		"object": "list",
+		"data":   data,
+	}
+	if ps.aliasService != nil {
+		aliasNames, err := ps.aliasService.ListEnabledAliasNames(c.Request.Context())
+		if err != nil {
+			logrus.WithError(err).Warn("Failed to load aliases for aggregate model list")
+		} else {
+			appendAliasModels(response, aliasNames)
+		}
+	}
+	c.JSON(http.StatusOK, response)
+}

@@ -162,6 +162,31 @@ func candidateModelsForGroup(g *models.Group) map[string]struct{} {
 	return out
 }
 
+// aggregateCandidateModelIDs 合并多个子分组的可调模型 (candidateModelsForGroup) 为并集,
+// 各自剔除 blocked_models, 全局去重后排序返回. 聚合分组的 /v1/models 用它构建完整、稳定
+// 的模型列表, 取代"随机 SWRR 命中单个子分组转发"造成的漂移/不完整.
+func aggregateCandidateModelIDs(subGroups []*models.Group) []string {
+	seen := map[string]struct{}{}
+	for _, sub := range subGroups {
+		if sub == nil {
+			continue
+		}
+		blocked := parseStringSet(sub.BlockedModels)
+		for m := range candidateModelsForGroup(sub) {
+			if _, isBlocked := blocked[m]; isBlocked {
+				continue
+			}
+			seen[m] = struct{}{}
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for m := range seen {
+		out = append(out, m)
+	}
+	sort.Strings(out)
+	return out
+}
+
 // parseStringSet decodes a datatypes.JSON containing a string array into a set.
 // Empty / invalid JSON yields an empty set.
 func parseStringSet(raw datatypes.JSON) map[string]struct{} {

@@ -1,15 +1,15 @@
 package services
 
 import (
-	"context"
-	"encoding/json"
-	"fmt"
 	"autogateway/internal/config"
 	"autogateway/internal/failover"
 	"autogateway/internal/models"
 	"autogateway/internal/store"
 	"autogateway/internal/syncer"
 	"autogateway/internal/utils"
+	"context"
+	"encoding/json"
+	"fmt"
 
 	"github.com/sirupsen/logrus"
 	"gorm.io/gorm"
@@ -132,12 +132,12 @@ func (gm *GroupManager) Initialize() error {
 
 			groupMap[g.Name] = &g
 			logrus.WithFields(logrus.Fields{
-				"group_name":               g.Name,
-				"effective_config":         g.EffectiveConfig,
-				"header_rules_count":       len(g.HeaderRuleList),
+				"group_name":                 g.Name,
+				"effective_config":           g.EffectiveConfig,
+				"header_rules_count":         len(g.HeaderRuleList),
 				"model_redirect_rules_count": len(g.ModelRedirectMap),
-				"model_redirect_strict":    g.ModelRedirectStrict,
-				"sub_group_count":          len(g.SubGroups),
+				"model_redirect_strict":      g.ModelRedirectStrict,
+				"sub_group_count":            len(g.SubGroups),
 			}).Debug("Loaded group with effective config")
 		}
 
@@ -197,6 +197,27 @@ func (gm *GroupManager) GetAllGroups() map[string]*models.Group {
 		return nil
 	}
 	return gm.syncer.Get()
+}
+
+// AggregateCandidateModels 返回聚合分组所有(weight>0)子分组"可调模型"的并集(去重排序).
+// 每个子分组: specified 用 exposed_models(空则 available), 其它用 available_models, 再去 blocked.
+// 聚合分组的 /v1/models 用它构建完整、稳定的列表, 取代"随机 SWRR 命中单个子分组转发".
+func (gm *GroupManager) AggregateCandidateModels(aggregateGroup *models.Group) []string {
+	if aggregateGroup == nil || aggregateGroup.GroupType != "aggregate" || len(aggregateGroup.SubGroups) == 0 {
+		return nil
+	}
+	all := gm.GetAllGroups()
+	byID := make(map[uint]*models.Group, len(all))
+	for _, g := range all {
+		byID[g.ID] = g
+	}
+	subs := make([]*models.Group, 0, len(aggregateGroup.SubGroups))
+	for _, sg := range aggregateGroup.SubGroups {
+		if sub, ok := byID[sg.SubGroupID]; ok {
+			subs = append(subs, sub)
+		}
+	}
+	return aggregateCandidateModelIDs(subs)
 }
 
 // GetGroupBySystemRole 通过 system_role 查找系统默认聚合分组(如 'default-openai').

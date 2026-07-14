@@ -36,6 +36,7 @@ type App struct {
 	aliasService          *services.AliasService
 	freeModelsRegistry    *services.FreeModelsRegistry
 	logCleanupService     *services.LogCleanupService
+	modelRefreshService   *services.ModelRefreshService
 	requestLogService     *services.RequestLogService
 	cronChecker           *keypool.CronChecker
 	keyPoolProvider       *keypool.KeyProvider
@@ -59,6 +60,7 @@ type AppParams struct {
 	AliasService          *services.AliasService
 	FreeModelsRegistry    *services.FreeModelsRegistry
 	LogCleanupService     *services.LogCleanupService
+	ModelRefreshService   *services.ModelRefreshService
 	RequestLogService     *services.RequestLogService
 	CronChecker           *keypool.CronChecker
 	KeyPoolProvider       *keypool.KeyProvider
@@ -81,6 +83,7 @@ func NewApp(params AppParams) *App {
 		aliasService:          params.AliasService,
 		freeModelsRegistry:    params.FreeModelsRegistry,
 		logCleanupService:     params.LogCleanupService,
+		modelRefreshService:   params.ModelRefreshService,
 		requestLogService:     params.RequestLogService,
 		cronChecker:           params.CronChecker,
 		keyPoolProvider:       params.KeyPoolProvider,
@@ -208,6 +211,7 @@ func (a *App) Start() error {
 		// 仅 Master 节点启动的服务
 		a.requestLogService.Start()
 		a.logCleanupService.Start()
+		a.modelRefreshService.Start()
 		a.cronChecker.Start()
 		// 启动同步管理器前清理 30 天以上的 sync_logs, 避免无限增长
 		a.syncPeerManager.PurgeOldLogs(30)
@@ -291,6 +295,7 @@ func (a *App) Stop(ctx context.Context) {
 		stoppableServices = append(stoppableServices,
 			a.cronChecker.Stop,
 			a.logCleanupService.Stop,
+			a.modelRefreshService.Stop,
 			a.requestLogService.Stop,
 		)
 	}

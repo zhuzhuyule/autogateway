@@ -113,6 +113,9 @@ func BuildContainer() (*dig.Container, error) {
 	if err := container.Provide(services.NewAggregateGroupService); err != nil {
 		return nil, err
 	}
+	if err := container.Provide(services.NewModelRefreshService); err != nil {
+		return nil, err
+	}
 	if err := container.Provide(ratelimit.NewLedger); err != nil {
 		return nil, err
 	}
