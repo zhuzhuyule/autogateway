@@ -14,6 +14,13 @@ services:
       - "${PORT:-3001}:${PORT:-3001}"
     env_file:
       - .env
+    # ── 忘记登录密钥(auth_key)时的重置办法,全程不用碰数据库 ──────────────
+    # 在 .env 里加一行,然后 `docker compose up -d` 重启一次即可:
+    #   RESET_AUTH_KEY=你的新密钥
+    # 启动时会把 auth_key(以及默认聚合分组的 proxy_key)重置成这个值,用它登录即可。
+    # 一次性生效:同一个值只会重置一次,可以一直留在 .env 里不用删;
+    # 想再次重置时,把 RESET_AUTH_KEY 改成新值再重启即可。
+    # ──────────────────────────────────────────────────────────────────
     restart: always
     volumes:
       - ./data:/app/data

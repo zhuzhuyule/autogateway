@@ -1,9 +1,6 @@
 package config
 
 import (
-	"context"
-	"encoding/json"
-	"fmt"
 	"autogateway/internal/db"
 	"autogateway/internal/failover"
 	"autogateway/internal/models"
@@ -11,6 +8,11 @@ import (
 	"autogateway/internal/syncer"
 	"autogateway/internal/types"
 	"autogateway/internal/utils"
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
 	"os"
 	"reflect"
 	"strconv"
@@ -163,6 +165,43 @@ func (sm *SystemSettingsManager) EnsureSettingsInitialized(authConfig types.Auth
 				return err
 			}
 			logrus.Infof("Initialized system setting: %s = %s", setting.SettingKey, setting.SettingValue)
+		}
+	}
+
+	// RESET_AUTH_KEY:一次性重置登录密钥,面向"忘记密钥"的用户 —— 只需在 .env 里设
+	// RESET_AUTH_KEY=新密钥 后重启,全程不碰数据库/SQL。此处在 syncer 首次 load 之前执行,
+	// 改完即被读到,无需二次重启。
+	//
+	// "一次性、用完自动失效、不用手动删"靠指纹实现:DB(内部 key reset_auth_key_fp)记录上次
+	// 应用值的 hash,只有当 RESET_AUTH_KEY 的值发生变化(hash 不同)时才会再次触发。所以这个
+	// 环境变量可以一直留在 .env 里 —— 同一个值只生效一次,之后重启不会反复覆盖 UI 改过的密钥。
+	if resetKey := strings.TrimSpace(os.Getenv("RESET_AUTH_KEY")); resetKey != "" {
+		sum := sha256.Sum256([]byte(resetKey))
+		fp := hex.EncodeToString(sum[:])
+		const fpKey = "reset_auth_key_fp" // 内部 key,不在 metadata/UI,loader 会忽略
+
+		var fpRow models.SystemSetting
+		alreadyApplied := db.DB.Where("setting_key = ?", fpKey).First(&fpRow).Error == nil && fpRow.SettingValue == fp
+
+		if alreadyApplied {
+			logrus.Debug("RESET_AUTH_KEY 指纹一致,已应用过,跳过")
+		} else {
+			for _, k := range []string{"auth_key", "proxy_keys"} {
+				if err := db.DB.Model(&models.SystemSetting{}).
+					Where("setting_key = ?", k).
+					Update("setting_value", resetKey).Error; err != nil {
+					logrus.Errorf("RESET_AUTH_KEY: 重置 %s 失败: %v", k, err)
+					return err
+				}
+			}
+			if err := db.DB.Where(models.SystemSetting{SettingKey: fpKey}).
+				Assign(models.SystemSetting{SettingValue: fp, Description: "internal: 上次应用的 RESET_AUTH_KEY 指纹"}).
+				FirstOrCreate(&fpRow).Error; err != nil {
+				logrus.Errorf("RESET_AUTH_KEY: 记录指纹失败: %v", err)
+				return err
+			}
+			logrus.Warn("RESET_AUTH_KEY: 已把 auth_key 与 proxy_keys 重置为该值(一次性,同值只生效一次)。" +
+				"可以把它留在 .env 里不用删;想再次重置时改成新值即可。")
 		}
 	}
 
