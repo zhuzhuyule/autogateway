@@ -1110,9 +1110,12 @@ const filteredExposed = computed(() => {
   return list;
 });
 
-// 上游全部列表(底部区) — 应用 search + free/paid/recommended 过滤
+// 上游"未暴露"候选列表(底部区) — 先排除顶部已暴露的(不重复展示),再应用 search + free/paid/recommended 过滤
 const filteredAvailable = computed(() => {
   let list = groupModels.value;
+  // 已进上方「已暴露」白名单的模型不再出现在底部候选池 — 它们无法再"加入白名单",留着只是重复
+  const exposed = exposedSet.value;
+  list = list.filter(m => !exposed.has(m));
   const q = modelSearch.value.toLowerCase().trim();
   if (q) {
     list = list.filter(m => m.toLowerCase().includes(q));
@@ -1140,6 +1143,11 @@ const filteredAvailable = computed(() => {
   }
   return list;
 });
+
+// specified 模式:上游模型是否已全部进白名单 — 底部候选池空的判定,区别于"搜索无匹配"
+const allUpstreamExposed = computed(
+  () => groupModels.value.length > 0 && groupModels.value.every(m => exposedSet.value.has(m)),
+);
 
 async function persistGroupPatch(patch: {
   model_routing_mode?: RoutingMode;
@@ -1994,6 +2002,7 @@ const filterCounts = computed(() => ({
                     ? 'v5-keycard--invalid'
                     : 'v5-keycard--unverified',
                 flashKeyId === k.id ? 'v5-keycard--flash' : '',
+                testingKeyIds.has(k.id) ? 'v5-keycard--testing' : '',
               ]"
             >
               <!-- Zone 1 · Header: Label 主标题(inline 编辑) + 状态信号灯 -->
@@ -2326,6 +2335,7 @@ const filterCounts = computed(() => ({
                 'v5-modelcard--blocked': blockedSet.has(modelId),
                 'v5-modelcard--selected': isSelected(modelId),
                 'v5-modelcard--testfail': modelTestState(modelId)?.ok === false,
+                'v5-modelcard--testing': testingModels.has(modelId),
               }"
               draggable="true"
               @click="toggleSelected(modelId)"
@@ -2444,6 +2454,7 @@ const filterCounts = computed(() => ({
                 'v5-modelcard--blocked': blockedSet.has(modelId),
                 'v5-modelcard--selected': isSelected(modelId),
                 'v5-modelcard--testfail': modelTestState(modelId)?.ok === false,
+                'v5-modelcard--testing': testingModels.has(modelId),
               }"
               @click="toggleSelected(modelId)"
             >
@@ -2518,7 +2529,9 @@ const filterCounts = computed(() => ({
             </div>
           </div>
           <div v-else class="v5-empty-mini">
-            <span>{{ groupModels.length === 0 ? (t("v3.upstreamEmpty") || "上游模型列表为空,请先刷新") : t("v3.noModelsMatching") }}</span>
+            <span v-if="groupModels.length === 0">{{ t("v3.upstreamEmpty") || "上游模型列表为空,请先刷新" }}</span>
+            <span v-else-if="allUpstreamExposed">{{ t("v3.allExposed") || "上游模型已全部暴露,无可添加项" }}</span>
+            <span v-else>{{ t("v3.noModelsMatching") }}</span>
           </div>
         </template>
 
@@ -2553,6 +2566,7 @@ const filterCounts = computed(() => ({
                 'v5-modelcard--blocked': blockedSet.has(modelId),
                 'v5-modelcard--selected': isSelected(modelId),
                 'v5-modelcard--testfail': modelTestState(modelId)?.ok === false,
+                'v5-modelcard--testing': testingModels.has(modelId),
               }"
               @click="toggleSelected(modelId)"
             >
