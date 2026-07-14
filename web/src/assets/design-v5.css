@@ -701,6 +701,8 @@
   padding: 10px 12px;
   display: flex;
   flex-direction: column;
+  /* 上下两头对齐: 名称在顶、操作行贴底, 而非都挤在顶部 */
+  justify-content: space-between;
   gap: 6px;
   transition: all 120ms;
 }
@@ -897,38 +899,6 @@
   border-color: var(--v3-accent);
 }
 
-/* Select indicator — makes "click card = multi-select" discoverable.
-   Empty box at rest, filled accent + check when selected. Card click still
-   toggles selection (the box is a pure affordance, clicks pass through). */
-.v5-modelcard__check {
-  flex-shrink: 0;
-  width: 15px;
-  height: 15px;
-  margin-top: 1px;
-  border-radius: 5px;
-  border: 1.5px solid var(--v3-line-strong);
-  background: var(--v3-surface);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 120ms;
-}
-.v5-modelcard:hover .v5-modelcard__check {
-  border-color: var(--v3-accent);
-}
-.v5-modelcard__check--on {
-  background: var(--v3-accent);
-  border-color: var(--v3-accent);
-}
-.v5-modelcard__check--on::after {
-  content: "";
-  width: 3px;
-  height: 6px;
-  margin-top: -1px;
-  border: solid #fff;
-  border-width: 0 1.5px 1.5px 0;
-  transform: rotate(45deg);
-}
 
 /* ===== Test failure state — placed after exposed/selected so red wins ===== */
 .v5-modelcard--testfail {
@@ -963,6 +933,16 @@
   border-radius: var(--v3-radius);
   font: 500 12px/1.2 var(--v3-sans);
   color: var(--v3-accent);
+}
+/* 批量条移进筛选区后: 去掉独立块的 sticky/蓝底/边框/边距, 作为 toolbar 内元素
+   与搜索并排(选中时替换筛选组, 同位置不推下面内容 → 不再屏幕跳动)。 */
+.v5-bulk-bar--inline {
+  position: static;
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
 }
 .v5-bulk-bar__count {
   font: 600 12px/1.2 var(--v3-mono);

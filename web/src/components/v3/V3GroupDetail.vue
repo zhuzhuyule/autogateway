@@ -2227,7 +2227,7 @@ const filterCounts = computed(() => ({
             <n-icon :component="SearchOutline" :size="12" />
             <input v-model="modelSearch" :placeholder="t('v3.filterModels') || 'Filter models…'" />
           </div>
-          <div class="v5-modemode v5-modemode--filters">
+          <div v-if="selectedModels.size === 0" class="v5-modemode v5-modemode--filters">
             <button class="v3-btn v3-btn--sm" :class="{ 'v3-btn--accent': availFilter === 'all' }" @click="availFilter = 'all'">
               {{ t("common.all") || "All" }}
             </button>
@@ -2254,13 +2254,7 @@ const filterCounts = computed(() => ({
               ⭐ {{ t("v3.recommended") || "推荐" }}
             </button>
           </div>
-        </div>
-
-        <!-- 批量操作 floating toolbar (selectedModels.size > 0 时显示) -->
-        <div
-          v-if="selectedModels.size > 0"
-          class="v5-bulk-bar"
-        >
+          <div v-if="selectedModels.size > 0" class="v5-bulk-bar v5-bulk-bar--inline">
           <span class="v5-bulk-bar__count">
             {{ t("v5.bulkSelected", { n: selectedModels.size }) || `已选 ${selectedModels.size} 个` }}
           </span>
@@ -2296,6 +2290,7 @@ const filterCounts = computed(() => ({
           <button class="v3-btn v3-btn--sm v3-btn--ghost" @click="clearSelection">
             {{ t("v5.bulkClear") || "取消选择" }}
           </button>
+          </div>
         </div>
 
         <!-- =============================================== -->
@@ -2339,11 +2334,6 @@ const filterCounts = computed(() => ({
               @drop="onExposedDrop(exposedModels.indexOf(modelId))"
             >
               <div class="v5-modelcard__row" style="align-items: flex-start; gap: 6px">
-                <span
-                  class="v5-modelcard__check"
-                  :class="{ 'v5-modelcard__check--on': isSelected(modelId) }"
-                  :title="t('v5.cardSelectHint') || '点击卡片可多选，用于批量操作'"
-                />
                 <code
                   class="v5-modelcard__name"
                   style="flex: 1; min-width: 0"
@@ -2458,11 +2448,6 @@ const filterCounts = computed(() => ({
               @click="toggleSelected(modelId)"
             >
               <div class="v5-modelcard__row" style="align-items: flex-start; gap: 6px">
-                <span
-                  class="v5-modelcard__check"
-                  :class="{ 'v5-modelcard__check--on': isSelected(modelId) }"
-                  :title="t('v5.cardSelectHint') || '点击卡片可多选，用于批量操作'"
-                />
                 <code
                   class="v5-modelcard__name"
                   style="flex: 1; min-width: 0"
@@ -2572,11 +2557,6 @@ const filterCounts = computed(() => ({
               @click="toggleSelected(modelId)"
             >
               <div class="v5-modelcard__row" style="align-items: flex-start; gap: 6px">
-                <span
-                  class="v5-modelcard__check"
-                  :class="{ 'v5-modelcard__check--on': isSelected(modelId) }"
-                  :title="t('v5.cardSelectHint') || '点击卡片可多选，用于批量操作'"
-                />
                 <code
                   class="v5-modelcard__name"
                   style="flex: 1; min-width: 0"
