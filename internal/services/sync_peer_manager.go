@@ -282,6 +282,12 @@ func (m *SyncPeerManager) ensureConnection(peer models.SyncPeer) {
 			if msgIn.Type != "sync" || msgIn.Ciphertext == "" {
 				continue // 心跳 / 其他类型暂时忽略
 			}
+			// 主从: follower 只靠 pull 全量快照镜像 master; ws push 是增量, 若走
+			// ProcessPayload(LWW) 会破坏镜像一致性 → follower 忽略 ws sync 帧, 配置
+			// 一致性完全由 pullLoop 的 ApplySnapshot 保证(1min 兜底, 延迟可接受)。
+			if !m.syncService.configManager.IsMaster() {
+				continue
+			}
 			// 优先非对称解 (用对端公钥), 失败 fallback legacy.
 			var payload *SyncPayload
 			var perr error

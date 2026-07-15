@@ -251,6 +251,11 @@ func (h *SyncHandler) WsEndpoint(c *gin.Context) {
 				continue
 			}
 
+			// 主从: 只有 master 接收 push(follower 的手动迁移上行); follower 不接收任何
+			// push, 一致性只靠 pull 镜像, 避免增量 LWW 破坏镜像。
+			if !h.syncService.IsMaster() {
+				continue
+			}
 			if err := h.syncService.ProcessPayload(context.Background(), payload); err != nil {
 				logrus.Errorf("failed to process sync payload: %v", err)
 				h.writeLog(peer.ID, "push", "error", fmt.Sprintf("merge: %v", err), "ws")
@@ -488,6 +493,11 @@ func (h *SyncHandler) PushEndpoint(c *gin.Context) {
 		return
 	}
 
+	// 主从: follower 不接收 push(一致性只靠 pull 镜像); 只有 master 接收上行迁移。
+	if !h.syncService.IsMaster() {
+		c.JSON(http.StatusOK, gin.H{"status": "ignored: follower does not accept push"})
+		return
+	}
 	if err := h.syncService.ProcessPayload(c.Request.Context(), payload); err != nil {
 		logrus.Errorf("failed to process push payload: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to process data"})

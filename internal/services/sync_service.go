@@ -162,6 +162,12 @@ func NewSyncService(db *gorm.DB, configManager types.ConfigManager, keypair *Nod
 	}
 }
 
+// IsMaster 报告本节点是否 master(权威源)。主从同步据此决定接收/下发方向:
+// master 接收 follower 的手动迁移 push 并下发快照; follower 只 pull 镜像、不接收 push。
+func (s *SyncService) IsMaster() bool {
+	return s.configManager.IsMaster()
+}
+
 // effectiveTime 返回一条 row 的 "最后变更时刻" — 取 UpdatedAt 和 DeletedAt 较大值.
 //
 // 关键: GORM Delete 走软删除只 SET deleted_at = NOW(), 不更新 updated_at. 如果
