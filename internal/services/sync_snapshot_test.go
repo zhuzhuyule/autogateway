@@ -89,3 +89,38 @@ func TestApplySnapshot_ExcludedCategorySkipped(t *testing.T) {
 		t.Fatal("setting 类别被排除, 不应被 master 覆盖")
 	}
 }
+
+// TestApplySnapshot_DuplicateGroupNoConflict 复现并锁定 2026-07-15 部署时的 bug:
+// 历史重复 group(墓碑+活同名)下, Unscoped().First() 命中墓碑并复活它, 撞 partial-unique
+// → 整个镜像事务回滚、follower 永远无法从 master 恢复。修复: 只匹配活记录。
+func TestApplySnapshot_DuplicateGroupNoConflict(t *testing.T) {
+	s, db := newTestSyncService(t)
+	// 复现真实 DB 的 partial-unique(V2_5_17): 允许墓碑+活同名共存
+	if err := db.Exec("CREATE UNIQUE INDEX uni_groups_name_active ON `groups`(name) WHERE deleted_at IS NULL").Error; err != nil {
+		t.Fatal(err)
+	}
+	// 历史重复 group: 墓碑 agnes(id 小) + 活 agnes
+	tomb := models.Group{Name: "agnes", ChannelType: "openai", Upstreams: []byte("[]")}
+	if err := db.Create(&tomb).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Delete(&tomb).Error; err != nil { // 软删 → 墓碑
+		t.Fatal(err)
+	}
+	if err := db.Create(&models.Group{Name: "agnes", ChannelType: "openai", Upstreams: []byte("[]")}).Error; err != nil {
+		t.Fatal(err) // 活 agnes(partial-unique 允许与墓碑共存)
+	}
+	// master 快照: agnes + 一个 key → 应更新活 agnes + 恢复 key, 不碰墓碑
+	snap := &SyncPayload{
+		Groups:  []models.Group{{ID: 1, Name: "agnes", ChannelType: "openai", Upstreams: []byte("[]")}},
+		APIKeys: []models.APIKey{{GroupID: 1, KeyValue: "k1", KeyHash: "h1", Status: models.KeyStatusActive}},
+	}
+	if err := s.ApplySnapshot(context.Background(), snap); err != nil {
+		t.Fatalf("重复 group 不应导致镜像失败(修复前会 UNIQUE 冲突): %v", err)
+	}
+	var aliveKeys int64
+	db.Model(&models.APIKey{}).Where("deleted_at IS NULL").Count(&aliveKeys)
+	if aliveKeys != 1 {
+		t.Fatalf("应从 master 恢复 1 个活 key, got %d", aliveKeys)
+	}
+}

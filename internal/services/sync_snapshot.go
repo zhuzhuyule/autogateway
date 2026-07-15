@@ -35,8 +35,11 @@ func (s *SyncService) ApplySnapshot(ctx context.Context, snap *SyncPayload) erro
 			for i := range snap.Groups {
 				incoming := snap.Groups[i]
 				masterNames[incoming.Name] = true
+				// 只匹配"活"group: 历史重复 group(墓碑+活同名)时, Unscoped().First() 会命中
+				// 墓碑(id 最小), syncMergeSave 复活它 → 与活记录撞 partial-unique → 整个镜像
+				// 事务回滚。只认活记录: 有则更新, 无则新建(新建不与墓碑冲突, partial-unique 只管活)。
 				var existing models.Group
-				err := tx.Unscoped().Where("name = ?", incoming.Name).First(&existing).Error
+				err := tx.Where("name = ?", incoming.Name).First(&existing).Error
 				if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 					return err
 				}
@@ -111,8 +114,9 @@ func (s *SyncService) ApplySnapshot(ctx context.Context, snap *SyncPayload) erro
 				incoming.GroupID = localGID
 				masterKeys[keyKey{localGID, incoming.KeyHash}] = true
 
+				// 同 group: 只匹配活 key(避免命中墓碑复活撞 partial-unique)。
 				var existing models.APIKey
-				err := tx.Unscoped().Where("group_id = ? AND key_hash = ?", localGID, incoming.KeyHash).First(&existing).Error
+				err := tx.Where("group_id = ? AND key_hash = ?", localGID, incoming.KeyHash).First(&existing).Error
 				if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 					return err
 				}
@@ -208,7 +212,7 @@ func (s *SyncService) applySnapshotAliases(tx *gorm.DB, snap *SyncPayload, polic
 		in := snap.ModelAliases[i]
 		master[ak{in.Alias, in.RealModel}] = true
 		var existing models.ModelAlias
-		err := tx.Unscoped().Where("alias = ? AND real_model = ?", in.Alias, in.RealModel).First(&existing).Error
+		err := tx.Where("alias = ? AND real_model = ?", in.Alias, in.RealModel).First(&existing).Error
 		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 			return err
 		}
@@ -261,7 +265,7 @@ func (s *SyncService) applySnapshotSubGroups(tx *gorm.DB, snap *SyncPayload, pol
 		in.GroupID, in.SubGroupID = gID, sID
 		master[pair{gID, sID}] = true
 		var existing models.GroupSubGroup
-		err := tx.Unscoped().Where("group_id = ? AND sub_group_id = ?", gID, sID).First(&existing).Error
+		err := tx.Where("group_id = ? AND sub_group_id = ?", gID, sID).First(&existing).Error
 		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 			return err
 		}
