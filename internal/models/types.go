@@ -367,3 +367,13 @@ const (
 	VideoTaskFailed    = "failed"
 	VideoTaskCanceled  = "canceled"
 )
+
+// InviteToken 一次性邀请凭证(本机, 不同步)。父签发, 子 join 时消费。
+type InviteToken struct {
+	Code      string     `gorm:"primaryKey;type:varchar(64)" json:"code"`
+	ExpiresAt time.Time  `gorm:"index" json:"expires_at"`
+	Used      bool       `gorm:"not null;default:false" json:"used"`
+	UsedBy    string     `gorm:"type:varchar(64)" json:"used_by"`
+	UsedAt    *time.Time `json:"used_at"`
+	CreatedAt time.Time  `json:"created_at"`
+}

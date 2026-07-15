@@ -161,6 +161,9 @@ func (a *App) Start() error {
 		if err := db.V2_5_30_SyncPeerIsMaster(a.db); err != nil {
 			return fmt.Errorf("V2_5_30 add sync_peers.is_master failed: %w", err)
 		}
+		if err := db.V2_7_0_InviteTokens(a.db); err != nil {
+			return fmt.Errorf("V2_7_0 invite_tokens failed: %w", err)
+		}
 		logrus.Info("Database auto-migration completed.")
 
 		// 初始化系统设置
@@ -234,6 +237,9 @@ func (a *App) Start() error {
 		// 本机拓扑字段(不同步), 必须每个 Slave 自己补。幂等(列已存在则跳过)。
 		if err := db.V2_5_30_SyncPeerIsMaster(a.db); err != nil {
 			return fmt.Errorf("V2_5_30 (slave) add sync_peers.is_master failed: %w", err)
+		}
+		if err := db.V2_7_0_InviteTokens(a.db); err != nil {
+			return fmt.Errorf("V2_7_0 (slave) invite_tokens failed: %w", err)
 		}
 		a.settingsManager.Initialize(a.storage, a.groupManager, a.configManager.IsMaster())
 		a.syncPeerManager.SetBroadcaster(a.syncHandler)
