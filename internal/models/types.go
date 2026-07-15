@@ -303,6 +303,9 @@ type SyncPeer struct {
 	URL          string     `gorm:"type:varchar(512);not null" json:"url"`
 	SyncKey      string     `gorm:"type:varchar(512);not null" json:"sync_key"`
 	Role         string     `gorm:"type:varchar(50);not null;default:'client'" json:"role"` // 'server' or 'client'
+	// IsMaster 标记该 peer 是否本节点的 master(权威源)。follower 只镜像 is_master=true 的
+	// peer, 避免旧拓扑多 peer 互相覆盖清空。本机至多一个 peer 应为 master。本机专属, 不同步。
+	IsMaster bool `gorm:"default:false" json:"is_master"`
 	Status       string     `gorm:"type:varchar(50);not null;default:'disconnected'" json:"status"`
 	LastSyncedAt *time.Time `json:"last_synced_at"`
 	// LastPulledAt 仅在成功 pull 后更新, 用作下次 pull 的 since 下限.

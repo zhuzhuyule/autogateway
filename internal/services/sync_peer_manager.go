@@ -472,14 +472,14 @@ func (m *SyncPeerManager) doPull(ctx context.Context) {
 	if !settings.SyncEnabled {
 		return
 	}
-	// 主从: master 是权威源, 不自动 pull follower(避免把 follower 本地态吸回来)。
-	// follower→master 只走用户手动迁移 PushPeer。
-	if m.syncService.configManager.IsMaster() {
+	// 主从: master 是权威源, 不自动 pull follower。
+	if m.syncService.IsMaster() {
 		return
 	}
-
+	// follower 只镜像"标记为 master"的 peer — 避免旧拓扑多 peer 互相覆盖清空(2026-07-15
+	// mini 被非 master peer 的空快照清空的根因)。没标 master 则不镜像任何(等 UI 指定 master)。
 	var peers []models.SyncPeer
-	if err := m.db.Find(&peers).Error; err != nil {
+	if err := m.db.Where("is_master = ?", true).Find(&peers).Error; err != nil {
 		return
 	}
 

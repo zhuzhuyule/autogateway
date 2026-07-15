@@ -202,6 +202,18 @@ const columns = computed(() => [
             },
             { icon: () => h(NIcon, null, { default: () => h(ArrowUpCircleOutline) }) }
           ),
+          // 主从: 设为本站 master(follower 只镜像它); 已是 master 显示✓
+          h(
+            NButton,
+            {
+              size: "small",
+              tertiary: true,
+              type: row.is_master ? "success" : "primary",
+              onClick: () => setAsMaster(row),
+              title: row.is_master ? "本站当前 master(镜像源)" : "设为本站 master",
+            },
+            { default: () => (row.is_master ? "主站✓" : "设为主站") }
+          ),
           h(
             NButton,
             { size: "small", tertiary: true, onClick: () => openLogs(row), title: t("sync.viewHistory") },
@@ -419,6 +431,25 @@ async function savePolicy() {
     message.error(err.response?.data?.error || t("common.saveFailed"));
   } finally {
     policySaving.value = false;
+  }
+}
+
+async function setNodeRole(isSlave: boolean) {
+  try {
+    await syncApi.setRole(isSlave);
+    await loadConfig();
+    message.success(isSlave ? "已切为子站 follower" : "已切为主站 master");
+  } catch (err: any) {
+    message.error(err.response?.data?.error || t("common.saveFailed"));
+  }
+}
+async function setAsMaster(peer: SyncPeer) {
+  try {
+    await syncApi.setPeerMaster(peer.id);
+    await loadPeers();
+    message.success("已把 " + peer.name + " 设为本站 master");
+  } catch (err: any) {
+    message.error(err.response?.data?.error || t("common.saveFailed"));
   }
 }
 
@@ -658,15 +689,34 @@ async function handleSave() {
       </span>
     </template>
 
-    <!-- 主从角色: follower 提示 / master 排除清单 -->
+    <!-- 本站角色切换(master/follower 热切, 立即生效) -->
+    <div class="v3-sync-config" style="margin-bottom: 16px">
+      <div class="v3-sync-config__row">
+        <div class="v3-sync-config__label">
+          <div class="v3-sync-config__title">本站角色</div>
+          <div class="v3-sync-config__hint">
+            主站(master)=权威源, 变更下发所有子站; 子站(follower)=只镜像指定 master。切换立即生效, 无需重启。
+          </div>
+        </div>
+        <n-switch
+          :value="config.is_master !== false"
+          @update:value="(v: boolean) => setNodeRole(!v)"
+        >
+          <template #checked>主站 master</template>
+          <template #unchecked>子站 follower</template>
+        </n-switch>
+      </div>
+    </div>
+
+    <!-- follower 提示 / master 排除清单 -->
     <n-alert
       v-if="config.is_master === false"
       type="info"
       style="margin-bottom: 16px"
       title="本节点为 follower(子节点)"
     >
-      配置以 master(主站)为准, 每分钟自动镜像主站。本地改动不会自动上传, 需在下方
-      peer 列表用「推送」手动迁移到主站, 否则会被下一轮镜像覆盖。
+      配置以 master(主站)为准, 每分钟自动镜像主站。本地改动不会自动上传, 需手动迁移到主站,
+      否则会被下一轮镜像覆盖。请在下方 peer 列表把某个 peer「设为主站」, 本站只镜像它。
     </n-alert>
 
     <div v-if="config.is_master" class="v3-sync-config" style="margin-bottom: 16px">

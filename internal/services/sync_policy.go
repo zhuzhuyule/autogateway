@@ -30,7 +30,7 @@ func DefaultSyncPolicy() *SyncPolicy {
 			// Group.Config 里的 proxy_url 是本机代理地址
 			"group": {"proxy_url"},
 			// SystemSettings 里的本机地址 / 代理 / 同步自身配置 / policy 自身
-			"setting": {"app_url", "proxy_url", "sync_enabled", "sync_key", "sync_policy"},
+			"setting": {"app_url", "proxy_url", "sync_enabled", "sync_key", "sync_policy", "node_is_slave"},
 		},
 	}
 }

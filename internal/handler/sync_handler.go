@@ -575,6 +575,41 @@ func (h *SyncHandler) UpdateSyncPolicy(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
+// SetRole 热切本机主从角色(is_slave=true→follower, false→master), 立即生效不重启。
+func (h *SyncHandler) SetRole(c *gin.Context) {
+	var body struct {
+		IsSlave bool `json:"is_slave"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	val := "false"
+	if body.IsSlave {
+		val = "true"
+	}
+	if err := h.syncService.SetNodeRole(c.Request.Context(), val); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true, "is_master": !body.IsSlave})
+}
+
+// SetPeerMaster 把指定 peer 设为本机的 master(其余 peer 取消 master, 保证唯一)。
+// follower 只镜像 is_master=true 的 peer。
+func (h *SyncHandler) SetPeerMaster(c *gin.Context) {
+	id := c.Param("id")
+	if err := h.db.Model(&models.SyncPeer{}).Where("is_master = ?", true).Update("is_master", false).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if err := h.db.Model(&models.SyncPeer{}).Where("id = ?", id).Update("is_master", true).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
 func (h *SyncHandler) ListPeers(c *gin.Context) {
 	var peers []models.SyncPeer
 	if err := h.db.Find(&peers).Error; err != nil {

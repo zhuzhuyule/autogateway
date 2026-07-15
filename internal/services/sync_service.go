@@ -162,10 +162,32 @@ func NewSyncService(db *gorm.DB, configManager types.ConfigManager, keypair *Nod
 	}
 }
 
-// IsMaster 报告本节点是否 master(权威源)。主从同步据此决定接收/下发方向:
-// master 接收 follower 的手动迁移 push 并下发快照; follower 只 pull 镜像、不接收 push。
+// nodeIsSlaveSettingKey 存本机角色(是否 slave/follower), 让 UI 能热切换角色, 不必改
+// IS_SLAVE 环境变量重启。本机专属, sync_policy 默认排除同步。
+const nodeIsSlaveSettingKey = "node_is_slave"
+
+// IsMaster 报告本节点是否 master(权威源)。优先读 DB 的 node_is_slave(UI 可热切),
+// 无则回退 IS_SLAVE 环境变量。主从据此决定接收/下发方向:master 接收 follower 手动
+// 迁移 push 并下发快照; follower 只 pull 镜像、不接收 push。
 func (s *SyncService) IsMaster() bool {
+	var row models.SystemSetting
+	if err := s.db.Where("setting_key = ?", nodeIsSlaveSettingKey).First(&row).Error; err == nil {
+		return row.SettingValue != "true"
+	}
 	return s.configManager.IsMaster()
+}
+
+// SetNodeRole 热切本机角色: isSlaveVal = "true"(follower) / "false"(master)。存 DB
+// node_is_slave setting, IsMaster() 立即读到, 无需重启改环境变量。
+func (s *SyncService) SetNodeRole(ctx context.Context, isSlaveVal string) error {
+	var row models.SystemSetting
+	err := s.db.WithContext(ctx).Where("setting_key = ?", nodeIsSlaveSettingKey).First(&row).Error
+	if err != nil {
+		return s.db.WithContext(ctx).Create(&models.SystemSetting{
+			SettingKey: nodeIsSlaveSettingKey, SettingValue: isSlaveVal,
+		}).Error
+	}
+	return s.db.WithContext(ctx).Model(&row).Update("setting_value", isSlaveVal).Error
 }
 
 // effectiveTime 返回一条 row 的 "最后变更时刻" — 取 UpdatedAt 和 DeletedAt 较大值.

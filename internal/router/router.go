@@ -268,6 +268,7 @@ func registerProtectedAPIRoutes(
 	api.PUT("/sync/config", syncHandler.UpdateConfig)
 	api.GET("/sync/policy", syncHandler.GetSyncPolicy)
 	api.PUT("/sync/policy", syncHandler.UpdateSyncPolicy)
+	api.PUT("/sync/role", syncHandler.SetRole)
 	syncPeers := api.Group("/sync/peers")
 	{
 		syncPeers.GET("", syncHandler.ListPeers)
@@ -278,6 +279,7 @@ func registerProtectedAPIRoutes(
 		syncPeers.GET("/:id/preview-push", syncHandler.PreviewPush)
 		syncPeers.POST("/:id/pull", syncHandler.TriggerPull)
 		syncPeers.POST("/:id/push", syncHandler.TriggerPush)
+		syncPeers.POST("/:id/set-master", syncHandler.SetPeerMaster)
 	}
 
 	// P9.2: 远程升级 - 写信号文件, 等宿主机 watcher 接管

@@ -6,6 +6,8 @@ export interface SyncPeer {
   url: string;
   sync_key: string;
   role: string;
+  /** 主从: 该 peer 是否本节点的 master(follower 只镜像 is_master=true 的 peer) */
+  is_master?: boolean;
   /**
    * P9.1: 复合状态字段, 可能形式:
    *   - "disconnected" / "connected"
@@ -126,6 +128,14 @@ export const syncApi = {
   },
   async updatePolicy(data: SyncPolicy): Promise<void> {
     await http.put("/sync/policy", data);
+  },
+  /** 主从: 热切本机角色(is_slave=true→follower, false→master), 立即生效 */
+  async setRole(isSlave: boolean): Promise<void> {
+    await http.put("/sync/role", { is_slave: isSlave });
+  },
+  /** 主从: 把某 peer 设为本机 master(其余取消), follower 只镜像它 */
+  async setPeerMaster(id: string): Promise<void> {
+    await http.post(`/sync/peers/${id}/set-master`, {});
   },
   async getPeers(): Promise<SyncPeer[]> {
     const response = await http.get("/sync/peers");
