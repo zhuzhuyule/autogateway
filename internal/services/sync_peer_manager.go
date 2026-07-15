@@ -41,6 +41,11 @@ type SyncPeerManager struct {
 	// 用于 Gap 3 双向化: pushToPeers 既推 client 持有的 conn, 也通过 broadcaster
 	// 推 server 持有的 conn.
 	broadcaster Broadcaster
+
+	// 反熵: 每个 peer 上次全量对账(since=nil)的时刻. 进程内存态, 重启后清空 → 启动后
+	// 首次 pull 即全量对账(补历史缺口), 之后每 fullReconcileInterval 全量一次.
+	reconcileMu   sync.Mutex
+	lastReconcile map[string]time.Time
 }
 
 // SetBroadcaster 注入 ws server 端的广播器.
@@ -56,7 +61,22 @@ func NewSyncPeerManager(db *gorm.DB, syncService *SyncService, settingsManager *
 		keypair:         keypair,
 		activePeers:     make(map[string]*websocket.Conn),
 		notifyChan:      make(chan struct{}, 1),
+		lastReconcile:   make(map[string]time.Time),
 	}
+}
+
+// fullReconcileInterval: 每隔这么久对每个 peer 做一次全量对账(since=nil), 补齐增量同步
+// 漏掉的历史记录 — 分布式同步的反熵(anti-entropy)机制。
+const fullReconcileInterval = 6 * time.Hour
+
+// markReconciled 在一次全量对账成功后记录时刻, 下次全量在 fullReconcileInterval 之后.
+func (m *SyncPeerManager) markReconciled(peerID string, doFull bool) {
+	if !doFull {
+		return
+	}
+	m.reconcileMu.Lock()
+	m.lastReconcile[peerID] = time.Now()
+	m.reconcileMu.Unlock()
 }
 
 // computeSinceFromPeers 取所有 peer 中最小的 last_synced_at, 作为 ExportPayload 的 since.
@@ -461,10 +481,17 @@ func (m *SyncPeerManager) pullOnePeer(ctx context.Context, peer models.SyncPeer,
 	// 把本端公钥显式带在 query, 让对端用这个加密响应 (绕过对端 db 里可能陈旧的公钥记录).
 	// 这是修 mini 端 "Max" peer 错存了自己公钥 → 加密给本端无法解 的 stale-record bug.
 	params := []string{}
-	// doPull 用专属的 LastPulledAt 作为 since 下限, 跟 LastSyncedAt (push 也会改) 解耦.
-	// 必须用 UTC 序列化 — SQLite TEXT 比较是字典序, "+00:00" 时间戳跟
-	// "+08:00" 时间戳字典序混乱 (15:46+00 < 23:45+08 字面上, 但实际 15:46 UTC > 15:45 UTC).
-	if peer.LastPulledAt != nil {
+	// 反熵: 距上次对该 peer 全量对账超过 fullReconcileInterval(或进程启动后首次)→ 本次不带
+	// since 全量拉取, 补齐增量漏掉的历史记录(某端离线期间别处的增删, 其 since 已越过永不重传);
+	// 否则用 LastPulledAt 走增量, 省带宽.
+	m.reconcileMu.Lock()
+	last, seen := m.lastReconcile[peer.ID]
+	doFull := !seen || time.Since(last) >= fullReconcileInterval
+	m.reconcileMu.Unlock()
+
+	// LastPulledAt 是专属 pull since 下限, 跟 LastSyncedAt 解耦. 必须 UTC 序列化 —
+	// SQLite TEXT 比较是字典序, 时区串不一致会乱.
+	if !doFull && peer.LastPulledAt != nil {
 		params = append(params, "since="+url.QueryEscape(peer.LastPulledAt.UTC().Format(time.RFC3339Nano)))
 	}
 	if myPubKey != "" {
@@ -506,6 +533,7 @@ func (m *SyncPeerManager) pullOnePeer(ctx context.Context, peer models.SyncPeer,
 		// No new data — 算成功, 但不记 log 避免噪音
 		now := time.Now().UTC()
 		m.db.Model(&models.SyncPeer{}).Where("id = ?", peer.ID).Update("last_pulled_at", now)
+		m.markReconciled(peer.ID, doFull)
 		return nil
 	}
 
@@ -531,12 +559,13 @@ func (m *SyncPeerManager) pullOnePeer(ctx context.Context, peer models.SyncPeer,
 		return err
 	}
 
-	now := time.Now()
+	now := time.Now().UTC()
 	// 同时更新 last_synced_at (展示用) 和 last_pulled_at (pull since 用)
 	m.db.Model(&models.SyncPeer{}).Where("id = ?", peer.ID).Updates(map[string]any{
 		"last_synced_at": now,
 		"last_pulled_at": now,
 	})
+	m.markReconciled(peer.ID, doFull)
 	summary := payloadSummary(payload)
 	m.writeLog(peer.ID, "pull", "success", "", summary)
 	logrus.Infof("successfully pulled and merged changes from peer %s (%s)", peer.Name, summary)
