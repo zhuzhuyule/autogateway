@@ -1,7 +1,7 @@
 {
   "name": "autogateway-frontend",
   "private": true,
-  "version": "2.5.29",
+  "version": "2.5.30",
   "description": "AutoGateway frontend — Smart AI API gateway with auto routing, free provider aggregation and unified entry. Built on Vue 3 + Naive UI.",
   "type": "module",
   "keywords": [

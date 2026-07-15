@@ -157,6 +157,10 @@ func (a *App) Start() error {
 		if err := db.V2_5_21_DedupActiveKeys(a.db); err != nil {
 			return fmt.Errorf("V2_5_21 dedup active api keys failed: %w", err)
 		}
+		// 主从拓扑: 确保 sync_peers.is_master 列存在(AutoMigrate 对已存在表加 bool 列偶尔漏).
+		if err := db.V2_5_30_SyncPeerIsMaster(a.db); err != nil {
+			return fmt.Errorf("V2_5_30 add sync_peers.is_master failed: %w", err)
+		}
 		logrus.Info("Database auto-migration completed.")
 
 		// 初始化系统设置

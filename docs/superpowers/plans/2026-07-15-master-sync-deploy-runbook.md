@@ -59,3 +59,21 @@ SELECT g.name, count(*) FROM api_keys k JOIN `groups` g ON g.id=k.group_id
 - follower 去掉 `IS_SLAVE=true` 重启 → 退回 master(对称 LWW 旧行为)。
 - 镜像是全量替换,follower 本地数据会被 HK 覆盖;回滚不恢复被覆盖的本地独有数据
   (这些应在部署前用手动迁移推给 HK 保留 —— 本次选"信任 HK",不额外保留)。
+
+## 2026-07-15 实战经验(部署踩坑记录)
+
+止血最终成功:三节点收敛 68 / agnes 4 / xfyun 6 / 孤儿 0。踩过的坑,后来者注意:
+
+1. **follower 只镜像唯一 master**(v2.5.29):对称 mesh 遗留多 peer 时,老逻辑 follower
+   镜像所有 peer → pull 到空/错误 peer 就把自己清空。现在只镜像 is_master=true 的 peer。
+   **部署后必须在 UI(或 DB)把 master(HK) peer 标 is_master**,否则 follower 不镜像任何。
+2. **mini 用内联 `environment:`,不读 .env**:IS_SLAVE 要加到 docker-compose.yml 的
+   environment 块。核对 `docker exec autogateway printenv IS_SLAVE`。
+3. **手动加 peer 缺公钥 → 解密失败**:正常应走 UI AddPeer(ws 握手自动换公钥)。手动
+   INSERT 的 peer 要把对端 `public_key_x25519` 也填上(可从已握手成功的节点 sync_peers 拷)。
+4. **is_master 列**:AutoMigrate 对已存在表加 bool 列偶尔漏(本地/mini 漏、HK 没漏),
+   V2_5_30 显式 AddColumn 兜底。
+5. **角色/master 热切**(v2.5.29):UI「本站角色」开关切 master/follower、peer「设为主站」
+   选 master,立即生效不重启。
+6. **ApplySnapshot 匹配按索引类型分治**:partial-unique(group/key)活匹配;全局 unique
+   (alias/subgroup/setting)Unscoped 匹配;alias 业务键含 group_id 且要 remap。
