@@ -1,8 +1,8 @@
 package db
 
 import (
-	"fmt"
 	"autogateway/internal/types"
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
@@ -64,6 +64,11 @@ func NewDB(configManager types.ConfigManager) (*gorm.DB, error) {
 	DB, err = gorm.Open(dialector, &gorm.Config{
 		Logger:      newLogger,
 		PrepareStmt: true,
+		// 统一所有自动时间戳(CreatedAt/UpdatedAt/DeletedAt)为 UTC。根治多机时区不一致:
+		// 服务器(UTC)与本机(CST)若各写本地时区, mesh sync 的 since 比较(SQLite TEXT
+		// 字典序)会因时区串不同而失效 → 每次全量导出 churn。全链路 UTC 后跨机时间戳
+		// 字典序即与真实时序一致。
+		NowFunc: func() time.Time { return time.Now().UTC() },
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to database: %w", err)

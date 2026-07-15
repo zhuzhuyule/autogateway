@@ -2,7 +2,6 @@ package services
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -64,19 +63,28 @@ func NewSyncPeerManager(db *gorm.DB, syncService *SyncService, settingsManager *
 // 含义: 最落后那个 peer 决定了"需要回放的下限". 这样保证重启后不会丢任何变更.
 // 如果没有任何已同步过的 peer (全是 null), 返回 nil → ExportPayload 会带全量.
 func (m *SyncPeerManager) computeSinceFromPeers() *time.Time {
-	var minTime *time.Time
-	rows, err := m.db.Model(&models.SyncPeer{}).
-		Select("MIN(last_synced_at) as min_t").
-		Where("last_synced_at IS NOT NULL").
-		Rows()
-	if err != nil {
+	// 用 GORM Find 读 peer 记录 — struct 字段(*time.Time)扫描走 GORM 的方言感知时间解析,
+	// 能正确处理 glebarez 存的 "...+08:00" 格式;在 Go 里算 MIN 并归一化 UTC。
+	// 不用原生 SQL MIN(last_synced_at) + sql.NullTime.Scan — 后者解析不了该格式会返回
+	// invalid → nil → ExportPayload 每次全量导出(churn 根因)。
+	var peers []models.SyncPeer
+	if err := m.db.Where("last_synced_at IS NOT NULL").Find(&peers).Error; err != nil {
 		return nil
 	}
-	defer rows.Close()
-	if rows.Next() {
-		var t sql.NullTime
-		if err := rows.Scan(&t); err == nil && t.Valid {
-			minTime = &t.Time
+	// 忽略长期离线(>3天没同步)的 peer: 其陈旧 last_synced_at 会把 since 拖回过去 → 全量
+	// 导出(churn)。离线 peer 重新上线后靠自身 pull(peer.LastPulledAt)补齐, 不依赖 push 覆盖。
+	cutoff := time.Now().UTC().Add(-72 * time.Hour)
+	var minTime *time.Time
+	for i := range peers {
+		if peers[i].LastSyncedAt == nil {
+			continue
+		}
+		u := peers[i].LastSyncedAt.UTC()
+		if u.Before(cutoff) {
+			continue
+		}
+		if minTime == nil || u.Before(*minTime) {
+			minTime = &u
 		}
 	}
 	return minTime
@@ -380,7 +388,7 @@ func (m *SyncPeerManager) pushToPeers(ctx context.Context, settings types.System
 			delete(m.activePeers, peerID)
 		} else {
 			pushedToAny = true
-			now := time.Now()
+			now := time.Now().UTC()
 			m.db.Model(&models.SyncPeer{}).Where("id = ?", peerID).Update("last_synced_at", now)
 			m.writeLog(peerID, "push", "success", "", summary)
 		}
@@ -496,7 +504,7 @@ func (m *SyncPeerManager) pullOnePeer(ctx context.Context, peer models.SyncPeer,
 
 	if response.Ciphertext == "" {
 		// No new data — 算成功, 但不记 log 避免噪音
-		now := time.Now()
+		now := time.Now().UTC()
 		m.db.Model(&models.SyncPeer{}).Where("id = ?", peer.ID).Update("last_pulled_at", now)
 		return nil
 	}
@@ -554,17 +562,17 @@ func (m *SyncPeerManager) PullPeer(ctx context.Context, peerID string) error {
 // Action 只区分 "upsert" 和 "delete" — 本端没法可靠区分 create vs update
 // (不知道对端是否已有这条记录), upsert 表达 "会发送过去" 即可.
 type PreviewItem struct {
-	Type    string    `json:"type"`              // group / subgroup / alias / key / setting
-	Name    string    `json:"name"`              // 展示用 (group.name / alias / key 掩码 / setting_key)
-	Action  string    `json:"action"`            // upsert / delete
-	Updated time.Time `json:"updated_at"`        // 排序展示用
+	Type    string    `json:"type"`       // group / subgroup / alias / key / setting
+	Name    string    `json:"name"`       // 展示用 (group.name / alias / key 掩码 / setting_key)
+	Action  string    `json:"action"`     // upsert / delete
+	Updated time.Time `json:"updated_at"` // 排序展示用
 }
 
 // PreviewPushResponse 是 GET /api/sync/peers/:id/preview-push 的响应.
 type PreviewPushResponse struct {
 	PeerID         string        `json:"peer_id"`
 	PeerName       string        `json:"peer_name"`
-	Since          *time.Time    `json:"since"`            // since 时间 (nil = 全量)
+	Since          *time.Time    `json:"since"` // since 时间 (nil = 全量)
 	SettingsCount  int           `json:"settings_count"`
 	GroupsCount    int           `json:"groups_count"`
 	SubGroupsCount int           `json:"subgroups_count"`
@@ -623,9 +631,9 @@ func (m *SyncPeerManager) PreviewPushPayload(ctx context.Context, peerID string)
 	}
 	for _, sg := range payload.SubGroups {
 		resp.Affected = append(resp.Affected, PreviewItem{
-			Type: "subgroup",
-			Name: fmt.Sprintf("group=%d → sub=%d", sg.GroupID, sg.SubGroupID),
-			Action: actionOf(sg.DeletedAt),
+			Type:    "subgroup",
+			Name:    fmt.Sprintf("group=%d → sub=%d", sg.GroupID, sg.SubGroupID),
+			Action:  actionOf(sg.DeletedAt),
 			Updated: sg.UpdatedAt,
 		})
 	}

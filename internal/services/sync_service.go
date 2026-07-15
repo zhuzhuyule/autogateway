@@ -171,6 +171,8 @@ func syncMergeSave(tx *gorm.DB, value any) error {
 // 启用同步即同步全部内容 (含 api_keys), 不再有细粒度开关. 用户对"是否同步密钥"
 // 的选择已简化为"是否启用同步": 启用 ⇒ 全部, 不启用 ⇒ 什么都不同步.
 func (s *SyncService) ExportPayload(ctx context.Context, since *time.Time) (*SyncPayload, error) {
+	// 注: since 归一化到 UTC 由调用方保证 — pull 侧 peer.LastPulledAt.UTC(), push 侧
+	// computeSinceFromPeers 返回 UTC。这里不再二次 .UTC(), 以免破坏直接传本地时间的调用方。
 	payload := &SyncPayload{
 		SourcePeerID: s.configManager.GetAuthConfig().Key, // 复用本端的 Master 密钥哈希或 Key 作为本端节点 ID
 		Timestamp:    time.Now(),
