@@ -542,6 +542,25 @@ func (h *SyncHandler) UpdateConfig(c *gin.Context) {
 }
 
 // ListPeers returns all configured sync peers
+// GetSyncPolicy 返回当前 sync_policy(master 用于 UI 展示/编辑)。
+func (h *SyncHandler) GetSyncPolicy(c *gin.Context) {
+	c.JSON(http.StatusOK, h.syncService.LoadSyncPolicy(c.Request.Context()))
+}
+
+// UpdateSyncPolicy 保存 sync_policy(仅 master 有意义, follower 端保存无实际作用)。
+func (h *SyncHandler) UpdateSyncPolicy(c *gin.Context) {
+	var p services.SyncPolicy
+	if err := c.ShouldBindJSON(&p); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if err := h.syncService.SaveSyncPolicy(c.Request.Context(), &p); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
 func (h *SyncHandler) ListPeers(c *gin.Context) {
 	var peers []models.SyncPeer
 	if err := h.db.Find(&peers).Error; err != nil {
