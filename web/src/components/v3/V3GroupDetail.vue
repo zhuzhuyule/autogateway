@@ -1113,9 +1113,14 @@ const filteredExposed = computed(() => {
 // 上游"未暴露"候选列表(底部区) — 先排除顶部已暴露的(不重复展示),再应用 search + free/paid/recommended 过滤
 const filteredAvailable = computed(() => {
   let list = groupModels.value;
-  // 已进上方「已暴露」白名单的模型不再出现在底部候选池 — 它们无法再"加入白名单",留着只是重复
-  const exposed = exposedSet.value;
-  list = list.filter(m => !exposed.has(m));
+  // 仅 specified 分离视图(顶部「已暴露」+ 底部「上游全部」)才把已暴露的从候选池排除:
+  // 它们已展示在上方,底部不重复。passthrough / aggregate 是单一「全部模型」列表,
+  // 没有顶部区兜底 — 若在此排除, 已暴露模型会凭空消失。与模板分支
+  // v-if="!isAggregate && routingMode === 'specified'" 保持一致。
+  if (!isAggregate.value && routingMode.value === "specified") {
+    const exposed = exposedSet.value;
+    list = list.filter(m => !exposed.has(m));
+  }
   const q = modelSearch.value.toLowerCase().trim();
   if (q) {
     list = list.filter(m => m.toLowerCase().includes(q));
