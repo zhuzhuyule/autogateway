@@ -157,6 +157,10 @@ func (a *App) Start() error {
 		if err := db.V2_5_21_DedupActiveKeys(a.db); err != nil {
 			return fmt.Errorf("V2_5_21 dedup active api keys failed: %w", err)
 		}
+		// P9: 清理指向已删/不存在分组的孤儿活 key(存量脏数据); 合并侧 D'+加载侧 C 已堵新增.
+		if err := db.V2_5_25_CleanupOrphanKeys(a.db); err != nil {
+			return fmt.Errorf("V2_5_25 cleanup orphan api keys failed: %w", err)
+		}
 		logrus.Info("Database auto-migration completed.")
 
 		// 初始化系统设置

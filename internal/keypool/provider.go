@@ -297,7 +297,12 @@ func (p *KeyProvider) LoadKeysFromDB() error {
 	batchSize := 10000
 	var batchKeys []*models.APIKey
 
-	err := p.db.Model(&models.APIKey{}).FindInBatches(&batchKeys, batchSize, func(tx *gorm.DB, batch int) error {
+	// C: 只加载"属于有效 group(存在且未删)"的 key — 孤儿 key(指向已删/不存在的 group)不进
+	// keypool, 既不会被 SelectKey 选中(匹配不到 provider 必失败), 也不占 active_keys 列表。
+	// 这也自愈"group 尚未同步到本端"的暂时孤儿: group 一到, 下次重载即纳入, 不误删任何数据。
+	validGroups := p.db.Model(&models.Group{}).Select("id").Where("deleted_at IS NULL")
+	err := p.db.Model(&models.APIKey{}).Where("group_id IN (?)", validGroups).
+		FindInBatches(&batchKeys, batchSize, func(tx *gorm.DB, batch int) error {
 		logrus.Debugf("Processing batch %d with %d keys...", batch, len(batchKeys))
 
 		var pipeline store.Pipeliner

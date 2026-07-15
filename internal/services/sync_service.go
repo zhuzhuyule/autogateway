@@ -376,6 +376,22 @@ func (s *SyncService) ProcessPayload(ctx context.Context, payload *SyncPayload) 
 						return fmt.Errorf("failed to update group %s: %w", incoming.Name, err)
 					}
 				}
+				// D': group 经本次合并处于软删状态 → 级联软删其下的活 key。否则 group 删了、
+				// key 还活着 = 孤儿(指向已删 group, 匹配不到 provider), 且会被同步来回复活/传播。
+				// DeleteGroup(本地 API)本就级联删 key, 这里补齐"同步收到 group 删除"的路径。
+				// 幂等: 已无活 key 时 Delete 影响 0 行。
+				if base.DeletedAt.Valid {
+					res := tx.Where("group_id = ? AND deleted_at IS NULL", existing.ID).
+						Delete(&models.APIKey{})
+					if res.Error != nil {
+						return fmt.Errorf("failed to cascade-delete keys of removed group %s: %w", incoming.Name, res.Error)
+					}
+					if res.RowsAffected > 0 {
+						// 让合并收尾对该 group 调 SyncGroupKeysFromDB, 把这些 key 从运行时 keypool
+						// 摘除(LRem + Delete hash), 无需等下次启动 LoadKeysFromDB 兜底重建。
+						affectedKeyGroups[existing.ID] = true
+					}
+				}
 			}
 		}
 
