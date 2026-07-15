@@ -576,6 +576,7 @@ func (h *SyncHandler) UpdateSyncPolicy(c *gin.Context) {
 }
 
 // SetRole 热切本机主从角色(is_slave=true→follower, false→master), 立即生效不重启。
+// 联动: 切成 master 时清掉所有 peer 的主站标记(master 是权威源, 不镜像任何 peer)。
 func (h *SyncHandler) SetRole(c *gin.Context) {
 	var body struct {
 		IsSlave bool `json:"is_slave"`
@@ -592,13 +593,37 @@ func (h *SyncHandler) SetRole(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	if !body.IsSlave {
+		// 切成 master → 清所有 peer 主站标记(本站自己是权威, 不镜像别人)
+		if err := h.db.Model(&models.SyncPeer{}).Where("is_master = ?", true).Update("is_master", false).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+	}
 	c.JSON(http.StatusOK, gin.H{"ok": true, "is_master": !body.IsSlave})
 }
 
-// SetPeerMaster 把指定 peer 设为本机的 master(其余 peer 取消 master, 保证唯一)。
+// SetPeerMaster 切换指定 peer 的主站标记(toggle):
+//   - 该 peer 当前不是主站 → 设为唯一主站(其余取消) + 本站自动切 follower(镜像它=当子站);
+//   - 该 peer 当前已是主站 → 取消(撤销), 本站不再镜像任何 peer, 等重新指定。
 // follower 只镜像 is_master=true 的 peer。
 func (h *SyncHandler) SetPeerMaster(c *gin.Context) {
 	id := c.Param("id")
+	var peer models.SyncPeer
+	if err := h.db.First(&peer, "id = ?", id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "peer not found"})
+		return
+	}
+	if peer.IsMaster {
+		// 撤销主站: 本站不再镜像它
+		if err := h.db.Model(&models.SyncPeer{}).Where("id = ?", id).Update("is_master", false).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"ok": true, "peer_is_master": false})
+		return
+	}
+	// 设为唯一主站
 	if err := h.db.Model(&models.SyncPeer{}).Where("is_master = ?", true).Update("is_master", false).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -607,7 +632,12 @@ func (h *SyncHandler) SetPeerMaster(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"ok": true})
+	// 联动: 指定了要镜像的 master, 本站自然是 follower(子站)
+	if err := h.syncService.SetNodeRole(c.Request.Context(), "true"); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true, "peer_is_master": true})
 }
 
 func (h *SyncHandler) ListPeers(c *gin.Context) {

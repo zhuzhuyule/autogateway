@@ -202,17 +202,17 @@ const columns = computed(() => [
             },
             { icon: () => h(NIcon, null, { default: () => h(ArrowUpCircleOutline) }) }
           ),
-          // 主从: 设为本站 master(follower 只镜像它); 已是 master 显示✓
+          // 主从: 设为/取消本站 master(toggle; follower 只镜像 is_master 的 peer)
           h(
             NButton,
             {
               size: "small",
               tertiary: true,
-              type: row.is_master ? "success" : "primary",
+              type: row.is_master ? "warning" : "primary",
               onClick: () => setAsMaster(row),
-              title: row.is_master ? "本站当前 master(镜像源)" : "设为本站 master",
+              title: row.is_master ? "本站当前镜像源, 点击撤销" : "设为本站 master(镜像源)",
             },
-            { default: () => (row.is_master ? "主站✓" : "设为主站") }
+            { default: () => (row.is_master ? "取消主站" : "设为主站") }
           ),
           h(
             NButton,
@@ -438,16 +438,19 @@ async function setNodeRole(isSlave: boolean) {
   try {
     await syncApi.setRole(isSlave);
     await loadConfig();
+    await loadPeers(); // 切成主站会清掉 peer 的主站标记, reload 让列表按钮同步
     message.success(isSlave ? "已切为子站 follower" : "已切为主站 master");
   } catch (err: any) {
     message.error(err.response?.data?.error || t("common.saveFailed"));
   }
 }
 async function setAsMaster(peer: SyncPeer) {
+  const wasMaster = peer.is_master;
   try {
-    await syncApi.setPeerMaster(peer.id);
-    await loadPeers();
-    message.success("已把 " + peer.name + " 设为本站 master");
+    await syncApi.setPeerMaster(peer.id); // toggle: 已是主站则撤销, 否则设为唯一主站
+    await loadConfig(); // 设为主站会联动把本站切成 follower, 角色开关要同步
+    await loadPeers(); // 主站标记更新
+    message.success(wasMaster ? "已撤销 " + peer.name + " 的主站" : "已把 " + peer.name + " 设为主站");
   } catch (err: any) {
     message.error(err.response?.data?.error || t("common.saveFailed"));
   }
