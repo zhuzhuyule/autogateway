@@ -291,6 +291,24 @@ func (s *SyncService) ExportPayload(ctx context.Context, since *time.Time) (*Syn
 	return payload, nil
 }
 
+// ExportSnapshot 是 master 给 follower 的全量快照: 忽略 since(始终全量) + 附带
+// sync_policy。follower 用 ApplySnapshot 镜像它。数据量小(几十条), 全量无压力, 且是
+// 根治一致性的关键(增量无法表达"本地多出来的该删")。
+func (s *SyncService) ExportSnapshot(ctx context.Context) (*SyncPayload, error) {
+	payload, err := s.ExportPayload(ctx, nil) // 全量
+	if err != nil {
+		return nil, err
+	}
+	payload.Policy = s.LoadSyncPolicy(ctx)
+	return payload, nil
+}
+
+// LoadSyncPolicy 临时返回默认 policy; 阶段B(Task 7)换成从 sync_policy setting 读。
+func (s *SyncService) LoadSyncPolicy(ctx context.Context) *SyncPolicy {
+	_ = ctx
+	return DefaultSyncPolicy()
+}
+
 // ProcessPayload 在单个事务中执行记录级最新写入生效（LWW per Record）智能合并。
 // 在 context 上挂 syncMergeKey 标记,GORM hook 见到后短路,避免合并触发回环 push。
 //

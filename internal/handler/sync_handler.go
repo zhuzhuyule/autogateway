@@ -407,8 +407,9 @@ func (h *SyncHandler) PullEndpoint(c *gin.Context) {
 		}
 	}
 
-	// 启用同步即同步全部 — 不再区分 sync_api_keys
-	payload, err := h.syncService.ExportPayload(c.Request.Context(), since)
+	// 主从: master 给 follower 的是"全量快照 + policy"(忽略 since)。
+	_ = since // 主从模式不用增量 since
+	payload, err := h.syncService.ExportSnapshot(c.Request.Context())
 	if err != nil {
 		logrus.Errorf("failed to export payload: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to export data"})

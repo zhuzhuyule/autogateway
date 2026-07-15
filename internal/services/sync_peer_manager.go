@@ -461,6 +461,11 @@ func (m *SyncPeerManager) doPull(ctx context.Context) {
 	if !settings.SyncEnabled {
 		return
 	}
+	// 主从: master 是权威源, 不自动 pull follower(避免把 follower 本地态吸回来)。
+	// follower→master 只走用户手动迁移 PushPeer。
+	if m.syncService.configManager.IsMaster() {
+		return
+	}
 
 	var peers []models.SyncPeer
 	if err := m.db.Find(&peers).Error; err != nil {
@@ -553,10 +558,18 @@ func (m *SyncPeerManager) pullOnePeer(ctx context.Context, peer models.SyncPeer,
 		return err
 	}
 
-	if err := m.syncService.ProcessPayload(ctx, payload); err != nil {
-		logrus.Errorf("failed to process pulled payload from peer %s: %v", peer.Name, err)
-		m.writeLog(peer.ID, "pull", "error", fmt.Sprintf("merge: %v", err), payloadSummary(payload))
-		return err
+	// 主从: follower(非 master) 用镜像替换, 恒等于 master; master 不 pull follower 的
+	// 自动同步(doPull 已对 master 短路), 这里 ProcessPayload 分支仅作过渡兜底。
+	var mergeErr error
+	if !m.syncService.configManager.IsMaster() {
+		mergeErr = m.syncService.ApplySnapshot(ctx, payload)
+	} else {
+		mergeErr = m.syncService.ProcessPayload(ctx, payload)
+	}
+	if mergeErr != nil {
+		logrus.Errorf("failed to process pulled payload from peer %s: %v", peer.Name, mergeErr)
+		m.writeLog(peer.ID, "pull", "error", fmt.Sprintf("merge: %v", mergeErr), payloadSummary(payload))
+		return mergeErr
 	}
 
 	now := time.Now().UTC()
