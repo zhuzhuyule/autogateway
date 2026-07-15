@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -767,6 +769,22 @@ func (h *SyncHandler) TriggerJoinParent(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+// GenerateInvite 父侧: 登录用户在自己 UI 点"生成邀请链接", 签发一次性 token(24h 有效)
+// 并拼出自包含本机地址的邀请链接, 供分享给子节点扫码/粘贴加入。
+//
+// 鉴权: 本机管理操作, 挂在 protected 路由组(跟 /sync/join-parent 一样), 见 router.go
+// 注册位置 —— 跟公开无凭证的 /sync/join(父侧收子的加入请求)不是同一类端点。
+func (h *SyncHandler) GenerateInvite(c *gin.Context) {
+	code, err := h.syncService.GenerateInviteToken(24 * time.Hour)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	appURL := strings.TrimRight(h.settingsManager.GetAppUrl(), "/")
+	link := fmt.Sprintf("%s/#/join?token=%s&inviter=%s", appURL, code, url.QueryEscape(appURL))
+	c.JSON(http.StatusOK, gin.H{"code": code, "link": link, "inviter_url": appURL})
 }
 
 func (h *SyncHandler) ListPeers(c *gin.Context) {

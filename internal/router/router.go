@@ -278,6 +278,9 @@ func registerProtectedAPIRoutes(
 	// 不是同一类端点, 不能挂在 registerSyncRoutes 的公开 syncGroup 上, 必须放这里
 	// (protectedAPI, 跟 /sync/peers 等本机管理端点同组)。
 	api.POST("/sync/join-parent", syncHandler.TriggerJoinParent)
+	// /sync/invite: 本机管理操作(登录用户签发一次性邀请链接, 供子节点加入本机) —— 跟
+	// /sync/join-parent 同类, 需要鉴权, 放在这里(不是 registerSyncRoutes 的公开 syncGroup)。
+	api.POST("/sync/invite", syncHandler.GenerateInvite)
 	syncPeers := api.Group("/sync/peers")
 	{
 		syncPeers.GET("", syncHandler.ListPeers)
