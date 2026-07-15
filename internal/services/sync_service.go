@@ -301,11 +301,28 @@ func (s *SyncService) ExportPayload(ctx context.Context, since *time.Time) (*Syn
 // sync_policy。follower 用 ApplySnapshot 镜像它。数据量小(几十条), 全量无压力, 且是
 // 根治一致性的关键(增量无法表达"本地多出来的该删")。
 func (s *SyncService) ExportSnapshot(ctx context.Context) (*SyncPayload, error) {
-	payload, err := s.ExportPayload(ctx, nil) // 全量
-	if err != nil {
-		return nil, err
+	payload := &SyncPayload{
+		SourcePeerID: s.configManager.GetAuthConfig().Key,
+		Policy:       s.LoadSyncPolicy(ctx),
 	}
-	payload.Policy = s.LoadSyncPolicy(ctx)
+	// 只导出"活"记录 — 镜像语义: follower 对齐 master 的活状态, 删除由"master 无则删"表达,
+	// 不下发墓碑(gorm 默认 Find 过滤 deleted_at IS NULL)。这也让自镜像幂等(见 smoke test)。
+	db := s.db.WithContext(ctx)
+	if err := db.Find(&payload.Settings).Error; err != nil {
+		return nil, fmt.Errorf("snapshot settings: %w", err)
+	}
+	if err := db.Find(&payload.Groups).Error; err != nil {
+		return nil, fmt.Errorf("snapshot groups: %w", err)
+	}
+	if err := db.Find(&payload.SubGroups).Error; err != nil {
+		return nil, fmt.Errorf("snapshot subgroups: %w", err)
+	}
+	if err := db.Find(&payload.APIKeys).Error; err != nil {
+		return nil, fmt.Errorf("snapshot api keys: %w", err)
+	}
+	if err := db.Find(&payload.ModelAliases).Error; err != nil {
+		return nil, fmt.Errorf("snapshot aliases: %w", err)
+	}
 	return payload, nil
 }
 

@@ -177,7 +177,7 @@ func (s *SyncService) ApplySnapshot(ctx context.Context, snap *SyncPayload) erro
 		}
 
 		// ---- 4. ModelAliases / SubGroups ----
-		if err := s.applySnapshotAliases(tx, snap, policy); err != nil {
+		if err := s.applySnapshotAliases(tx, snap, policy, groupIDByName); err != nil {
 			return err
 		}
 		if err := s.applySnapshotSubGroups(tx, snap, policy, groupIDByName); err != nil {
@@ -202,17 +202,41 @@ func (s *SyncService) ApplySnapshot(ctx context.Context, snap *SyncPayload) erro
 
 // applySnapshotAliases 镜像 model_aliases: 按 (alias, real_model) 业务键 upsert +
 // master 无则软删。alias 不引用 group_id, 无需 remap。
-func (s *SyncService) applySnapshotAliases(tx *gorm.DB, snap *SyncPayload, policy *SyncPolicy) error {
+func (s *SyncService) applySnapshotAliases(tx *gorm.DB, snap *SyncPayload, policy *SyncPolicy, groupIDByName map[string]uint) error {
 	if policy.IsCategoryExcluded("alias") {
 		return nil
 	}
-	type ak struct{ Alias, Real string }
+	// alias 业务唯一键是 (alias, group_id, real_model); group_id 需从 master remap 到本端
+	// (0 = 全局 reserved alias, 两端一致不 remap)。缺 group_id 匹配会误判 RecordNotFound →
+	// Create 撞 unique → 整个镜像事务回滚(2026-07-15 部署第二次翻车)。
+	nameByMasterID := map[uint]string{}
+	for _, g := range snap.Groups {
+		nameByMasterID[g.ID] = g.Name
+	}
+	remapGID := func(gid uint) (uint, bool) {
+		if gid == 0 {
+			return 0, true
+		}
+		lg, ok := groupIDByName[nameByMasterID[gid]]
+		return lg, ok
+	}
+	type ak struct {
+		Alias, Real string
+		GID         uint
+	}
 	master := map[ak]bool{}
 	for i := range snap.ModelAliases {
 		in := snap.ModelAliases[i]
-		master[ak{in.Alias, in.RealModel}] = true
+		lgid, ok := remapGID(in.GroupID)
+		if !ok {
+			continue // 对应 group 不在同步范围
+		}
+		in.GroupID = lgid
+		master[ak{in.Alias, in.RealModel, lgid}] = true
+		// idx_alias_group_model 是全局 UNIQUE(含墓碑) → Unscoped 匹配唯一记录(复用/复活墓碑),
+		// 活匹配找不到墓碑会 Create 撞 unique。完整键 (alias, group_id, real_model) 缺一不可。
 		var existing models.ModelAlias
-		err := tx.Where("alias = ? AND real_model = ?", in.Alias, in.RealModel).First(&existing).Error
+		err := tx.Unscoped().Where("alias = ? AND real_model = ? AND group_id = ?", in.Alias, in.RealModel, lgid).First(&existing).Error
 		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 			return err
 		}
@@ -233,7 +257,7 @@ func (s *SyncService) applySnapshotAliases(tx *gorm.DB, snap *SyncPayload, polic
 		return err
 	}
 	for _, la := range local {
-		if master[ak{la.Alias, la.RealModel}] {
+		if master[ak{la.Alias, la.RealModel, la.GroupID}] {
 			continue
 		}
 		if err := tx.Delete(&models.ModelAlias{}, la.ID).Error; err != nil {
@@ -264,8 +288,9 @@ func (s *SyncService) applySnapshotSubGroups(tx *gorm.DB, snap *SyncPayload, pol
 		}
 		in.GroupID, in.SubGroupID = gID, sID
 		master[pair{gID, sID}] = true
+		// idx_group_sub 是全局 UNIQUE(含墓碑) → Unscoped 匹配(复用/复活墓碑)。
 		var existing models.GroupSubGroup
-		err := tx.Where("group_id = ? AND sub_group_id = ?", gID, sID).First(&existing).Error
+		err := tx.Unscoped().Where("group_id = ? AND sub_group_id = ?", gID, sID).First(&existing).Error
 		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 			return err
 		}
