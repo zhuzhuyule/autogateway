@@ -3,6 +3,9 @@ services:
     # 默认拉本项目预 build 的镜像 (multi-arch: linux/amd64 + linux/arm64).
     # docker compose pull && docker compose up -d 即可滚动升级.
     image: ghcr.io/zhuzhuyule/autogateway:latest
+    # 每次 `docker compose up -d` 自动拉取最新 latest 镜像 — 无需先手动 pull、无需改 tag。
+    # 这是让所有机器"始终跑最新版"的关键:配合 :latest, 一条 up -d 就是滚动升级。
+    pull_policy: always
     # 也可改用上游 GPT-Load 官方镜像(不含本项目的免费 Provider/系统聚合等增强):
     # image: ghcr.io/tbphp/gpt-load:latest
     # 想从源码本地 build 时, 把上面 image 行注释掉, 启用以下 build 块:
