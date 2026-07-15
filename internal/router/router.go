@@ -273,6 +273,11 @@ func registerProtectedAPIRoutes(
 	api.GET("/sync/policy", syncHandler.GetSyncPolicy)
 	api.PUT("/sync/policy", syncHandler.UpdateSyncPolicy)
 	api.PUT("/sync/role", syncHandler.SetRole)
+	// /sync/join-parent: 本机管理操作(登录用户在自己 UI 点"加入"触发本机后端去调用
+	// 别的节点的 /api/sync/join), 需要鉴权 —— 跟公开的 /sync/join(父侧收无凭证的子)
+	// 不是同一类端点, 不能挂在 registerSyncRoutes 的公开 syncGroup 上, 必须放这里
+	// (protectedAPI, 跟 /sync/peers 等本机管理端点同组)。
+	api.POST("/sync/join-parent", syncHandler.TriggerJoinParent)
 	syncPeers := api.Group("/sync/peers")
 	{
 		syncPeers.GET("", syncHandler.ListPeers)

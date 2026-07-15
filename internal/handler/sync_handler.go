@@ -750,6 +750,25 @@ func (h *SyncHandler) JoinEndpoint(c *gin.Context) {
 	})
 }
 
+// TriggerJoinParent 子侧: 本机(登录用户在自己 UI 点"加入")触发后端去加入 inviter_url
+// 指向的父节点。这是本机管理操作(需要鉴权), 跟无凭证的 JoinEndpoint(父侧收加入)
+// 不是一回事 —— 挂在 protected 路由组, 见 router.go 注册位置。
+func (h *SyncHandler) TriggerJoinParent(c *gin.Context) {
+	var body struct {
+		InviterURL string `json:"inviter_url"`
+		Token      string `json:"token"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if err := h.syncService.JoinParent(c.Request.Context(), body.InviterURL, body.Token); err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
 func (h *SyncHandler) ListPeers(c *gin.Context) {
 	var peers []models.SyncPeer
 	if err := h.db.Find(&peers).Error; err != nil {
