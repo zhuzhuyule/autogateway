@@ -337,12 +337,17 @@ func (m *SyncPeerManager) pushLoop(ctx context.Context) {
 			if !settings.SyncEnabled {
 				continue
 			}
-			m.pushToPeers(ctx, settings)
+			m.pushToPeers(ctx, settings, false)
 		}
 	}
 }
 
-func (m *SyncPeerManager) pushToPeers(ctx context.Context, settings types.SystemSettings) {
+func (m *SyncPeerManager) pushToPeers(ctx context.Context, settings types.SystemSettings, forced bool) {
+	// 主从: follower 本地改动默认不自动外传(避免污染 master/其它 follower)。
+	// follower→master 只走用户手动迁移 PushPeer(forced=true); master 正常广播。
+	if !m.syncService.configManager.IsMaster() && !forced {
+		return
+	}
 	// since = 所有 peer 中最旧的 last_synced_at, 持久化在 SyncPeer 表里, 重启不丢.
 	since := m.computeSinceFromPeers()
 	payload, err := m.syncService.ExportPayload(ctx, since)
@@ -713,8 +718,9 @@ func (m *SyncPeerManager) PushPeer(ctx context.Context, peerID string) error {
 		return fmt.Errorf("peer not connected via WS (push needs an active WS connection)")
 	}
 	// 复用 pushToPeers — 它会推给所有 connected peer. 目标 peer 包含在内.
-	// 不为单个 peer 重写另一份加密/广播逻辑, YAGNI.
-	m.pushToPeers(ctx, settings)
+	// 不为单个 peer 重写另一份加密/广播逻辑, YAGNI. forced=true: 手动迁移绕过
+	// follower 的自动 push 短路, 让 follower 也能主动把本地变更推给 master。
+	m.pushToPeers(ctx, settings, true)
 	return nil
 }
 
