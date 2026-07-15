@@ -130,6 +130,10 @@ func registerSyncRoutes(api *gin.RouterGroup, syncHandler *handler.SyncHandler) 
 		syncGroup.GET("/ws", syncHandler.WsEndpoint)
 		syncGroup.GET("/pull", syncHandler.PullEndpoint)
 		syncGroup.POST("/push", syncHandler.PushEndpoint)
+		// /sync/join: 被邀方(子)无任何凭证时来加入, token 本身就是唯一凭证(在
+		// JoinEndpoint 内部 ConsumeInviteToken 校验), 不能挂 X-Sync-Key 中间件 —— 跟
+		// pull/push 同组注册在 protectedAPI(全局鉴权)之前, 保持公开无鉴权。
+		syncGroup.POST("/join", syncHandler.JoinEndpoint)
 	}
 }
 

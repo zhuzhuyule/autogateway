@@ -48,6 +48,13 @@ func (s *SyncService) PurgeExpiredInvites() int64 {
 	return res.RowsAffected
 }
 
+// GenerateSyncKey 导出包装: handler 包(sync_handler.go 的 JoinEndpoint)拿不到私有的
+// randSyncKey, 但落子 peer 前需要分配一把 per-peer sync_key —— 让这一步留在 service 层,
+// handler 只管调用, 不重复实现随机数生成逻辑。
+func (s *SyncService) GenerateSyncKey() (string, error) {
+	return randSyncKey()
+}
+
 // randSyncKey 生成一把 per-peer sync_key(join 时父分配给子)。
 func randSyncKey() (string, error) {
 	buf := make([]byte, 32)

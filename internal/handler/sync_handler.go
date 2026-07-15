@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"sync"
@@ -15,6 +16,7 @@ import (
 	"autogateway/internal/version"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"github.com/sirupsen/logrus"
 	"gorm.io/gorm"
@@ -638,6 +640,114 @@ func (h *SyncHandler) SetPeerMaster(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"ok": true, "peer_is_master": true})
+}
+
+// joinRequest 是子 POST /api/sync/join 的请求体。
+// 注意: 不收 my_fingerprint —— 指纹一律由服务端从 my_public_key 推导(见 JoinEndpoint),
+// 防止 client 伪造指纹去覆盖(幂等 Updates)别人已有的 peer 行。
+type joinRequest struct {
+	Token       string `json:"token"`
+	MyURL       string `json:"my_url"`
+	MyPublicKey string `json:"my_public_key"`
+	MyName      string `json:"my_name"`
+}
+
+// JoinEndpoint 父侧: 被邀方带 token 来加入。校验并消费 token(一次性) → 分配一把
+// per-peer sync_key → 把子落库为普通 peer(is_master=false, 子不是父的镜像源) →
+// 用子公钥加密该 key → 返回加密的 key + 父自己的连接信息(子据此把父设为镜像源, Task 4)。
+//
+// 指纹信任: PinnedFingerprint 一律由服务端从 my_public_key 推导(FingerprintOf),
+// 绝不信任 client 自报的指纹 —— 否则 client 可伪造一个别人的指纹, 借幂等 Updates 覆盖
+// 别人的 peer 行。server-derived 指纹也和后续 WS 握手时 FingerprintOf(peer.PublicKeyX25519)
+// 的校验口径一致。
+//
+// 鉴权: 公开路由, 无 X-Sync-Key 中间件 —— 被邀方此时还没有任何凭证, token 本身就是
+// 唯一凭证, 在 ConsumeInviteToken 里一次性校验消费(见 router.go 注册位置)。
+func (h *SyncHandler) JoinEndpoint(c *gin.Context) {
+	var req joinRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if req.Token == "" || req.MyURL == "" || req.MyPublicKey == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "missing token/my_url/my_public_key"})
+		return
+	}
+	// 先校验公钥并解析(顺带拿到 childPub 加密用) —— 放在消费 token 之前, 公钥非法就直接
+	// 400 而不烧掉一次性 token。
+	childPub, err := services.DecodePublicKeyBase64(req.MyPublicKey)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "bad public key"})
+		return
+	}
+	// 服务端从公钥推导指纹(唯一可信来源)。公钥已解析成功, 这里必非空。
+	fp := services.FingerprintOf(req.MyPublicKey)
+
+	// 校验并消费 token(一次性, DB 原子条件 UPDATE, 见 ConsumeInviteToken 注释)。
+	// used_by 审计字段也记 server-derived 指纹, 不记 client 自报值。
+	if err := h.syncService.ConsumeInviteToken(req.Token, fp); err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
+		return
+	}
+	// 分配 per-peer key(生成逻辑留在 service 层, 见 GenerateSyncKey 注释)
+	key, err := h.syncService.GenerateSyncKey()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	// 用子公钥加密 key —— 提前做, 避免落库后再失败导致 peer 悬空
+	encKey, err := h.keypair.EncryptFor([]byte(key), childPub)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	// 落子 peer, 幂等: 按 pinned_fingerprint 显式两步(先 First 判存在, 无则 Create, 有则 Updates)。
+	// 子重复 join(比如 token 过期重发)应该更新同一行, 而不是每次插一条新 peer。
+	// 去重键用 server-derived fp, client 无法伪造去命中别人的行。
+	var existing models.SyncPeer
+	err = h.db.Where("pinned_fingerprint = ?", fp).First(&existing).Error
+	switch {
+	case errors.Is(err, gorm.ErrRecordNotFound):
+		peer := models.SyncPeer{
+			ID:                uuid.NewString(),
+			Name:              req.MyName,
+			URL:               req.MyURL,
+			SyncKey:           key,
+			Role:              "client",
+			Status:            "disconnected",
+			IsMaster:          false, // 子不是父的镜像源, 父不镜像子
+			PublicKeyX25519:   req.MyPublicKey,
+			PinnedFingerprint: fp,
+		}
+		if err := h.db.Create(&peer).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+	case err != nil:
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	default:
+		if err := h.db.Model(&existing).Updates(map[string]any{
+			"name":              req.MyName,
+			"url":               req.MyURL,
+			"sync_key":          key,
+			"public_key_x25519": req.MyPublicKey,
+		}).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"sync_key_enc": encKey,
+		"parent": gin.H{
+			"url":         h.settingsManager.GetAppUrl(),
+			"public_key":  h.keypair.PublicKeyBase64(),
+			"fingerprint": h.keypair.Fingerprint(),
+			"name":        h.settingsManager.GetAppUrl(), // 展示名, 无独立字段就用 app_url
+		},
+	})
 }
 
 func (h *SyncHandler) ListPeers(c *gin.Context) {
