@@ -41,6 +41,34 @@ func preserveLocalProxyURL(incoming *models.Group, existing *models.Group) {
 	}
 }
 
+// preserveExcludedGroupFields 按 policy 让 group.Config 里被排除的字段保留本机值 —
+// preserveLocalProxyURL 的通用化: 对 policy.ExcludedFields["group"] 里的每个字段, 用
+// existing(本机现有)的值覆盖 incoming(master)的值; 本机没有该值则从 incoming 删掉,
+// 不继承 master 的本机专属配置。existing 为 nil(本地全新记录)时全部删掉。
+func preserveExcludedGroupFields(incoming *models.Group, existing *models.Group, policy *SyncPolicy) {
+	if policy == nil {
+		return
+	}
+	for _, field := range policy.ExcludedFields["group"] {
+		var local any
+		hasLocal := false
+		if existing != nil && existing.Config != nil {
+			local, hasLocal = existing.Config[field]
+		}
+		if incoming.Config == nil {
+			if !hasLocal {
+				continue
+			}
+			incoming.Config = datatypes.JSONMap{}
+		}
+		if hasLocal {
+			incoming.Config[field] = local
+		} else {
+			delete(incoming.Config, field)
+		}
+	}
+}
+
 // SyncPayload 定义了多端同步的明文数据体，直接使用数据库实体以完整保留主键 ID 与所有时间戳（含 DeletedAt 软删除墓碑）
 type SyncPayload struct {
 	SourcePeerID string                 `json:"source_peer_id"`
@@ -50,6 +78,8 @@ type SyncPayload struct {
 	SubGroups    []models.GroupSubGroup `json:"sub_groups,omitempty"`
 	APIKeys      []models.APIKey        `json:"api_keys,omitempty"`
 	ModelAliases []models.ModelAlias    `json:"model_aliases,omitempty"`
+	// Policy 由 master 在导出快照时带上, follower 据此裁剪镜像(nil = 全同步)。
+	Policy *SyncPolicy `json:"policy,omitempty"`
 }
 
 // WSMessage 是 WebSocket 上传递的统一消息封装. 通过 type 字段区分:
