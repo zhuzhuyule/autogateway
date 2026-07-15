@@ -1,5 +1,15 @@
 package services
 
+import (
+	"context"
+	"encoding/json"
+
+	"autogateway/internal/models"
+)
+
+// syncPolicySettingKey 是 sync_policy 在 system_settings 表里的 setting_key。
+const syncPolicySettingKey = "sync_policy"
+
 // SyncPolicy 是 master 集中定义的"哪些不同步"规则。默认(空)= 全同步; master 新增任何
 // 字段, 因不在清单里, 默认自动纳入同步。随快照下发给 follower, 由 follower 在
 // ApplySnapshot 时执行: 排除的类别整体跳过, 排除的字段保留本地值。
@@ -49,4 +59,34 @@ func (p *SyncPolicy) IsFieldExcluded(category, field string) bool {
 		}
 	}
 	return false
+}
+
+// LoadSyncPolicy 从 sync_policy setting 读; 缺失/解析失败 → DefaultSyncPolicy。
+func (s *SyncService) LoadSyncPolicy(ctx context.Context) *SyncPolicy {
+	var row models.SystemSetting
+	err := s.db.WithContext(ctx).Where("setting_key = ?", syncPolicySettingKey).First(&row).Error
+	if err != nil {
+		return DefaultSyncPolicy()
+	}
+	var p SyncPolicy
+	if json.Unmarshal([]byte(row.SettingValue), &p) != nil {
+		return DefaultSyncPolicy()
+	}
+	return &p
+}
+
+// SaveSyncPolicy 落库到 sync_policy setting(upsert by setting_key)。
+func (s *SyncService) SaveSyncPolicy(ctx context.Context, p *SyncPolicy) error {
+	b, err := json.Marshal(p)
+	if err != nil {
+		return err
+	}
+	var row models.SystemSetting
+	err = s.db.WithContext(ctx).Where("setting_key = ?", syncPolicySettingKey).First(&row).Error
+	if err != nil {
+		return s.db.WithContext(ctx).Create(&models.SystemSetting{
+			SettingKey: syncPolicySettingKey, SettingValue: string(b),
+		}).Error
+	}
+	return s.db.WithContext(ctx).Model(&row).Update("setting_value", string(b)).Error
 }

@@ -303,12 +303,6 @@ func (s *SyncService) ExportSnapshot(ctx context.Context) (*SyncPayload, error) 
 	return payload, nil
 }
 
-// LoadSyncPolicy 临时返回默认 policy; 阶段B(Task 7)换成从 sync_policy setting 读。
-func (s *SyncService) LoadSyncPolicy(ctx context.Context) *SyncPolicy {
-	_ = ctx
-	return DefaultSyncPolicy()
-}
-
 // ProcessPayload 在单个事务中执行记录级最新写入生效（LWW per Record）智能合并。
 // 在 context 上挂 syncMergeKey 标记,GORM hook 见到后短路,避免合并触发回环 push。
 //

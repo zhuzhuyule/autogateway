@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"testing"
 
 	"autogateway/internal/models"
@@ -67,5 +68,26 @@ func TestPreserveExcludedGroupFields_LocalMissing(t *testing.T) {
 	// 本地没值 → 删掉 incoming 的, 不从 master 继承本机字段
 	if _, ok := incoming.Config["proxy_url"]; ok {
 		t.Fatal("本地无 proxy_url 时应删除 incoming 的, 不继承 master")
+	}
+}
+
+func TestSaveLoadSyncPolicy_RoundTrip(t *testing.T) {
+	s, _ := newTestSyncService(t)
+	ctx := context.Background()
+	p := &SyncPolicy{ExcludedCategories: []string{"alias"}, ExcludedFields: map[string][]string{"group": {"proxy_url"}}}
+	if err := s.SaveSyncPolicy(ctx, p); err != nil {
+		t.Fatal(err)
+	}
+	got := s.LoadSyncPolicy(ctx)
+	if !got.IsCategoryExcluded("alias") || !got.IsFieldExcluded("group", "proxy_url") {
+		t.Fatal("round-trip 丢失 policy")
+	}
+}
+
+func TestLoadSyncPolicy_DefaultWhenAbsent(t *testing.T) {
+	s, _ := newTestSyncService(t)
+	got := s.LoadSyncPolicy(context.Background())
+	if !got.IsFieldExcluded("group", "proxy_url") {
+		t.Fatal("无存储时应回退默认 policy")
 	}
 }
