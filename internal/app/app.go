@@ -229,6 +229,12 @@ func (a *App) Start() error {
 		a.syncPeerManager.Start(context.Background())
 	} else {
 		logrus.Info("Starting as Slave Node.")
+		// 主从拓扑: Slave 也 doPull 查 sync_peers.is_master 来选 master, 必须保证该列存在。
+		// Slave 分支不跑 AutoMigrate/其它 migration(schema 由 Master 负责), 但 is_master 是
+		// 本机拓扑字段(不同步), 必须每个 Slave 自己补。幂等(列已存在则跳过)。
+		if err := db.V2_5_30_SyncPeerIsMaster(a.db); err != nil {
+			return fmt.Errorf("V2_5_30 (slave) add sync_peers.is_master failed: %w", err)
+		}
 		a.settingsManager.Initialize(a.storage, a.groupManager, a.configManager.IsMaster())
 		a.syncPeerManager.SetBroadcaster(a.syncHandler)
 		a.syncPeerManager.Start(context.Background())
