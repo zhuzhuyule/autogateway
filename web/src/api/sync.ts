@@ -80,6 +80,14 @@ export const upgradeApi = {
 export interface SyncConfig {
   sync_enabled: boolean;
   sync_key: string;
+  /** 只读: 本节点是否 master(由 IS_MASTER 环境变量决定)。主从 UI 据此区分展示。 */
+  is_master?: boolean;
+}
+
+/** master 集中定义的同步排除清单。默认全同步; 列入的类别/字段不下发给 follower。 */
+export interface SyncPolicy {
+  excludedCategories: string[];
+  excludedFields: Record<string, string[]>;
 }
 
 // P11.36: push 二次确认 preview 响应
@@ -110,6 +118,14 @@ export const syncApi = {
   },
   async updateConfig(data: SyncConfig): Promise<void> {
     await http.put("/sync/config", data);
+  },
+  /** 主从: 读取/保存 master 的同步排除清单 sync_policy */
+  async getPolicy(): Promise<SyncPolicy> {
+    const response = await http.get("/sync/policy");
+    return response.data;
+  },
+  async updatePolicy(data: SyncPolicy): Promise<void> {
+    await http.put("/sync/policy", data);
   },
   async getPeers(): Promise<SyncPeer[]> {
     const response = await http.get("/sync/peers");

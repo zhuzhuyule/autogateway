@@ -512,8 +512,11 @@ func (h *SyncHandler) PushEndpoint(c *gin.Context) {
 // 前端 PeerSyncPanel 用此端点统一管理同步开关与密钥, 不再走通用的 /api/settings 路径,
 // 也不再出现在 Settings 页 (字段在 SystemSettings 上加了 hidden:"true").
 type syncConfigBody struct {
-	SyncEnabled bool   `json:"sync_enabled"`
+	SyncEnabled bool `json:"sync_enabled"`
 	SyncKey     string `json:"sync_key"`
+	// IsMaster 只读(由 IS_MASTER 环境变量决定, 不经 API 改), 供前端区分展示
+	// master 排除清单编辑 / follower 迁移提示。PUT 时忽略。
+	IsMaster bool `json:"is_master"`
 }
 
 // GetConfig 返回当前节点的同步开关 + Sync Secret.
@@ -523,6 +526,7 @@ func (h *SyncHandler) GetConfig(c *gin.Context) {
 	response.Success(c, syncConfigBody{
 		SyncEnabled: s.SyncEnabled,
 		SyncKey:     s.SyncKey,
+		IsMaster:    h.syncService.IsMaster(),
 	})
 }
 

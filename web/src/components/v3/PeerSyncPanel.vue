@@ -5,6 +5,7 @@ import {
   type SyncPeer,
   type SyncLog,
   type SyncConfig,
+  type SyncPolicy,
   type VersionInfo,
   type UpgradeStatus,
   type PreviewPushResponse,
@@ -55,7 +56,7 @@ const message = useMessage();
 const dialog = useDialog();
 
 // 全局同步配置 (顶部卡片管理)
-const config = ref<SyncConfig>({ sync_enabled: false, sync_key: "" });
+const config = ref<SyncConfig>({ sync_enabled: false, sync_key: "", is_master: false });
 const configSaving = ref(false);
 
 const peers = ref<SyncPeer[]>([]);
@@ -353,6 +354,7 @@ async function loadConfig() {
       config.value = {
         sync_enabled: !!c.sync_enabled,
         sync_key: c.sync_key ?? "",
+        is_master: !!c.is_master,
       };
     }
   } catch {
@@ -375,6 +377,48 @@ async function saveConfig() {
     message.error(err.response?.data?.error || t("common.saveFailed"));
   } finally {
     configSaving.value = false;
+  }
+}
+
+// 主从: 同步排除清单(仅 master 编辑; 勾选某类别 = 该类别不下发给 follower)
+const policy = ref<SyncPolicy>({ excludedCategories: [], excludedFields: {} });
+const policySaving = ref(false);
+const POLICY_CATEGORIES = ["group", "key", "alias", "subgroup", "setting"] as const;
+const CATEGORY_LABELS: Record<string, string> = {
+  group: "Provider(分组)",
+  key: "密钥",
+  alias: "模型别名",
+  subgroup: "聚合关系",
+  setting: "系统设置",
+};
+async function loadPolicy() {
+  try {
+    const p = await syncApi.getPolicy();
+    if (p && typeof p === "object") {
+      policy.value = {
+        excludedCategories: p.excludedCategories || [],
+        excludedFields: p.excludedFields || {},
+      };
+    }
+  } catch {
+    // 拉失败保留默认(全同步)
+  }
+}
+function toggleCategory(cat: string, excluded: boolean) {
+  const set = new Set(policy.value.excludedCategories);
+  if (excluded) set.add(cat);
+  else set.delete(cat);
+  policy.value.excludedCategories = [...set];
+}
+async function savePolicy() {
+  policySaving.value = true;
+  try {
+    await syncApi.updatePolicy(policy.value);
+    message.success("排除清单已保存");
+  } catch (err: any) {
+    message.error(err.response?.data?.error || t("common.saveFailed"));
+  } finally {
+    policySaving.value = false;
   }
 }
 
@@ -430,6 +474,7 @@ async function openLogs(peer: SyncPeer) {
 onMounted(() => {
   loadVersion();
   loadConfig();
+  loadPolicy();
   loadPeers();
   loadUpgradeStatus();
   loadGithubLatest();
@@ -612,6 +657,49 @@ async function handleSave() {
         · schema <code style="font-size:11px">{{ myVersion.schema_hash }}</code>
       </span>
     </template>
+
+    <!-- 主从角色: follower 提示 / master 排除清单 -->
+    <n-alert
+      v-if="config.is_master === false"
+      type="info"
+      style="margin-bottom: 16px"
+      title="本节点为 follower(子节点)"
+    >
+      配置以 master(主站)为准, 每分钟自动镜像主站。本地改动不会自动上传, 需在下方
+      peer 列表用「推送」手动迁移到主站, 否则会被下一轮镜像覆盖。
+    </n-alert>
+
+    <div v-if="config.is_master" class="v3-sync-config" style="margin-bottom: 16px">
+      <div class="v3-sync-config__title" style="margin-bottom: 8px">
+        同步排除清单 · 本主站为权威源
+      </div>
+      <div class="v3-sync-config__hint" style="margin-bottom: 12px">
+        默认全同步; 勾选表示该类别「不」下发给 follower。本机专属字段(proxy_url
+        等)已自动保留, 无需在此设置。
+      </div>
+      <n-space vertical size="small">
+        <n-space>
+          <n-checkbox
+            v-for="cat in POLICY_CATEGORIES"
+            :key="cat"
+            :checked="policy.excludedCategories.includes(cat)"
+            @update:checked="(v: boolean) => toggleCategory(cat, v)"
+          >
+            不同步 {{ CATEGORY_LABELS[cat] }}
+          </n-checkbox>
+        </n-space>
+        <div>
+          <n-button
+            size="small"
+            type="primary"
+            :loading="policySaving"
+            @click="savePolicy"
+          >
+            保存排除清单
+          </n-button>
+        </div>
+      </n-space>
+    </div>
 
     <!-- 本机身份卡片 — 对端添加本节点为 peer 时需要的全部信息一处展示 -->
     <div v-if="myVersion" class="v3-sync-identity">
