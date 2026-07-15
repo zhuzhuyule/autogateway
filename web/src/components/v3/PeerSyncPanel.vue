@@ -492,6 +492,62 @@ async function copyText(text: string, _what: string) {
   }
 }
 
+// v2.7.0: 邀请子节点加入 — 生成一次性邀请链接, 对方粘贴到"用链接加入"或直接打开链接即可配对
+const inviteModalShow = ref(false);
+const inviteLink = ref("");
+const inviteGenerating = ref(false);
+
+async function handleGenerateInvite() {
+  inviteGenerating.value = true;
+  try {
+    const res = await syncApi.generateInvite();
+    inviteLink.value = res.link;
+    inviteModalShow.value = true;
+  } catch (err: any) {
+    message.error(err.response?.data?.error || "生成邀请链接失败");
+  } finally {
+    inviteGenerating.value = false;
+  }
+}
+
+// v2.7.0: 用链接加入 — 本机作为子节点, 粘贴对方生成的邀请链接直接加入
+const joinLinkInput = ref("");
+const joining = ref(false);
+
+/** 从邀请链接里解出 inviter(父站 URL) + token(一次性令牌). 格式不对返回 null. */
+function parseInvite(link: string): { inviter: string; token: string } | null {
+  try {
+    const q = link.split("?")[1] || "";
+    const p = new URLSearchParams(q);
+    const token = p.get("token");
+    const inviter = p.get("inviter");
+    if (token && inviter) return { inviter, token };
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
+async function handleJoinByLink() {
+  const parsed = parseInvite(joinLinkInput.value.trim());
+  if (!parsed) {
+    message.error("链接格式不正确, 请检查后重试");
+    return;
+  }
+  joining.value = true;
+  try {
+    await syncApi.joinParent(parsed.inviter, parsed.token);
+    message.success("已加入");
+    joinLinkInput.value = "";
+    await loadConfig();
+    await loadPeers();
+  } catch (err: any) {
+    message.error(err.response?.data?.error || "加入失败, 请确认邀请链接是否已过期或已被使用");
+  } finally {
+    joining.value = false;
+  }
+}
+
 async function openLogs(peer: SyncPeer) {
   logPeer.value = peer;
   logDrawer.value = true;
@@ -785,6 +841,50 @@ async function handleSave() {
       <div class="v3-sync-identity__hint">{{ t("sync.identityHint") }}</div>
     </div>
 
+    <!-- v2.7.0: 邀请子节点加入 — 生成一次性邀请链接, 免手动交换公钥/指纹 -->
+    <div class="v3-sync-config" style="margin-bottom: 16px">
+      <div class="v3-sync-config__row">
+        <div class="v3-sync-config__label">
+          <div class="v3-sync-config__title">邀请子节点加入(挂到本站之下)</div>
+          <div class="v3-sync-config__hint">
+            方向: 让对方成为本站的子节点。生成一次性邀请链接发给对方管理员, 对方打开链接或在下方"用链接加入"粘贴即可自动配对。
+            任何节点都能邀请子节点, 无需先设为主站。
+          </div>
+        </div>
+        <n-button :loading="inviteGenerating" @click="handleGenerateInvite">
+          生成邀请链接
+        </n-button>
+      </div>
+    </div>
+
+    <!-- v2.7.0: 用链接加入 — 本机作为子节点, 粘贴对方的邀请链接直接加入 -->
+    <div class="v3-sync-config" style="margin-bottom: 16px">
+      <div class="v3-sync-config__row">
+        <div class="v3-sync-config__label">
+          <div class="v3-sync-config__title">用链接加入(把本站挂到父节点之下)</div>
+          <div class="v3-sync-config__hint">
+            方向: 把本站加入某个父节点, 本站将切换为该父节点的子站(follower), 定期镜像其配置。粘贴对方给你的邀请链接即可。
+          </div>
+        </div>
+        <n-space>
+          <n-input
+            v-model:value="joinLinkInput"
+            style="width: 320px"
+            placeholder="粘贴邀请链接"
+            @keyup.enter="handleJoinByLink"
+          />
+          <n-button
+            type="primary"
+            :loading="joining"
+            :disabled="!joinLinkInput.trim()"
+            @click="handleJoinByLink"
+          >
+            加入
+          </n-button>
+        </n-space>
+      </div>
+    </div>
+
     <!-- 全局同步配置: enable + secret (合并自原 Settings 页) -->
     <div class="v3-sync-config">
       <div class="v3-sync-config__row">
@@ -917,6 +1017,29 @@ async function handleSave() {
         <n-space justify="end">
           <n-button @click="showModal = false">{{ t("common.cancel") }}</n-button>
           <n-button type="primary" @click="handleSave">{{ t("common.save") }}</n-button>
+        </n-space>
+      </template>
+    </n-modal>
+
+    <!-- v2.7.0: 邀请链接弹窗 — 生成后展示只读链接 + 复制 -->
+    <n-modal
+      v-model:show="inviteModalShow"
+      preset="card"
+      style="width: 520px"
+      title="邀请链接"
+    >
+      <n-space vertical>
+        <div style="font-size: 12px; color: var(--text-color-3)">
+          分享此链接给要加入为子节点的站点管理员; 链接为一次性令牌, 使用后失效。
+        </div>
+        <n-input :value="inviteLink" readonly />
+      </n-space>
+      <template #footer>
+        <n-space justify="end">
+          <n-button @click="inviteModalShow = false">{{ t("common.cancel") }}</n-button>
+          <n-button type="primary" @click="copyText(inviteLink, 'invite-link')">
+            {{ t("common.copy") }}
+          </n-button>
         </n-space>
       </template>
     </n-modal>

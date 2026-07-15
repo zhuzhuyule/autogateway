@@ -24,7 +24,16 @@ const handleLogin = async () => {
   const success = await login(authKey.value);
   loading.value = false;
   if (success) {
-    router.push("/");
+    // v2.7.0: 若登录前被 auth guard 从某个鉴权页(如邀请链接 /join?token=...&inviter=...)
+    // 拦下来, router 会把原完整地址存进 sessionStorage, 这里读出来回跳(带回 query),
+    // 让子站首次点邀请链接的加入流程不中断。取完即清, 避免下次登录误跳。
+    const redirect = sessionStorage.getItem("redirectAfterLogin");
+    sessionStorage.removeItem("redirectAfterLogin");
+    if (redirect && redirect !== "/login") {
+      router.replace(redirect);
+    } else {
+      router.push("/");
+    }
   }
 };
 </script>

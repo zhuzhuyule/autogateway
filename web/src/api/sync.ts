@@ -92,6 +92,13 @@ export interface SyncPolicy {
   excludedFields: Record<string, string[]>;
 }
 
+// v2.7.0: 邀请链接生成响应 — link 形如 "{appURL}/#/join?token=...&inviter=..."
+export interface GenerateInviteResponse {
+  code: string;
+  link: string;
+  inviter_url: string;
+}
+
 // P11.36: push 二次确认 preview 响应
 export interface PreviewItem {
   type: "group" | "subgroup" | "alias" | "key" | "setting";
@@ -180,5 +187,15 @@ export const syncApi = {
   }): Promise<SyncLog[]> {
     const response = await http.get("/sync/logs", { params });
     return response.data || [];
+  },
+  /** v2.7.0: 签发一次性邀请链接, 供子节点粘贴/直接打开完成加入, 免手动交换公钥/指纹 */
+  async generateInvite(): Promise<GenerateInviteResponse> {
+    const response = await http.post("/sync/invite", {});
+    return response.data;
+  },
+  /** v2.7.0: 本机(子)用邀请链接里的 token 加入 inviterUrl 指向的父节点.
+   *  只传 inviter_url + token — 不传任何 fingerprint/公钥, 后端内部构造 join 请求. */
+  async joinParent(inviterUrl: string, token: string): Promise<void> {
+    await http.post("/sync/join-parent", { inviter_url: inviterUrl, token });
   },
 };
