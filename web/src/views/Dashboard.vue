@@ -3,8 +3,10 @@ import {
   getDashboardStats,
   getGroupList,
   getTopModels,
+  getUsageRollup,
   getUsageSummary,
   type TopModelStat,
+  type UsageRollup,
   type UsageSummary,
 } from "@/api/dashboard";
 import { keysApi } from "@/api/keys";
@@ -46,6 +48,7 @@ const groupStatsMap = ref<Record<string, { req24h: number; failed: number }>>({}
 const topModelsApi = ref<TopModelStat[]>([]);
 const topModelsLoaded = ref(false);
 const usageSummary = ref<UsageSummary | null>(null);
+const usageRollup = ref<UsageRollup | null>(null);
 const quickStartOpen = ref(false);
 
 onMounted(() => {
@@ -55,7 +58,13 @@ onMounted(() => {
 async function loadAll() {
   loading.value = true;
   try {
-    await Promise.all([loadStats(), loadGroupsAndStats(), loadTopModels(), loadUsageSummary()]);
+    await Promise.all([
+      loadStats(),
+      loadGroupsAndStats(),
+      loadTopModels(),
+      loadUsageSummary(),
+      loadUsageRollup(),
+    ]);
   } finally {
     loading.value = false;
   }
@@ -68,6 +77,16 @@ async function loadUsageSummary() {
   } catch (e) {
     console.error("usage summary failed", e);
     usageSummary.value = null;
+  }
+}
+
+async function loadUsageRollup() {
+  try {
+    const r = await getUsageRollup(30);
+    usageRollup.value = (r as unknown as { data: UsageRollup }).data || null;
+  } catch (e) {
+    console.error("usage rollup failed", e);
+    usageRollup.value = null;
   }
 }
 
@@ -712,6 +731,15 @@ async function copyText(value: string) {
           </div>
         </div>
       </div>
+      <div v-if="usageRollup && usageRollup.total_tokens > 0" class="v3-usage-strip__foot">
+        {{
+          t("v3.usageRollup", {
+            days: usageRollup.days,
+            tokens: fmtNumber(usageRollup.total_tokens),
+            cost: fmtCost(usageRollup.cost_usd),
+          })
+        }}
+      </div>
     </div>
 
     <!-- Top models + Heat / Endpoints -->
@@ -955,6 +983,14 @@ async function copyText(value: string) {
   margin-top: 5px;
   font: 400 11px/1.3 var(--v3-mono);
   color: var(--v3-ink-3);
+}
+
+.v3-usage-strip__foot {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--v3-line);
+  font: 400 11.5px/1.3 var(--v3-mono);
+  color: var(--v3-ink-2);
 }
 
 @media (max-width: 560px) {

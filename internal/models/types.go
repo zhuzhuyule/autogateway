@@ -300,20 +300,26 @@ type GroupHourlyStat struct {
 	GroupID      uint      `gorm:"not null;uniqueIndex:idx_group_time" json:"group_id"`
 	SuccessCount int64     `gorm:"not null;default:0" json:"success_count"`
 	FailureCount int64     `gorm:"not null;default:0" json:"failure_count"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	// ①成本可观测性 · 月度 rollup: token 用量与折算成本按小时卷进本表, 使其独立于
+	// RequestLog 的保留期(日志会轮转), 支撑"本月"等长周期视图。AutoMigrate 建列。
+	PromptTokens     int64     `gorm:"not null;default:0" json:"prompt_tokens"`
+	CompletionTokens int64     `gorm:"not null;default:0" json:"completion_tokens"`
+	TotalTokens      int64     `gorm:"not null;default:0" json:"total_tokens"`
+	CostUSD          float64   `gorm:"not null;default:0" json:"cost_usd"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
 }
 
 // SyncPeer 对应 sync_peers 表，用于管理多端同步节点
 type SyncPeer struct {
-	ID           string     `gorm:"type:varchar(255);primaryKey" json:"id"`
-	Name         string     `gorm:"type:varchar(255);not null" json:"name"`
-	URL          string     `gorm:"type:varchar(512);not null" json:"url"`
-	SyncKey      string     `gorm:"type:varchar(512);not null" json:"sync_key"`
-	Role         string     `gorm:"type:varchar(50);not null;default:'client'" json:"role"` // 'server' or 'client'
+	ID      string `gorm:"type:varchar(255);primaryKey" json:"id"`
+	Name    string `gorm:"type:varchar(255);not null" json:"name"`
+	URL     string `gorm:"type:varchar(512);not null" json:"url"`
+	SyncKey string `gorm:"type:varchar(512);not null" json:"sync_key"`
+	Role    string `gorm:"type:varchar(50);not null;default:'client'" json:"role"` // 'server' or 'client'
 	// IsMaster 标记该 peer 是否本节点的 master(权威源)。follower 只镜像 is_master=true 的
 	// peer, 避免旧拓扑多 peer 互相覆盖清空。本机至多一个 peer 应为 master。本机专属, 不同步。
-	IsMaster bool `gorm:"default:false" json:"is_master"`
+	IsMaster     bool       `gorm:"default:false" json:"is_master"`
 	Status       string     `gorm:"type:varchar(50);not null;default:'disconnected'" json:"status"`
 	LastSyncedAt *time.Time `json:"last_synced_at"`
 	// LastPulledAt 仅在成功 pull 后更新, 用作下次 pull 的 since 下限.

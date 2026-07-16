@@ -879,6 +879,7 @@ export default {
     usageIO: "输入 {prompt} · 输出 {completion}",
     usageMetered: "{n} 次计量请求",
     usageValueTip: "按挂牌价折算 · 免费源实际支出为 0",
+    usageRollup: "近 {days} 天累计:{tokens} tokens · 折算 {cost}",
     requestVolume24hSub: "按 channel 分组",
     routingActive: "路由生效中",
     routingPassthrough: "直通模式",

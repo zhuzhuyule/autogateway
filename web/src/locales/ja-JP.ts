@@ -899,6 +899,7 @@ export default {
     usageIO: "入力 {prompt} · 出力 {completion}",
     usageMetered: "{n} 件の計測リクエスト",
     usageValueTip: "定価換算 · 無料ソースの実支出は $0",
+    usageRollup: "直近 {days} 日:{tokens} tokens · 換算 {cost}",
     requestVolume24hSub: "channel 別",
     routingActive: "ルーティング有効",
     routingPassthrough: "パススルー",

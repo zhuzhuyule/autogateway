@@ -30,7 +30,7 @@ func newUsageTestServer(t *testing.T) *Server {
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
-	if err := db.AutoMigrate(&models.RequestLog{}); err != nil {
+	if err := db.AutoMigrate(&models.RequestLog{}, &models.GroupHourlyStat{}, &models.Group{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	return &Server{DB: db}
@@ -147,5 +147,60 @@ func TestTopModels_IncludesTokensAndCost(t *testing.T) {
 	free := byModel["free-qwen"]
 	if free.Tokens != 400 || free.CostUSD != 0 {
 		t.Fatalf("free-qwen = %+v, want tokens=400 cost=0", free)
+	}
+}
+
+func seedHourly(t *testing.T, db *gorm.DB, groupID uint, ts time.Time, total int64, cost float64) {
+	t.Helper()
+	err := db.Create(&models.GroupHourlyStat{
+		Time: ts, GroupID: groupID,
+		SuccessCount: 1,
+		PromptTokens: total / 2, CompletionTokens: total - total/2,
+		TotalTokens: total, CostUSD: cost,
+	}).Error
+	if err != nil {
+		t.Fatalf("seed hourly g%d: %v", groupID, err)
+	}
+}
+
+func TestUsageRollup_ExcludesAggregateParents(t *testing.T) {
+	s := newUsageTestServer(t)
+	now := time.Now()
+
+	// 标准子分组 1、2 计入; 聚合父分组 9 (其行是子的镜像累加) 必须排除避免双计。
+	if err := s.DB.Create(&models.Group{Name: "child1", GroupType: "standard", ChannelType: "openai", TestModel: "x", Upstreams: []byte("[]")}).Error; err != nil {
+		t.Fatalf("create child1: %v", err)
+	}
+	if err := s.DB.Create(&models.Group{Name: "child2", GroupType: "standard", ChannelType: "openai", TestModel: "x", Upstreams: []byte("[]")}).Error; err != nil {
+		t.Fatalf("create child2: %v", err)
+	}
+	agg := models.Group{Name: "agg", GroupType: "aggregate", ChannelType: "openai", TestModel: "x", Upstreams: []byte("[]")}
+	if err := s.DB.Create(&agg).Error; err != nil {
+		t.Fatalf("create agg: %v", err)
+	}
+
+	// 子分组 1、2 各 100 token; 聚合父 (agg.ID) 记 200 (镜像) — 应被排除。
+	seedHourly(t, s.DB, 1, now.Add(-1*time.Hour), 100, 0.01)
+	seedHourly(t, s.DB, 2, now.Add(-2*time.Hour), 100, 0.01)
+	seedHourly(t, s.DB, agg.ID, now.Add(-1*time.Hour), 200, 0.02)
+	// 窗口外 (40 天前, 30 天窗口应排除)。
+	seedHourly(t, s.DB, 1, now.Add(-40*24*time.Hour), 500, 5.0)
+
+	rec := callGET(s, "/dashboard/usage-rollup?days=30", s.UsageRollup)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	var out UsageRollupResponse
+	decodeData(t, rec.Body.Bytes(), &out)
+
+	if out.Days != 30 {
+		t.Fatalf("days = %d, want 30", out.Days)
+	}
+	// 只有子分组 1+2 在窗口内: total=200, cost=0.02。聚合父与窗口外都排除。
+	if out.TotalTokens != 200 {
+		t.Fatalf("total_tokens = %d, want 200 (aggregate parent + out-of-window excluded)", out.TotalTokens)
+	}
+	if out.CostUSD < 0.0199 || out.CostUSD > 0.0201 {
+		t.Fatalf("cost = %v, want ~0.02", out.CostUSD)
 	}
 }

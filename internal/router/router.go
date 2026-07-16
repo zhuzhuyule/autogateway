@@ -251,6 +251,7 @@ func registerProtectedAPIRoutes(
 		dashboard.GET("/top-models", serverHandler.TopModels)
 		dashboard.GET("/model-timings", serverHandler.ModelTimings)
 		dashboard.GET("/usage-summary", serverHandler.UsageSummary)
+		dashboard.GET("/usage-rollup", serverHandler.UsageRollup)
 	}
 
 	// 日志

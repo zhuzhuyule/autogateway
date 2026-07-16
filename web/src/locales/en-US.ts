@@ -900,6 +900,7 @@ export default {
     usageIO: "in {prompt} · out {completion}",
     usageMetered: "{n} metered requests",
     usageValueTip: "Valued at list price · free sources actually cost $0",
+    usageRollup: "Last {days} days: {tokens} tokens · {cost} list-price",
     requestVolume24hSub: "grouped per channel",
     routingActive: "ROUTING ACTIVE",
     routingPassthrough: "DIRECT PASS-THROUGH",

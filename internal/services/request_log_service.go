@@ -1,12 +1,12 @@
 package services
 
 import (
-	"context"
-	"encoding/json"
-	"fmt"
 	"autogateway/internal/config"
 	"autogateway/internal/models"
 	"autogateway/internal/store"
+	"context"
+	"encoding/json"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -267,10 +267,28 @@ func (s *RequestLogService) writeLogsToDB(logs []*models.RequestLog) error {
 		}
 
 		// 更新统计表
+		type hourlyCounts struct {
+			Success, Failure                            int64
+			PromptTokens, CompletionTokens, TotalTokens int64
+			Cost                                        float64
+		}
 		hourlyStats := make(map[struct {
 			Time    time.Time
 			GroupID uint
-		}]struct{ Success, Failure int64 })
+		}]hourlyCounts)
+		// addUsage 把一条日志的成败与 token/cost 累加进一个 hourlyCounts。
+		addUsage := func(c hourlyCounts, log *models.RequestLog) hourlyCounts {
+			if log.IsSuccess {
+				c.Success++
+			} else {
+				c.Failure++
+			}
+			c.PromptTokens += int64(log.PromptTokens)
+			c.CompletionTokens += int64(log.CompletionTokens)
+			c.TotalTokens += int64(log.TotalTokens)
+			c.Cost += log.CostUSD
+			return c
+		}
 		for _, log := range logs {
 			// retry/test 类型不计入 hourly 业务统计:
 			// - retry 是单次业务请求内部的重试, 主条目已计数
@@ -284,13 +302,7 @@ func (s *RequestLogService) writeLogsToDB(logs []*models.RequestLog) error {
 				GroupID uint
 			}{Time: hourlyTime, GroupID: log.GroupID}
 
-			counts := hourlyStats[key]
-			if log.IsSuccess {
-				counts.Success++
-			} else {
-				counts.Failure++
-			}
-			hourlyStats[key] = counts
+			hourlyStats[key] = addUsage(hourlyStats[key], log)
 
 			if log.ParentGroupID > 0 {
 				parentKey := struct {
@@ -298,13 +310,7 @@ func (s *RequestLogService) writeLogsToDB(logs []*models.RequestLog) error {
 					GroupID uint
 				}{Time: hourlyTime, GroupID: log.ParentGroupID}
 
-				parentCounts := hourlyStats[parentKey]
-				if log.IsSuccess {
-					parentCounts.Success++
-				} else {
-					parentCounts.Failure++
-				}
-				hourlyStats[parentKey] = parentCounts
+				hourlyStats[parentKey] = addUsage(hourlyStats[parentKey], log)
 			}
 		}
 
@@ -313,15 +319,23 @@ func (s *RequestLogService) writeLogsToDB(logs []*models.RequestLog) error {
 				err := tx.Clauses(clause.OnConflict{
 					Columns: []clause.Column{{Name: "time"}, {Name: "group_id"}},
 					DoUpdates: clause.Assignments(map[string]any{
-						"success_count": gorm.Expr("group_hourly_stats.success_count + ?", counts.Success),
-						"failure_count": gorm.Expr("group_hourly_stats.failure_count + ?", counts.Failure),
-						"updated_at":    time.Now(),
+						"success_count":     gorm.Expr("group_hourly_stats.success_count + ?", counts.Success),
+						"failure_count":     gorm.Expr("group_hourly_stats.failure_count + ?", counts.Failure),
+						"prompt_tokens":     gorm.Expr("group_hourly_stats.prompt_tokens + ?", counts.PromptTokens),
+						"completion_tokens": gorm.Expr("group_hourly_stats.completion_tokens + ?", counts.CompletionTokens),
+						"total_tokens":      gorm.Expr("group_hourly_stats.total_tokens + ?", counts.TotalTokens),
+						"cost_usd":          gorm.Expr("group_hourly_stats.cost_usd + ?", counts.Cost),
+						"updated_at":        time.Now(),
 					}),
 				}).Create(&models.GroupHourlyStat{
-					Time:         key.Time,
-					GroupID:      key.GroupID,
-					SuccessCount: counts.Success,
-					FailureCount: counts.Failure,
+					Time:             key.Time,
+					GroupID:          key.GroupID,
+					SuccessCount:     counts.Success,
+					FailureCount:     counts.Failure,
+					PromptTokens:     counts.PromptTokens,
+					CompletionTokens: counts.CompletionTokens,
+					TotalTokens:      counts.TotalTokens,
+					CostUSD:          counts.Cost,
 				}).Error
 
 				if err != nil {

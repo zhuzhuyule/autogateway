@@ -424,6 +424,49 @@ func (s *Server) UsageSummary(c *gin.Context) {
 	response.Success(c, out)
 }
 
+// UsageRollupResponse 是 /api/dashboard/usage-rollup 的响应。
+type UsageRollupResponse struct {
+	Days             int     `json:"days"`
+	PromptTokens     int64   `json:"prompt_tokens"`
+	CompletionTokens int64   `json:"completion_tokens"`
+	TotalTokens      int64   `json:"total_tokens"`
+	CostUSD          float64 `json:"cost_usd"`
+}
+
+// UsageRollup 汇总长周期(默认 30 天)的 token 用量与折算成本。数据来自
+// group_hourly_stats 小时卷积表, 独立于 RequestLog 保留期, 故可跨"本月"等长窗口。
+// 排除聚合父分组行(其统计是子分组的镜像累加), 避免父+子双重计数 —— 与
+// getHourlyStats 的口径一致。
+//
+// GET /api/dashboard/usage-rollup?days=30  (days: 1..365)
+func (s *Server) UsageRollup(c *gin.Context) {
+	days := 30
+	if raw := strings.TrimSpace(c.DefaultQuery("days", "30")); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n > 0 && n <= 365 {
+			days = n
+		}
+	}
+	since := time.Now().Add(-time.Duration(days) * 24 * time.Hour)
+
+	var out UsageRollupResponse
+	err := s.DB.Table("group_hourly_stats").
+		Where("time >= ?", since).
+		Where("group_id NOT IN (?)",
+			s.DB.Table("groups").Select("id").Where("group_type = ?", "aggregate")).
+		Select("COALESCE(SUM(prompt_tokens),0) as prompt_tokens, " +
+			"COALESCE(SUM(completion_tokens),0) as completion_tokens, " +
+			"COALESCE(SUM(total_tokens),0) as total_tokens, " +
+			"COALESCE(SUM(cost_usd),0) as cost_usd").
+		Scan(&out).Error
+	if err != nil {
+		response.ErrorI18nFromAPIError(c, app_errors.ErrDatabase, "database.cannot_get_top_models")
+		return
+	}
+	out.Days = days
+
+	response.Success(c, out)
+}
+
 // getSecurityWarnings 检查安全配置并返回警告信息
 func (s *Server) getSecurityWarnings(c *gin.Context) []models.SecurityWarning {
 	var warnings []models.SecurityWarning

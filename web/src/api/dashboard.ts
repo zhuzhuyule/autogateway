@@ -63,6 +63,25 @@ export const getUsageSummary = (window: "1h" | "6h" | "24h" | "7d" = "24h") => {
   });
 };
 
+/** 长周期(默认 30 天)用量卷积, 来自 group_hourly_stats, 独立于日志保留期。 */
+export interface UsageRollup {
+  days: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  cost_usd: number;
+}
+
+/**
+ * 获取长周期 token 用量与折算成本(来自小时卷积表, 支撑"本月"等长窗口)。
+ * days: 1..365 (默认 30)
+ */
+export const getUsageRollup = (days = 30) => {
+  return http.get<UsageRollup>("/dashboard/usage-rollup", {
+    params: { days },
+  });
+};
+
 /**
  * 获取热门模型排行(按调用量倒序)。
  * window: 1h | 6h | 24h | 7d (默认 24h)
