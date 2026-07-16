@@ -149,6 +149,8 @@ var MessagesJaJP = map[string]string{
 	"config.log_retention_days_desc":          "データベースにリクエストログを保持する日数、0でログを永久保存。",
 	"config.log_write_interval":               "ログ書き込み間隔（分）",
 	"config.log_write_interval_desc":          "リクエストログをキャッシュからデータベースに書き込む間隔（分）、0でリアルタイム書き込み。",
+	"config.hourly_stats_retention_days":      "時間統計の保持日数",
+	"config.hourly_stats_retention_days_desc": "時間単位の token/コスト集計の保持期間（リクエストログの保持期間とは独立）。利用する最長のコスト期間以上にしてください（使用量ロールアップは最大 365 日）。0 で無期限。",
 	"config.enable_request_body_logging":      "リクエストボディログを有効化",
 	"config.enable_request_body_logging_desc": "完全なリクエストボディの内容をログに記録するかどうか。有効にするとメモリとストレージの使用量が増加します。",
 	"config.use_freemodels_registry":          "FreeModels レジストリを使用",

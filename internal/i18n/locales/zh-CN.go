@@ -149,6 +149,8 @@ var MessagesZhCN = map[string]string{
 	"config.log_retention_days_desc":          "请求日志在数据库中的保留天数，0为不清理日志。",
 	"config.log_write_interval":               "日志延迟写入周期（分钟）",
 	"config.log_write_interval_desc":          "请求日志从缓存写入数据库的周期（分钟），0为实时写入数据。",
+	"config.hourly_stats_retention_days":      "小时统计保留天数",
+	"config.hourly_stats_retention_days_desc": "小时级 token/成本卷积的保留时长（独立于请求日志保留期）。应不短于你使用的最长成本窗口（用量卷积支持最长 365 天）。0 = 永久保留。",
 	"config.enable_request_body_logging":      "启用日志详情",
 	"config.enable_request_body_logging_desc": "是否在请求日志中记录完整的请求体内容。启用此功能会增加内存以及存储空间的占用。",
 	"config.use_freemodels_registry":          "启用 FreeModels 注册表",

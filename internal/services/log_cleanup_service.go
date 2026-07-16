@@ -1,9 +1,9 @@
 package services
 
 import (
-	"context"
 	"autogateway/internal/config"
 	"autogateway/internal/models"
+	"context"
 	"sync"
 	"time"
 
@@ -61,11 +61,13 @@ func (s *LogCleanupService) run() {
 
 	// 启动时先执行一次清理
 	s.cleanupExpiredLogs()
+	s.cleanupExpiredHourlyStats()
 
 	for {
 		select {
 		case <-ticker.C:
 			s.cleanupExpiredLogs()
+			s.cleanupExpiredHourlyStats()
 		case <-s.stopCh:
 			return
 		}
@@ -101,5 +103,34 @@ func (s *LogCleanupService) cleanupExpiredLogs() {
 		}).Info("Successfully cleaned up expired request logs")
 	} else {
 		logrus.Debug("No expired request logs found to cleanup")
+	}
+}
+
+// cleanupExpiredHourlyStats 清理过期的小时统计卷积 (group_hourly_stats)。
+//
+// 该表持久保留 token/cost 卷积以支撑长周期视图, 保留期独立于 RequestLog 且默认
+// 更长 (HourlyStatsRetentionDays, 默认 400 天覆盖最大 365 天 rollup 窗口)。仅作
+// 无限膨胀的安全阀; 0 = 永久保留。
+func (s *LogCleanupService) cleanupExpiredHourlyStats() {
+	retentionDays := s.settingsManager.GetSettings().HourlyStatsRetentionDays
+	if retentionDays <= 0 {
+		logrus.Debug("Hourly stats retention is disabled (hourly_stats_retention_days <= 0)")
+		return
+	}
+
+	cutoffTime := time.Now().AddDate(0, 0, -retentionDays).UTC()
+
+	result := s.db.Where("time < ?", cutoffTime).Delete(&models.GroupHourlyStat{})
+	if result.Error != nil {
+		logrus.WithError(result.Error).Error("Failed to cleanup expired hourly stats")
+		return
+	}
+
+	if result.RowsAffected > 0 {
+		logrus.WithFields(logrus.Fields{
+			"deleted_count":  result.RowsAffected,
+			"cutoff_time":    cutoffTime.Format(time.RFC3339),
+			"retention_days": retentionDays,
+		}).Info("Successfully cleaned up expired hourly stats")
 	}
 }

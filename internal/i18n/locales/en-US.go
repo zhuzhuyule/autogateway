@@ -149,6 +149,8 @@ var MessagesEnUS = map[string]string{
 	"config.log_retention_days_desc":          "Number of days to retain request logs in database, 0 to keep logs forever.",
 	"config.log_write_interval":               "Log Write Interval (minutes)",
 	"config.log_write_interval_desc":          "Interval (in minutes) for writing request logs from cache to database, 0 for real-time writes.",
+	"config.hourly_stats_retention_days":      "Hourly Stats Retention (days)",
+	"config.hourly_stats_retention_days_desc": "How long to keep hourly token/cost rollups (independent of request-log retention). Must be at least as long as your longest cost window (usage-rollup supports up to 365d). 0 keeps forever.",
 	"config.enable_request_body_logging":      "Enable Request Body Logging",
 	"config.enable_request_body_logging_desc": "Whether to log complete request body content. Enabling this will increase memory and storage usage.",
 	"config.use_freemodels_registry":          "Use FreeModels Registry",

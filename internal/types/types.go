@@ -24,6 +24,7 @@ type SystemSettings struct {
 	ProxyKeys                      string `json:"proxy_keys" name:"config.proxy_keys" category:"config.category.basic" desc:"config.proxy_keys_desc" validate:"required"`
 	RequestLogRetentionDays        int    `json:"request_log_retention_days" default:"7" name:"config.log_retention_days" category:"config.category.basic" desc:"config.log_retention_days_desc" validate:"required,min=0"`
 	RequestLogWriteIntervalMinutes int    `json:"request_log_write_interval_minutes" default:"1" name:"config.log_write_interval" category:"config.category.basic" desc:"config.log_write_interval_desc" validate:"required,min=0"`
+	HourlyStatsRetentionDays       int    `json:"hourly_stats_retention_days" default:"400" name:"config.hourly_stats_retention_days" category:"config.category.basic" desc:"config.hourly_stats_retention_days_desc" validate:"min=0"`
 	EnableRequestBodyLogging       bool   `json:"enable_request_body_logging" default:"false" name:"config.enable_request_body_logging" category:"config.category.basic" desc:"config.enable_request_body_logging_desc"`
 	UseFreeModelsRegistry          bool   `json:"use_freemodels_registry" default:"true" name:"config.use_freemodels_registry" category:"config.category.basic" desc:"config.use_freemodels_registry_desc"`
 
