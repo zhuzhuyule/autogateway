@@ -37,9 +37,6 @@ export interface TopModelStat {
   errors: number;
   error_rate: number;
   groups: string[];
-  /** 窗口内该模型累计 token 与按挂牌价折算的成本 (免费源/未知模型 → 0)。 */
-  tokens: number;
-  cost_usd: number;
 }
 
 /** 窗口内 token 用量与折算成本汇总 (①成本可观测性)。 */
@@ -92,11 +89,14 @@ export const getTopModels = (window: "1h" | "6h" | "24h" | "7d" = "24h", limit =
   });
 };
 
-/** 单条 model timing — 仅 avg_ms / calls,无 group attribution. */
+/** 单条 model timing — avg_ms / calls + 窗口内 token/成本,无 group attribution. */
 export interface ModelTiming {
   model: string;
   avg_ms: number;
   calls: number;
+  /** 窗口内该模型累计 token 与按挂牌价折算成本 (免费源/未知模型 → 0)。 */
+  tokens: number;
+  cost_usd: number;
 }
 
 /**

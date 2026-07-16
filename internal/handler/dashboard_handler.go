@@ -270,9 +270,6 @@ type TopModelStat struct {
 	Errors    int64    `json:"errors"`
 	ErrorRate float64  `json:"error_rate"`
 	Groups    []string `json:"groups"`
-	// ①成本可观测性: 窗口内该模型累计 token 与按挂牌价折算的成本 (免费源/未知模型 → 0)。
-	Tokens  int64   `json:"tokens"`
-	CostUSD float64 `json:"cost_usd"`
 }
 
 // TopModels returns the highest-volume models within the requested window.
@@ -286,16 +283,14 @@ func (s *Server) TopModels(c *gin.Context) {
 	since := time.Now().Add(-dashboardLookback(c.DefaultQuery("window", "24h")))
 
 	type row struct {
-		Model   string
-		Calls   int64
-		AvgMs   float64
-		Errors  int64
-		Tokens  int64
-		CostUSD float64
+		Model  string
+		Calls  int64
+		AvgMs  float64
+		Errors int64
 	}
 	var rows []row
 	err := s.DB.Model(&models.RequestLog{}).
-		Select("model, COUNT(*) as calls, AVG(duration) as avg_ms, SUM(CASE WHEN is_success THEN 0 ELSE 1 END) as errors, COALESCE(SUM(total_tokens),0) as tokens, COALESCE(SUM(cost_usd),0) as cost_usd").
+		Select("model, COUNT(*) as calls, AVG(duration) as avg_ms, SUM(CASE WHEN is_success THEN 0 ELSE 1 END) as errors").
 		Where("timestamp >= ? AND request_type = ? AND model IS NOT NULL AND model != ''", since, models.RequestTypeFinal).
 		Group("model").
 		Order("calls DESC").
@@ -339,8 +334,6 @@ func (s *Server) TopModels(c *gin.Context) {
 			Errors:    r.Errors,
 			ErrorRate: errRate,
 			Groups:    groupsByModel[r.Model],
-			Tokens:    r.Tokens,
-			CostUSD:   r.CostUSD,
 		})
 	}
 
@@ -352,6 +345,10 @@ type ModelTiming struct {
 	Model string `json:"model"`
 	AvgMs int64  `json:"avg_ms"`
 	Calls int64  `json:"calls"`
+	// ①成本可观测性: 窗口内该模型累计 token 与按挂牌价折算成本 (免费源/未知模型 → 0)。
+	// 前端在模型卡上挂成本/用量 chip (ModelCatalog / Aliases)。
+	Tokens  int64   `json:"tokens"`
+	CostUSD float64 `json:"cost_usd"`
 }
 
 // ModelTimings returns avg request duration (ms) per model for the last 24h.
@@ -364,13 +361,16 @@ func (s *Server) ModelTimings(c *gin.Context) {
 	since := time.Now().Add(-dashboardLookback(c.DefaultQuery("window", "24h")))
 
 	type row struct {
-		Model string
-		Calls int64
-		AvgMs float64
+		Model   string
+		Calls   int64
+		AvgMs   float64
+		Tokens  int64
+		CostUSD float64
 	}
 	var rows []row
 	err := s.DB.Model(&models.RequestLog{}).
-		Select("model, COUNT(*) as calls, AVG(duration) as avg_ms").
+		Select("model, COUNT(*) as calls, AVG(duration) as avg_ms, "+
+			"COALESCE(SUM(total_tokens),0) as tokens, COALESCE(SUM(cost_usd),0) as cost_usd").
 		Where("timestamp >= ? AND request_type = ? AND model IS NOT NULL AND model != ''", since, models.RequestTypeFinal).
 		Group("model").
 		Scan(&rows).Error
@@ -382,9 +382,11 @@ func (s *Server) ModelTimings(c *gin.Context) {
 	out := make([]ModelTiming, 0, len(rows))
 	for _, r := range rows {
 		out = append(out, ModelTiming{
-			Model: r.Model,
-			AvgMs: int64(r.AvgMs),
-			Calls: r.Calls,
+			Model:   r.Model,
+			AvgMs:   int64(r.AvgMs),
+			Calls:   r.Calls,
+			Tokens:  r.Tokens,
+			CostUSD: r.CostUSD,
 		})
 	}
 	response.Success(c, out)

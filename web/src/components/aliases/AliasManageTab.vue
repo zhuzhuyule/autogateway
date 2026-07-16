@@ -311,16 +311,23 @@ function aliasLogoHint(row: ModelAliasRow): string {
 
 // model-timings: { real_model -> avg_ms } 24h 平均请求耗时,用于 chip 旁挂个 "≈ X ms"
 const timingMap = ref<Record<string, number>>({});
+// { real_model -> {cost, tokens} } 24h 折算成本/用量,挂成本 chip (①成本可观测性).
+const costMap = ref<Record<string, { cost: number; tokens: number }>>({});
 
 async function loadTimings() {
   try {
     const r = await getModelTimings("24h");
     const list: ModelTiming[] = (r as unknown as { data: ModelTiming[] }).data || [];
     const map: Record<string, number> = {};
+    const cmap: Record<string, { cost: number; tokens: number }> = {};
     for (const t of list) {
-      if (t?.model) map[t.model] = t.avg_ms || 0;
+      if (t?.model) {
+        map[t.model] = t.avg_ms || 0;
+        cmap[t.model] = { cost: t.cost_usd || 0, tokens: t.tokens || 0 };
+      }
     }
     timingMap.value = map;
+    costMap.value = cmap;
   } catch {
     /* swallow — chip is purely decorative */
   }
@@ -334,6 +341,18 @@ function formatAvgMs(ms: number): string {
   if (ms <= 0) return "";
   if (ms < 1000) return `≈ ${ms} ms`;
   return `≈ ${(ms / 1000).toFixed(1)} s`;
+}
+
+// 成本 chip 文案: 有成本显示折算价格, 免费但有用量显示 token 数, 否则空。
+function costChipFor(modelId: string): string {
+  const c = costMap.value[modelId];
+  if (!c) return "";
+  if (c.cost > 0) return c.cost < 1 ? `$${c.cost.toFixed(4)}` : `$${c.cost.toFixed(2)}`;
+  if (c.tokens > 0) {
+    const tok = c.tokens >= 1000 ? `${(c.tokens / 1000).toFixed(1)}K` : `${c.tokens}`;
+    return `${tok} tok`;
+  }
+  return "";
 }
 
 // === Edit Mapping ===
@@ -1121,6 +1140,13 @@ function saveSettingsThrottled() {
               >
                 {{ formatAvgMs(avgMsFor(m.real_model)) }}
               </span>
+              <span
+                v-if="costChipFor(m.real_model)"
+                class="v3-alias-chip__avgms"
+                :title="'折算成本 · 24h(免费源显示用量 token)'"
+              >
+                {{ costChipFor(m.real_model) }}
+              </span>
               <button
                 v-if="aliasIsDeadByExposure(m)"
                 type="button"
@@ -1245,6 +1271,13 @@ function saveSettingsThrottled() {
                 :title="t('v3.aliasAvgMsTip') || '全程耗时 · 24h 平均(含流式回答时长)'"
               >
                 {{ formatAvgMs(avgMsFor(m.real_model)) }}
+              </span>
+              <span
+                v-if="costChipFor(m.real_model)"
+                class="v3-alias-chip__avgms"
+                :title="'折算成本 · 24h(免费源显示用量 token)'"
+              >
+                {{ costChipFor(m.real_model) }}
               </span>
               <button
                 v-if="aliasIsDeadByExposure(m)"

@@ -119,21 +119,21 @@ func TestUsageSummary_SumsWithinWindow(t *testing.T) {
 	}
 }
 
-func TestTopModels_IncludesTokensAndCost(t *testing.T) {
+func TestModelTimings_IncludesTokensAndCost(t *testing.T) {
 	s := newUsageTestServer(t)
 	now := time.Now()
 	seedLog(t, s.DB, "a", "gpt-4o", now.Add(-1*time.Hour), models.RequestTypeFinal, 100, 50, 150, 0.001, true)
 	seedLog(t, s.DB, "b", "gpt-4o", now.Add(-2*time.Hour), models.RequestTypeFinal, 200, 80, 280, 0.002, true)
 	seedLog(t, s.DB, "c", "free-qwen", now.Add(-3*time.Hour), models.RequestTypeFinal, 300, 100, 400, 0, true)
 
-	rec := callGET(s, "/dashboard/top-models?window=24h", s.TopModels)
+	rec := callGET(s, "/dashboard/model-timings?window=24h", s.ModelTimings)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d", rec.Code)
 	}
-	var out []TopModelStat
+	var out []ModelTiming
 	decodeData(t, rec.Body.Bytes(), &out)
 
-	byModel := map[string]TopModelStat{}
+	byModel := map[string]ModelTiming{}
 	for _, r := range out {
 		byModel[r.Model] = r
 	}
