@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -135,4 +136,65 @@ func TestValidateJSONSuccessResponseRejectsHTML(t *testing.T) {
 	if err := validateJSONSuccessResponse(resp); err == nil {
 		t.Fatalf("expected HTML success response to be rejected")
 	}
+}
+
+// hasIncludeUsage 解析 body 判断 stream_options.include_usage 是否为 true。
+func hasIncludeUsage(t *testing.T, body []byte) bool {
+	t.Helper()
+	var obj map[string]any
+	if err := json.Unmarshal(body, &obj); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	so, ok := obj["stream_options"].(map[string]any)
+	if !ok {
+		return false
+	}
+	v, _ := so["include_usage"].(bool)
+	return v
+}
+
+func TestInjectStreamUsage(t *testing.T) {
+	t.Run("chat request gets include_usage", func(t *testing.T) {
+		in := []byte(`{"model":"gpt-4o","messages":[{"role":"user","content":"hi"}],"stream":true}`)
+		out := injectStreamUsage(in)
+		if !hasIncludeUsage(t, out) {
+			t.Fatalf("expected include_usage=true, got %s", out)
+		}
+	})
+
+	t.Run("existing stream_options augmented", func(t *testing.T) {
+		in := []byte(`{"messages":[{"role":"user","content":"hi"}],"stream_options":{"foo":1}}`)
+		out := injectStreamUsage(in)
+		if !hasIncludeUsage(t, out) {
+			t.Fatalf("expected include_usage=true, got %s", out)
+		}
+		var obj map[string]any
+		_ = json.Unmarshal(out, &obj)
+		if so, _ := obj["stream_options"].(map[string]any); so["foo"] == nil {
+			t.Fatalf("existing stream_options key lost: %s", out)
+		}
+	})
+
+	t.Run("client explicit include_usage=false respected", func(t *testing.T) {
+		in := []byte(`{"messages":[{"role":"user"}],"stream_options":{"include_usage":false}}`)
+		out := injectStreamUsage(in)
+		if hasIncludeUsage(t, out) {
+			t.Fatalf("must not override client's include_usage=false: %s", out)
+		}
+	})
+
+	t.Run("non-chat request (no messages) untouched", func(t *testing.T) {
+		in := []byte(`{"model":"text-embedding-3-small","input":"hi"}`)
+		out := injectStreamUsage(in)
+		if !bytes.Equal(in, out) {
+			t.Fatalf("non-chat request should be untouched, got %s", out)
+		}
+	})
+
+	t.Run("invalid json passthrough", func(t *testing.T) {
+		in := []byte(`not json`)
+		if out := injectStreamUsage(in); !bytes.Equal(in, out) {
+			t.Fatalf("invalid json should pass through unchanged")
+		}
+	})
 }

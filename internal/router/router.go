@@ -250,6 +250,7 @@ func registerProtectedAPIRoutes(
 		dashboard.GET("/encryption-status", serverHandler.EncryptionStatus)
 		dashboard.GET("/top-models", serverHandler.TopModels)
 		dashboard.GET("/model-timings", serverHandler.ModelTimings)
+		dashboard.GET("/usage-summary", serverHandler.UsageSummary)
 	}
 
 	// 日志

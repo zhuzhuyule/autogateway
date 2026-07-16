@@ -18,6 +18,7 @@ import (
 	app_errors "autogateway/internal/errors"
 	"autogateway/internal/keypool"
 	"autogateway/internal/models"
+	"autogateway/internal/pricing"
 	"autogateway/internal/ratelimit"
 	"autogateway/internal/response"
 	"autogateway/internal/router_engine"
@@ -301,6 +302,13 @@ func (ps *ProxyServer) executeRequestWithRetry(
 ) {
 	cfg := group.EffectiveConfig
 
+	// ①成本可观测性: OpenAI chat 流式且开启 ForceStreamUsage 时, 注入
+	// stream_options.include_usage 让上游回传 usage 帧 (否则拿不到 token 用量)。
+	// 幂等: retry 递归重入也只会注入一次 (已存在则跳过)。
+	if isStream && cfg.ForceStreamUsage && group.ChannelType == "openai" {
+		bodyBytes = injectStreamUsage(bodyBytes)
+	}
+
 	// 速率账本: 每次 failover 进入本函数都会对所选 key 预占一次额度 (Record).
 	// 跨 N 个 key 的 failover 会预占 N 次 — 这是"预占"模型的预期行为 (每把 key
 	// 确实各收到一次请求尝试), 偏保守不会少计, 符合"保守不超限"目标.
@@ -492,6 +500,9 @@ func (ps *ProxyServer) executeRequestWithRetry(
 			return
 		}
 		// wroteToClient=true: 已发头 (即便后续有问题也不能 failover) → 走下方成功 logRequest.
+		// ①成本可观测性: 把流式累积到的 token 用量挂到 ctx 供 logRequest 落库
+		// (流式无法回填响应头, 只落库)。
+		stashUsage(c, out.usage)
 	} else {
 		for key, values := range resp.Header {
 			for _, value := range values {
@@ -499,7 +510,7 @@ func (ps *ProxyServer) executeRequestWithRetry(
 			}
 		}
 		c.Status(resp.StatusCode)
-		ps.handleNormalResponse(c, resp)
+		ps.handleNormalResponse(c, resp, channelHandler.ExtractModel(c, bodyBytes))
 	}
 
 	ps.logRequest(c, originalGroup, group, apiKey, startTime, resp.StatusCode, nil, isStream, upstreamURL, channelHandler, bodyBytes, models.RequestTypeFinal)
@@ -746,6 +757,15 @@ func (ps *ProxyServer) logRequest(
 
 	if channelHandler != nil && bodyBytes != nil {
 		logEntry.Model = channelHandler.ExtractModel(c, bodyBytes)
+	}
+
+	// ①成本可观测性: 响应处理阶段解析到 token 用量则落库, 并按挂牌价折算成本
+	// (免费源/未知模型 → CostUSD=0)。仅成功请求会 stash usage; 错误路径无。
+	if u, ok := ctxUsage(c); ok {
+		logEntry.PromptTokens = u.PromptTokens
+		logEntry.CompletionTokens = u.CompletionTokens
+		logEntry.TotalTokens = u.TotalTokens
+		logEntry.CostUSD = pricing.Cost(logEntry.Model, u)
 	}
 
 	if apiKey != nil {

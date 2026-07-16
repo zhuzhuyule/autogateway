@@ -472,3 +472,33 @@ func TestStreamWithIntegrity_ZeroIdleTimeoutNoTimeout(t *testing.T) {
 		t.Fatalf("expected [DONE] in recorder body, got %q", rec.Body.String())
 	}
 }
+
+// TestStreamWithIntegrity_CapturesOpenAIUsage: OpenAI 流仅末帧 (include_usage)
+// 带 usage, streamOutcome.usage 应捕获到全量。
+func TestStreamWithIntegrity_CapturesOpenAIUsage(t *testing.T) {
+	c, _ := newStreamCtx()
+	body := "data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n" +
+		"data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" +
+		"data: {\"choices\":[],\"usage\":{\"prompt_tokens\":12,\"completion_tokens\":8,\"total_tokens\":20}}\n\n" +
+		"data: [DONE]\n\n"
+	out := streamWithIntegrity(c, fakeResp(http.StatusOK, body), true, 0)
+
+	if out.usage.PromptTokens != 12 || out.usage.CompletionTokens != 8 || out.usage.TotalTokens != 20 {
+		t.Fatalf("captured usage = %+v, want {12 8 20}", out.usage)
+	}
+}
+
+// TestStreamWithIntegrity_CapturesAnthropicUsage: Anthropic 流 input 在
+// message_start, output 在 message_delta 单调增, 逐帧 max 合并应收敛到 (25,250,275)。
+func TestStreamWithIntegrity_CapturesAnthropicUsage(t *testing.T) {
+	c, _ := newStreamCtx()
+	body := "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":25,\"output_tokens\":1}}}\n\n" +
+		"data: {\"type\":\"content_block_delta\",\"delta\":{\"text\":\"hi\"}}\n\n" +
+		"data: {\"type\":\"message_delta\",\"usage\":{\"output_tokens\":250}}\n\n"
+	// 非 OpenAI 渠道 (isOpenAI=false): scanUsage 对所有渠道生效。
+	out := streamWithIntegrity(c, fakeResp(http.StatusOK, body), false, 0)
+
+	if out.usage.PromptTokens != 25 || out.usage.CompletionTokens != 250 || out.usage.TotalTokens != 275 {
+		t.Fatalf("captured usage = %+v, want {25 250 275}", out.usage)
+	}
+}

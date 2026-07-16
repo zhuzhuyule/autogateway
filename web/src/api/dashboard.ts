@@ -37,7 +37,31 @@ export interface TopModelStat {
   errors: number;
   error_rate: number;
   groups: string[];
+  /** 窗口内该模型累计 token 与按挂牌价折算的成本 (免费源/未知模型 → 0)。 */
+  tokens: number;
+  cost_usd: number;
 }
+
+/** 窗口内 token 用量与折算成本汇总 (①成本可观测性)。 */
+export interface UsageSummary {
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  /** 按挂牌价折算的等价价值 (免费源实际支出为 0)。 */
+  cost_usd: number;
+  /** 窗口内成功解析出用量的请求数。 */
+  metered_requests: number;
+}
+
+/**
+ * 获取窗口内的 token 用量与折算成本汇总。
+ * window: 1h | 6h | 24h | 7d (默认 24h)
+ */
+export const getUsageSummary = (window: "1h" | "6h" | "24h" | "7d" = "24h") => {
+  return http.get<UsageSummary>("/dashboard/usage-summary", {
+    params: { window },
+  });
+};
 
 /**
  * 获取热门模型排行(按调用量倒序)。

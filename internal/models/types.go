@@ -46,6 +46,7 @@ type GroupConfig struct {
 	KeyValidationConcurrency     *int    `json:"key_validation_concurrency,omitempty"`
 	KeyValidationTimeoutSeconds  *int    `json:"key_validation_timeout_seconds,omitempty"`
 	EnableRequestBodyLogging     *bool   `json:"enable_request_body_logging,omitempty"`
+	ForceStreamUsage             *bool   `json:"force_stream_usage,omitempty"`
 }
 
 // HeaderRule defines a single rule for header manipulation.
@@ -244,6 +245,13 @@ type RequestLog struct {
 	UpstreamAddr    string    `gorm:"type:varchar(500)" json:"upstream_addr"`
 	IsStream        bool      `gorm:"not null" json:"is_stream"`
 	RequestBody     string    `gorm:"type:text" json:"request_body"`
+	// Token 用量与成本 (①成本可观测性)。由上游响应解析而来 (见 internal/usage);
+	// 上游未上报或未识别时为 0。CostUSD 是按挂牌价 (internal/pricing) 折算的估算,
+	// 免费源/未知模型为 0。GORM AutoMigrate 自动加这些数值列, 无需手写迁移。
+	PromptTokens     int     `gorm:"not null;default:0" json:"prompt_tokens"`
+	CompletionTokens int     `gorm:"not null;default:0" json:"completion_tokens"`
+	TotalTokens      int     `gorm:"not null;default:0" json:"total_tokens"`
+	CostUSD          float64 `gorm:"not null;default:0" json:"cost_usd"`
 }
 
 // StatCard 用于仪表盘的单个统计卡片数据

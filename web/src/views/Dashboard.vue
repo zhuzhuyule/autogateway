@@ -1,5 +1,12 @@
 <script setup lang="ts">
-import { getDashboardStats, getGroupList, getTopModels, type TopModelStat } from "@/api/dashboard";
+import {
+  getDashboardStats,
+  getGroupList,
+  getTopModels,
+  getUsageSummary,
+  type TopModelStat,
+  type UsageSummary,
+} from "@/api/dashboard";
 import { keysApi } from "@/api/keys";
 import { settingsApi } from "@/api/settings";
 import EncryptionMismatchAlert from "@/components/EncryptionMismatchAlert.vue";
@@ -38,6 +45,7 @@ const allGroups = ref<Group[]>([]);
 const groupStatsMap = ref<Record<string, { req24h: number; failed: number }>>({});
 const topModelsApi = ref<TopModelStat[]>([]);
 const topModelsLoaded = ref(false);
+const usageSummary = ref<UsageSummary | null>(null);
 const quickStartOpen = ref(false);
 
 onMounted(() => {
@@ -47,9 +55,19 @@ onMounted(() => {
 async function loadAll() {
   loading.value = true;
   try {
-    await Promise.all([loadStats(), loadGroupsAndStats(), loadTopModels()]);
+    await Promise.all([loadStats(), loadGroupsAndStats(), loadTopModels(), loadUsageSummary()]);
   } finally {
     loading.value = false;
+  }
+}
+
+async function loadUsageSummary() {
+  try {
+    const r = await getUsageSummary("24h");
+    usageSummary.value = (r as unknown as { data: UsageSummary }).data || null;
+  } catch (e) {
+    console.error("usage summary failed", e);
+    usageSummary.value = null;
   }
 }
 
@@ -152,6 +170,17 @@ function fmtNumber(v?: number): string {
     return `${(v / 1_000).toFixed(1)}K`;
   }
   return v.toLocaleString();
+}
+
+// fmtCost 把折算成本格式化成美元。小额 (<$1) 保留 4 位小数, 否则 2 位。
+function fmtCost(v?: number): string {
+  if (v == null) {
+    return "—";
+  }
+  if (v > 0 && v < 1) {
+    return `$${v.toFixed(4)}`;
+  }
+  return `$${v.toFixed(2)}`;
 }
 
 function fmtTrend(card?: StatCard): string {
@@ -654,6 +683,37 @@ async function copyText(value: string) {
       </div>
     </div>
 
+    <!-- Usage & list-price value (①成本可观测性) -->
+    <div v-if="usageSummary" class="v3-usage-strip">
+      <div class="v3-usage-strip__head">{{ t("v3.usageTitle") }}</div>
+      <div class="v3-usage-strip__cells">
+        <div class="v3-usage-cell">
+          <div class="v3-usage-cell__lbl">{{ t("v3.usageTokens") }}</div>
+          <div class="v3-usage-cell__val">{{ fmtNumber(usageSummary.total_tokens) }}</div>
+          <div class="v3-usage-cell__sub">
+            {{
+              t("v3.usageIO", {
+                prompt: fmtNumber(usageSummary.prompt_tokens),
+                completion: fmtNumber(usageSummary.completion_tokens),
+              })
+            }}
+          </div>
+        </div>
+        <div class="v3-usage-cell">
+          <div class="v3-usage-cell__lbl">
+            {{ t("v3.usageValue") }}
+            <span class="v3-usage-cell__tip" :title="t('v3.usageValueTip')">ⓘ</span>
+          </div>
+          <div class="v3-usage-cell__val" style="color: var(--v3-ok)">
+            {{ fmtCost(usageSummary.cost_usd) }}
+          </div>
+          <div class="v3-usage-cell__sub">
+            {{ t("v3.usageMetered", { n: usageSummary.metered_requests }) }}
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- Top models + Heat / Endpoints -->
     <div v-if="false" class="v3-dash-grid">
       <!-- Top models -->
@@ -849,5 +909,57 @@ async function copyText(value: string) {
 <style scoped>
 .v3-dash-chart {
   width: 100%;
+}
+
+.v3-usage-strip {
+  margin-top: 12px;
+  border: 1px solid var(--v3-line);
+  border-radius: var(--v3-radius-lg);
+  background: linear-gradient(180deg, #ffffff 0%, oklch(0.987 0.011 238) 100%);
+  box-shadow: var(--v3-shadow-sm);
+  padding: 14px 16px;
+}
+
+.v3-usage-strip__head {
+  font: 600 11px/1 var(--v3-mono);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--v3-ink-3);
+  margin-bottom: 12px;
+}
+
+.v3-usage-strip__cells {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.v3-usage-cell__lbl {
+  font-size: 12px;
+  color: var(--v3-ink-2);
+  margin-bottom: 4px;
+}
+
+.v3-usage-cell__tip {
+  cursor: help;
+  color: var(--v3-ink-3);
+  font-size: 11px;
+}
+
+.v3-usage-cell__val {
+  font: 700 22px/1.1 var(--v3-mono);
+  color: var(--v3-ink);
+}
+
+.v3-usage-cell__sub {
+  margin-top: 5px;
+  font: 400 11px/1.3 var(--v3-mono);
+  color: var(--v3-ink-3);
+}
+
+@media (max-width: 560px) {
+  .v3-usage-strip__cells {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

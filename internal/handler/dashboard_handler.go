@@ -247,6 +247,21 @@ func (s *Server) getRPMStats(now time.Time) (models.StatCard, error) {
 	}, nil
 }
 
+// dashboardLookback 把 window 查询参数 (1h|6h|24h|7d) 映射成回看时长,
+// 默认 24h。dashboard 的窗口型端点共用。
+func dashboardLookback(window string) time.Duration {
+	switch strings.TrimSpace(window) {
+	case "1h":
+		return time.Hour
+	case "6h":
+		return 6 * time.Hour
+	case "7d":
+		return 7 * 24 * time.Hour
+	default:
+		return 24 * time.Hour
+	}
+}
+
 // TopModelStat is one row of /api/dashboard/top-models.
 type TopModelStat struct {
 	Model     string   `json:"model"`
@@ -255,6 +270,9 @@ type TopModelStat struct {
 	Errors    int64    `json:"errors"`
 	ErrorRate float64  `json:"error_rate"`
 	Groups    []string `json:"groups"`
+	// ①成本可观测性: 窗口内该模型累计 token 与按挂牌价折算的成本 (免费源/未知模型 → 0)。
+	Tokens  int64   `json:"tokens"`
+	CostUSD float64 `json:"cost_usd"`
 }
 
 // TopModels returns the highest-volume models within the requested window.
@@ -265,29 +283,19 @@ type TopModelStat struct {
 //   - window: 1h | 6h | 24h | 7d (default 24h)
 //   - limit:  1..50 (default 10)
 func (s *Server) TopModels(c *gin.Context) {
-	window := strings.TrimSpace(c.DefaultQuery("window", "24h"))
-	var lookback time.Duration
-	switch window {
-	case "1h":
-		lookback = time.Hour
-	case "6h":
-		lookback = 6 * time.Hour
-	case "7d":
-		lookback = 7 * 24 * time.Hour
-	default:
-		lookback = 24 * time.Hour
-	}
-	since := time.Now().Add(-lookback)
+	since := time.Now().Add(-dashboardLookback(c.DefaultQuery("window", "24h")))
 
 	type row struct {
-		Model     string
-		Calls     int64
-		AvgMs    float64
-		Errors    int64
+		Model   string
+		Calls   int64
+		AvgMs   float64
+		Errors  int64
+		Tokens  int64
+		CostUSD float64
 	}
 	var rows []row
 	err := s.DB.Model(&models.RequestLog{}).
-		Select("model, COUNT(*) as calls, AVG(duration) as avg_ms, SUM(CASE WHEN is_success THEN 0 ELSE 1 END) as errors").
+		Select("model, COUNT(*) as calls, AVG(duration) as avg_ms, SUM(CASE WHEN is_success THEN 0 ELSE 1 END) as errors, COALESCE(SUM(total_tokens),0) as tokens, COALESCE(SUM(cost_usd),0) as cost_usd").
 		Where("timestamp >= ? AND request_type = ? AND model IS NOT NULL AND model != ''", since, models.RequestTypeFinal).
 		Group("model").
 		Order("calls DESC").
@@ -331,6 +339,8 @@ func (s *Server) TopModels(c *gin.Context) {
 			Errors:    r.Errors,
 			ErrorRate: errRate,
 			Groups:    groupsByModel[r.Model],
+			Tokens:    r.Tokens,
+			CostUSD:   r.CostUSD,
 		})
 	}
 
@@ -351,19 +361,7 @@ type ModelTiming struct {
 // GET /api/dashboard/model-timings?window=24h
 //   - window: 1h | 6h | 24h | 7d (default 24h)
 func (s *Server) ModelTimings(c *gin.Context) {
-	window := strings.TrimSpace(c.DefaultQuery("window", "24h"))
-	var lookback time.Duration
-	switch window {
-	case "1h":
-		lookback = time.Hour
-	case "6h":
-		lookback = 6 * time.Hour
-	case "7d":
-		lookback = 7 * 24 * time.Hour
-	default:
-		lookback = 24 * time.Hour
-	}
-	since := time.Now().Add(-lookback)
+	since := time.Now().Add(-dashboardLookback(c.DefaultQuery("window", "24h")))
 
 	type row struct {
 		Model string
@@ -389,6 +387,40 @@ func (s *Server) ModelTimings(c *gin.Context) {
 			Calls: r.Calls,
 		})
 	}
+	response.Success(c, out)
+}
+
+// UsageSummaryResponse 是 /api/dashboard/usage-summary 的响应。
+type UsageSummaryResponse struct {
+	PromptTokens     int64   `json:"prompt_tokens"`
+	CompletionTokens int64   `json:"completion_tokens"`
+	TotalTokens      int64   `json:"total_tokens"`
+	CostUSD          float64 `json:"cost_usd"`         // 按挂牌价折算的等价价值 (免费源实际支出为 0)
+	MeteredRequests  int64   `json:"metered_requests"` // 窗口内成功解析出用量的请求数
+}
+
+// UsageSummary 汇总窗口内的 token 用量与按挂牌价折算的成本 (①成本可观测性)。
+// 数据来自 RequestLog, 受日志保留策略限制 —— 因此只做窗口 (1h|6h|24h|7d) 视图,
+// 月度长周期需另把 token 卷进 group_hourly_stats (后续)。
+//
+// GET /api/dashboard/usage-summary?window=24h
+func (s *Server) UsageSummary(c *gin.Context) {
+	since := time.Now().Add(-dashboardLookback(c.DefaultQuery("window", "24h")))
+
+	var out UsageSummaryResponse
+	err := s.DB.Model(&models.RequestLog{}).
+		Select("COALESCE(SUM(prompt_tokens),0) as prompt_tokens, "+
+			"COALESCE(SUM(completion_tokens),0) as completion_tokens, "+
+			"COALESCE(SUM(total_tokens),0) as total_tokens, "+
+			"COALESCE(SUM(cost_usd),0) as cost_usd, "+
+			"COUNT(CASE WHEN total_tokens > 0 THEN 1 END) as metered_requests").
+		Where("timestamp >= ? AND request_type = ?", since, models.RequestTypeFinal).
+		Scan(&out).Error
+	if err != nil {
+		response.ErrorI18nFromAPIError(c, app_errors.ErrDatabase, "database.cannot_get_top_models")
+		return
+	}
+
 	response.Success(c, out)
 }
 

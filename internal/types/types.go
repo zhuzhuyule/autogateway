@@ -33,6 +33,7 @@ type SystemSettings struct {
 	IdleConnTimeout       int    `json:"idle_conn_timeout" default:"120" name:"config.idle_conn_timeout" category:"config.category.request" desc:"config.idle_conn_timeout_desc" validate:"required,min=1"`
 	ResponseHeaderTimeout int    `json:"response_header_timeout" default:"600" name:"config.response_header_timeout" category:"config.category.request" desc:"config.response_header_timeout_desc" validate:"required,min=1"`
 	StreamIdleTimeout     int    `json:"stream_idle_timeout" default:"0" name:"config.stream_idle_timeout" category:"config.category.request" desc:"config.stream_idle_timeout_desc" validate:"min=0"`
+	ForceStreamUsage      bool   `json:"force_stream_usage" default:"false" name:"config.force_stream_usage" category:"config.category.request" desc:"config.force_stream_usage_desc"`
 	MaxIdleConns          int    `json:"max_idle_conns" default:"100" name:"config.max_idle_conns" category:"config.category.request" desc:"config.max_idle_conns_desc" validate:"required,min=1"`
 	MaxIdleConnsPerHost   int    `json:"max_idle_conns_per_host" default:"50" name:"config.max_idle_conns_per_host" category:"config.category.request" desc:"config.max_idle_conns_per_host_desc" validate:"required,min=1"`
 	ProxyURL              string `json:"proxy_url" name:"config.proxy_url" category:"config.category.request" desc:"config.proxy_url_desc"`

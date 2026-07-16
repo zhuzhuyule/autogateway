@@ -9,6 +9,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"autogateway/internal/usage"
+
 	"github.com/gin-gonic/gin"
 	"github.com/sirupsen/logrus"
 )
@@ -22,11 +24,12 @@ const firstChunkBufCap = 64 * 1024
 // (server.go 成功块) 可安全 failover (因为还没向客户端发头/发数据);
 // wroteToClient=true 一旦置位, 即便后续出错也不能再 failover.
 type streamOutcome struct {
-	wroteToClient bool   // 是否已经向客户端发头并写过数据
-	failed        bool   // 本次转发是否失败 (空流 / error 帧 / 读错误)
-	statusCode    int    // failover 用的状态码 (0 = 网络/读错误)
-	parsedError   string // failover 用的错误信息
-	truncated     bool   // 流已写给客户端但未正常终止 (无 [DONE]/finish_reason)
+	wroteToClient bool        // 是否已经向客户端发头并写过数据
+	failed        bool        // 本次转发是否失败 (空流 / error 帧 / 读错误)
+	statusCode    int         // failover 用的状态码 (0 = 网络/读错误)
+	parsedError   string      // failover 用的错误信息
+	truncated     bool        // 流已写给客户端但未正常终止 (无 [DONE]/finish_reason)
+	usage         usage.Usage // ①成本可观测性: 从 SSE 帧累积的 token 用量 (末帧带, 逐帧 max 合并)
 }
 
 // streamWithIntegrity 是 ProxyServer 上的方法封装, 供 server.go 成功块调用.
@@ -131,10 +134,13 @@ func flushAndStream(c *gin.Context, resp *http.Response, buffered *bytes.Buffer,
 		idleTimer    *time.Timer
 		// M1: atomic.Bool 避免 AfterFunc goroutine 与主循环的数据竞争.
 		idleExpired atomic.Bool
+		// ①成本可观测性: 逐帧累积 token 用量 (对所有渠道扫描, 非仅 OpenAI).
+		usageAcc usage.Usage
 	)
 
 	if buffered.Len() > 0 {
 		// 在写给客户端之前先扫描缓冲区 (含 header-hold 期间捕获的首帧).
+		scanUsage(buffered.Bytes(), &usageAcc)
 		if isOpenAI {
 			bufferedBytes := buffered.Bytes()
 			if !seenDone {
@@ -178,6 +184,9 @@ func flushAndStream(c *gin.Context, resp *http.Response, buffered *bytes.Buffer,
 			}
 
 			chunk := buf[:n]
+
+			// ①成本可观测性: 扫描本批次里的 usage 帧 (max 合并, 幂等).
+			scanUsage(chunk, &usageAcc)
 
 			// 截断检测 + tool_call 补全检测: 扫描本批次字节里的 SSE data 行.
 			if isOpenAI && !seenDone {
@@ -230,7 +239,7 @@ func flushAndStream(c *gin.Context, resp *http.Response, buffered *bytes.Buffer,
 		flusher.Flush()
 	}
 
-	outcome := streamOutcome{wroteToClient: true}
+	outcome := streamOutcome{wroteToClient: true, usage: usageAcc}
 	if isOpenAI && !seenDone {
 		// 若补了 finish_reason (tool_calls 补全路径), 视为已规整, 不标 truncated.
 		if sawToolCalls && !sawFinish {
@@ -241,6 +250,25 @@ func flushAndStream(c *gin.Context, resp *http.Response, buffered *bytes.Buffer,
 		}
 	}
 	return outcome
+}
+
+// scanUsage 扫描一批 SSE 字节, 对每个 data 帧尝试解析 token 用量并 max 合并进
+// acc。对所有渠道生效 (Anthropic/Gemini 流总带 usage; OpenAI 仅在客户端传
+// stream_options.include_usage 时末帧才带)。max 合并保证幂等, 帧被重复扫描
+// (如 buffered 首帧) 也不会重复计数。
+//
+// 已知局限: 单个 usage JSON 帧若恰好被 32KB 读边界劈成两半, 两半都解析不出 ——
+// 与现有 scanForCompletion 同款权衡, 概率极低 (usage 帧短小且多在流尾单独到达)。
+func scanUsage(chunk []byte, acc *usage.Usage) {
+	for _, line := range bytes.Split(chunk, []byte("\n")) {
+		payload := parseDataLine(line)
+		if payload == nil || bytes.Equal(payload, []byte("[DONE]")) {
+			continue
+		}
+		if u, ok := usage.Extract(payload); ok {
+			*acc = acc.Merge(u)
+		}
+	}
 }
 
 // scanForCompletion 检查一批 SSE 字节里是否含有流正常结束的信号:
