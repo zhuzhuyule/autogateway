@@ -102,6 +102,15 @@ func (ch *charTestChannel) ModifyRequest(req *http.Request, apiKey *models.APIKe
 }
 func (ch *charTestChannel) IsStreamRequest(c *gin.Context, bodyBytes []byte) bool { return false }
 func (ch *charTestChannel) ExtractModel(c *gin.Context, bodyBytes []byte) string {
+	// Parse the model from the JSON body like the real channels do, so pricing
+	// resolves in the cost-capture E2E. Failover tests pass "test-model" and get
+	// the same value back — no behavior change for them.
+	var b struct {
+		Model string `json:"model"`
+	}
+	if json.Unmarshal(bodyBytes, &b) == nil && b.Model != "" {
+		return b.Model
+	}
 	return "test-model"
 }
 func (ch *charTestChannel) ValidateKey(ctx context.Context, apiKey *models.APIKey, group *models.Group) channel.ValidateResult {
