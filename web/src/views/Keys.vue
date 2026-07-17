@@ -113,3 +113,12 @@ function handleSubGroupSelect(groupId: number) {
     </div>
   </div>
 </template>
+
+<style scoped>
+/* 宽屏约束: 2K 下详情面板不再横向拉伸, 整页内容居中(与 dashboard 一致) */
+.v3-page-keys {
+  max-width: 1640px;
+  margin: 0 auto;
+  width: 100%;
+}
+</style>

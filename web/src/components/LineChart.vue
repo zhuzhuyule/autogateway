@@ -465,6 +465,7 @@ onMounted(() => {
         <svg
           ref="chartSvg"
           viewBox="0 0 800 260"
+          preserveAspectRatio="none"
           class="chart-svg"
           @mousemove="handleMouseMove"
           @mouseleave="hideTooltip"

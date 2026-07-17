@@ -151,10 +151,19 @@
 }
 
 .v5-hero__stats {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 22px;
-  padding: 20px 0 22px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 18px 0 20px;
+}
+/* 统计做成紧凑左聚拢的 stat 卡, 不再 4 等分铺满宽屏 */
+.v5-hero__stats > * {
+  flex: 0 1 auto;
+  min-width: 150px;
+  padding: 11px 15px;
+  border: 1px solid var(--v3-line);
+  border-radius: var(--v3-radius-md, 8px);
+  background: var(--v3-surface);
 }
 .v5-hero__stat-l {
   font: 500 10.5px/1 var(--v3-sans);
@@ -163,8 +172,8 @@
   text-transform: uppercase;
 }
 .v5-hero__stat-v {
-  font: 600 26px/1 var(--v3-sans);
-  margin-top: 8px;
+  font: 600 22px/1 var(--v3-sans);
+  margin-top: 7px;
   color: var(--v3-ink);
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.02em;
@@ -1580,9 +1589,9 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .v5-hero__stats {
-    grid-template-columns: repeat(2, 1fr);
-    gap: 14px;
+  .v5-hero__stats > * {
+    flex: 1 1 140px;
+    min-width: 0;
   }
   .v5-qs__row {
     grid-template-columns: 1fr;

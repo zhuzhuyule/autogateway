@@ -264,6 +264,17 @@ const kpis = computed<KpiSpec[]>(() => {
   ];
 });
 
+// 请求概览环形图数据 — 复用 stats(request_count 总量 + error_rate 错误率),无需新接口。
+const reqOverview = computed(() => {
+  const s = stats.value;
+  const total = Math.round(s?.request_count?.value ?? 0);
+  const errorRate = s?.error_rate?.value ?? 0;
+  const failures = Math.round((total * errorRate) / 100);
+  const success = Math.max(0, total - failures);
+  const successPct = total > 0 ? (success / total) * 100 : 0;
+  return { total, errorRate, failures, success, successPct };
+});
+
 const baseUrl = computed(() => `${window.location.protocol}//${window.location.host}`);
 
 // 系统聚合复制用的根 URL — 与下方 endpoints 数组保持一致, 复制到 /vN 即可,
@@ -919,7 +930,7 @@ async function copyText(value: string) {
       </div>
     </div>
 
-    <!-- Time-series chart (existing component) -->
+    <!-- Request overview: area trend (left) + success/failure donut & stats (right) -->
     <div class="v3-card">
       <div class="v3-card__head">
         <div>
@@ -928,7 +939,67 @@ async function copyText(value: string) {
         </div>
       </div>
       <div class="v3-card__body">
-        <line-chart class="v3-dash-chart" />
+        <div class="v3-req-panel">
+          <div class="v3-req-chart">
+            <line-chart class="v3-dash-chart" />
+          </div>
+          <div class="v3-req-side">
+            <div class="v3-req-donut">
+              <svg viewBox="0 0 36 36" class="v3-donut">
+                <circle class="v3-donut__base" cx="18" cy="18" r="15.915" />
+                <template v-if="reqOverview.total > 0">
+                  <circle
+                    class="v3-donut__ok"
+                    cx="18"
+                    cy="18"
+                    r="15.915"
+                    :stroke-dasharray="`${reqOverview.successPct} ${100 - reqOverview.successPct}`"
+                    stroke-dashoffset="0"
+                  />
+                  <circle
+                    class="v3-donut__bad"
+                    cx="18"
+                    cy="18"
+                    r="15.915"
+                    :stroke-dasharray="`${100 - reqOverview.successPct} ${reqOverview.successPct}`"
+                    :stroke-dashoffset="-reqOverview.successPct"
+                  />
+                </template>
+              </svg>
+              <div class="v3-donut__center">
+                <div class="v3-donut__pct">
+                  {{ reqOverview.total > 0 ? reqOverview.successPct.toFixed(1) + "%" : "—" }}
+                </div>
+                <div class="v3-donut__cap">{{ t("v3.successRate") }}</div>
+              </div>
+            </div>
+            <div class="v3-req-legend">
+              <div class="v3-req-legend__row">
+                <span class="v3-dot v3-dot--ok" />{{ t("v3.successReq") }}
+                <span class="v3-req-legend__val">{{ fmtNumber(reqOverview.success) }}</span>
+              </div>
+              <div class="v3-req-legend__row">
+                <span class="v3-dot v3-dot--danger" />{{ t("v3.failedReq") }}
+                <span class="v3-req-legend__val">{{ fmtNumber(reqOverview.failures) }}</span>
+              </div>
+            </div>
+            <div class="v3-req-stats">
+              <div class="v3-req-stat">
+                <div class="v3-req-stat__lbl">{{ t("v3.totalReq") }}</div>
+                <div class="v3-req-stat__val">{{ fmtNumber(reqOverview.total) }}</div>
+              </div>
+              <div class="v3-req-stat">
+                <div class="v3-req-stat__lbl">{{ t("v3.errorRate") }}</div>
+                <div
+                  class="v3-req-stat__val"
+                  :style="{ color: reqOverview.errorRate > 5 ? 'var(--v3-danger)' : 'var(--v3-ink)' }"
+                >
+                  {{ reqOverview.errorRate.toFixed(2) }}%
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -943,8 +1014,7 @@ async function copyText(value: string) {
   margin-top: 12px;
   border: 1px solid var(--v3-line);
   border-radius: var(--v3-radius-lg);
-  background: linear-gradient(180deg, #ffffff 0%, oklch(0.987 0.011 238) 100%);
-  box-shadow: var(--v3-shadow-sm);
+  background: var(--v3-surface, #ffffff);
   padding: 14px 16px;
 }
 
@@ -995,6 +1065,190 @@ async function copyText(value: string) {
 
 @media (max-width: 560px) {
   .v3-usage-strip__cells {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* 请求概览面板: 左面积图 + 右环形图/数字 */
+.v3-req-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(220px, 1fr);
+  gap: 20px;
+  align-items: center;
+}
+.v3-req-chart {
+  min-width: 0;
+}
+/* 卡死图表高度 — LineChart 的 SVG 默认 height:auto 会按 viewBox 比例在宽屏撑成巨图 */
+.v3-req-chart :deep(.chart-svg) {
+  height: 236px !important;
+  min-height: 0 !important;
+  width: 100%;
+}
+.v3-req-side {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding-left: 20px;
+  border-left: 1px solid var(--v3-line);
+  justify-content: center;
+}
+.v3-req-donut {
+  position: relative;
+  width: 128px;
+  height: 128px;
+  margin: 0 auto;
+}
+.v3-donut {
+  width: 100%;
+  height: 100%;
+  transform: rotate(-90deg);
+}
+.v3-donut__base {
+  fill: none;
+  stroke: var(--v3-line);
+  stroke-width: 3.4;
+}
+.v3-donut__ok {
+  fill: none;
+  stroke: var(--v3-ok);
+  stroke-width: 3.4;
+  transition: stroke-dasharray 0.5s ease;
+}
+.v3-donut__bad {
+  fill: none;
+  stroke: var(--v3-danger);
+  stroke-width: 3.4;
+}
+.v3-donut__center {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+.v3-donut__pct {
+  font: 700 22px/1 var(--v3-mono);
+  color: var(--v3-ink);
+}
+.v3-donut__cap {
+  margin-top: 3px;
+  font-size: 11px;
+  color: var(--v3-ink-3);
+}
+.v3-req-legend {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.v3-req-legend__row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12.5px;
+  color: var(--v3-ink-2);
+}
+.v3-req-legend__val {
+  margin-left: auto;
+  font: 600 12.5px/1 var(--v3-mono);
+  color: var(--v3-ink);
+}
+.v3-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  flex: none;
+}
+.v3-dot--ok {
+  background: var(--v3-ok);
+}
+.v3-dot--danger {
+  background: var(--v3-danger);
+}
+.v3-req-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  border-top: 1px solid var(--v3-line);
+  padding-top: 14px;
+}
+.v3-req-stat__lbl {
+  font-size: 11.5px;
+  color: var(--v3-ink-3);
+  margin-bottom: 3px;
+}
+.v3-req-stat__val {
+  font: 700 17px/1.1 var(--v3-mono);
+  color: var(--v3-ink);
+}
+@media (max-width: 900px) {
+  .v3-req-panel {
+    grid-template-columns: 1fr;
+  }
+  .v3-req-side {
+    border-left: none;
+    border-top: 1px solid var(--v3-line);
+    padding-left: 0;
+    padding-top: 16px;
+  }
+}
+
+/* ============================================================
+   Pass A — 扁平化 + 宽屏约束 + 响应式(全 scoped, 零波及其它页)
+   风格: Data-Dense Dashboard — 去渐变/去阴影, 边框表达层次, 收紧宽度
+   ============================================================ */
+
+/* 宽屏约束: 2K 下不再横向拉伸, 内容居中 */
+.dashboard-page {
+  max-width: 1640px;
+  margin: 0 auto;
+  --v3-shadow-sm: none;
+}
+
+/* 扁平卡片: 去渐变背景 + 去阴影, 仅留 1px 边框 */
+.dashboard-page :deep(.v5-agg),
+.v3-kpi,
+.v3-card,
+.v3-heat-card {
+  background: var(--v3-surface, #ffffff);
+  box-shadow: none;
+  border: 1px solid var(--v3-line);
+}
+
+/* KPI 卡收紧内边距, 信息密度更高 */
+.v3-kpi {
+  min-height: 84px;
+  padding: 13px 15px;
+}
+
+/* 响应式列数: 随可用宽度换行, 而非一味拉伸 */
+.v3-kpi-row {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+@media (max-width: 1280px) {
+  .v3-kpi-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 620px) {
+  .v3-kpi-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* 聚合分组卡: 3 → 2 → 1 */
+.dashboard-page :deep(.v5-agg-grid) {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+@media (max-width: 1180px) {
+  .dashboard-page :deep(.v5-agg-grid) {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 720px) {
+  .dashboard-page :deep(.v5-agg-grid) {
     grid-template-columns: 1fr;
   }
 }

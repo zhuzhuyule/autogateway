@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { keysApi } from "@/api/keys";
 import { aliasesApi, type ModelAliasRow } from "@/api/aliases";
+import { getModelTimings, type ModelTiming } from "@/api/dashboard";
 import KeyCreateDialog from "@/components/keys/KeyCreateDialog.vue";
 import KeyDeleteDialog from "@/components/keys/KeyDeleteDialog.vue";
 import GroupCopyModal from "@/components/keys/GroupCopyModal.vue";
@@ -308,6 +309,7 @@ function stopHealthPoll() {
 }
 onMounted(() => {
   startHealthPoll();
+  loadModelCosts();
   // P8.9 修 TDZ: 之前 watch immediate:true 在 setup 早期跑, 访问还没声明
   // 的 modelSearch / availFilter ref → ReferenceError. 改 onMounted 时
   // 调一次 (setup 已完成所有 ref init), 后续靠下面的 non-immediate watch
@@ -678,6 +680,54 @@ const groupModels = computed<string[]>(() => {
   }
   return mergeWithRegistry(base);
 });
+
+// 模型 → 服务它的子分组(provider)名列表. 聚合视图用: 每个模型标出由哪些
+// 子分组供给. 归一化按 lowercase 与 groupModels 对齐.
+const modelProviderMap = computed<Map<string, string[]>>(() => {
+  const m = new Map<string, string[]>();
+  if (!isAggregate.value) return m;
+  for (const sg of subGroups.value) {
+    const name = sg.group?.display_name || sg.group?.name || "";
+    if (!name) continue;
+    for (const raw of effectiveModelsFor(sg.group)) {
+      const key = (raw || "").trim().toLowerCase();
+      if (!key) continue;
+      const arr = m.get(key) || [];
+      if (!arr.includes(name)) arr.push(name);
+      m.set(key, arr);
+    }
+  }
+  return m;
+});
+function providersFor(modelId: string): string[] {
+  return modelProviderMap.value.get(modelId.toLowerCase()) || [];
+}
+
+// model → 24h 折算成本/用量, 给模型卡挂成本 chip(①成本可观测性). 与 ModelCatalog 同款.
+const modelCostMap = ref<Record<string, { cost: number; tokens: number }>>({});
+async function loadModelCosts() {
+  try {
+    const r = await getModelTimings("24h");
+    const list: ModelTiming[] = (r as unknown as { data: ModelTiming[] }).data || [];
+    const m: Record<string, { cost: number; tokens: number }> = {};
+    for (const t of list) {
+      if (t?.model) m[t.model] = { cost: t.cost_usd || 0, tokens: t.tokens || 0 };
+    }
+    modelCostMap.value = m;
+  } catch {
+    /* swallow — chip 纯装饰 */
+  }
+}
+function costChipFor(modelId: string): string {
+  const c = modelCostMap.value[modelId];
+  if (!c) return "";
+  if (c.cost > 0) return c.cost < 1 ? `$${c.cost.toFixed(4)}` : `$${c.cost.toFixed(2)}`;
+  if (c.tokens > 0) {
+    const tok = c.tokens >= 1000 ? `${(c.tokens / 1000).toFixed(1)}K` : `${c.tokens}`;
+    return `${tok} tok`;
+  }
+  return "";
+}
 
 // Aggregate-only stats
 const aggKeyTotal = computed(() =>
@@ -2405,6 +2455,24 @@ const filterCounts = computed(() => ({
                 </n-tooltip>
                 <CapabilityIcons :tags="tagsForModel(modelId)" :size="11" />
 
+                <span
+                  v-if="isAggregate && providersFor(modelId).length"
+                  class="v3-chip v5-modelcard__provider"
+                  style="flex-shrink: 0; font-size: 10px"
+                  :title="t('v5.servedBy', { providers: providersFor(modelId).join(', ') })"
+                >
+                  {{ providersFor(modelId)[0]
+                  }}<template v-if="providersFor(modelId).length > 1"> +{{ providersFor(modelId).length - 1 }}</template>
+                </span>
+                <span
+                  v-if="costChipFor(modelId)"
+                  class="v3-chip"
+                  style="flex-shrink: 0; font-size: 10px"
+                  :title="t('v5.costChipTip')"
+                >
+                  {{ costChipFor(modelId) }}
+                </span>
+
                 <span v-if="blockedSet.has(modelId)" class="v3-chip v3-chip--danger" style="flex-shrink: 0; font-size: 10px">
                   🚫 {{ t("v3.blocked") || "blocked" }}
                 </span>
@@ -2520,6 +2588,24 @@ const filterCounts = computed(() => ({
                 </n-tooltip>
                 <CapabilityIcons :tags="tagsForModel(modelId)" :size="11" />
 
+                <span
+                  v-if="isAggregate && providersFor(modelId).length"
+                  class="v3-chip v5-modelcard__provider"
+                  style="flex-shrink: 0; font-size: 10px"
+                  :title="t('v5.servedBy', { providers: providersFor(modelId).join(', ') }) || ('由 ' + providersFor(modelId).join(', ') + ' 提供')"
+                >
+                  {{ providersFor(modelId)[0]
+                  }}<template v-if="providersFor(modelId).length > 1"> +{{ providersFor(modelId).length - 1 }}</template>
+                </span>
+                <span
+                  v-if="costChipFor(modelId)"
+                  class="v3-chip"
+                  style="flex-shrink: 0; font-size: 10px"
+                  :title="t('v5.costChipTip') || '折算成本 · 24h(免费源显示用量 token)'"
+                >
+                  {{ costChipFor(modelId) }}
+                </span>
+
                 <span v-if="blockedSet.has(modelId)" class="v3-chip v3-chip--danger" style="flex-shrink: 0; font-size: 10px">
                   🚫 {{ t("v3.blocked") || "blocked" }}
                 </span>
@@ -2631,6 +2717,24 @@ const filterCounts = computed(() => ({
                   {{ speedReasonFor(modelId) }}
                 </n-tooltip>
                 <CapabilityIcons :tags="tagsForModel(modelId)" :size="11" />
+
+                <span
+                  v-if="isAggregate && providersFor(modelId).length"
+                  class="v3-chip v5-modelcard__provider"
+                  style="flex-shrink: 0; font-size: 10px"
+                  :title="t('v5.servedBy', { providers: providersFor(modelId).join(', ') })"
+                >
+                  {{ providersFor(modelId)[0]
+                  }}<template v-if="providersFor(modelId).length > 1"> +{{ providersFor(modelId).length - 1 }}</template>
+                </span>
+                <span
+                  v-if="costChipFor(modelId)"
+                  class="v3-chip"
+                  style="flex-shrink: 0; font-size: 10px"
+                  :title="t('v5.costChipTip')"
+                >
+                  {{ costChipFor(modelId) }}
+                </span>
 
                 <span v-if="blockedSet.has(modelId)" class="v3-chip v3-chip--danger" style="flex-shrink: 0; font-size: 10px">
                   🚫 {{ t("v3.blocked") || "blocked" }}
