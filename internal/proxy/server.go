@@ -765,6 +765,7 @@ func (ps *ProxyServer) logRequest(
 		logEntry.PromptTokens = u.PromptTokens
 		logEntry.CompletionTokens = u.CompletionTokens
 		logEntry.TotalTokens = u.TotalTokens
+		logEntry.CachedPromptTokens = u.CachedPromptTokens
 		logEntry.CostUSD = pricing.Cost(logEntry.Model, u)
 	}
 

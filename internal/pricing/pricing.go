@@ -80,13 +80,43 @@ func Lookup(model string) (Rate, bool) {
 	return Rate{}, false
 }
 
+// cacheMultFor 返回缓存输入相对满额输入价的倍率 (按 provider 家族)。缓存读
+// 计费各家不同: Anthropic ~0.1x / OpenAI ~0.5x / Gemini ~0.25x / DeepSeek ~0.1x。
+// 未知家族用保守默认 0.5。定价本就是估算, 这里也只求量级正确。
+func cacheMultFor(model string) float64 {
+	m := strings.ToLower(model)
+	switch {
+	case strings.Contains(m, "claude"), strings.Contains(m, "sonnet"),
+		strings.Contains(m, "haiku"), strings.Contains(m, "opus"):
+		return 0.1
+	case strings.Contains(m, "deepseek"):
+		return 0.1
+	case strings.Contains(m, "gemini"), strings.Contains(m, "flash"):
+		return 0.25
+	default:
+		return 0.5
+	}
+}
+
 // Cost 按挂牌价折算一次请求的美元成本。模型未知返回 0。
+//
+// 缓存命中的输入 (u.CachedPromptTokens) 按 cacheMultFor 打折计费 —— 修正对
+// 缓存密集型工作负载 (编码工具反复带同一大 prompt) 的成本高估。
 func Cost(model string, u usage.Usage) float64 {
 	rate, ok := Lookup(model)
 	if !ok {
 		return 0
 	}
 	const perMillion = 1_000_000.0
-	return float64(u.PromptTokens)/perMillion*rate.InputPerM +
+
+	cached := u.CachedPromptTokens
+	if cached > u.PromptTokens {
+		cached = u.PromptTokens
+	}
+	nonCached := u.PromptTokens - cached
+	cacheMult := cacheMultFor(model)
+
+	return float64(nonCached)/perMillion*rate.InputPerM +
+		float64(cached)/perMillion*rate.InputPerM*cacheMult +
 		float64(u.CompletionTokens)/perMillion*rate.OutputPerM
 }

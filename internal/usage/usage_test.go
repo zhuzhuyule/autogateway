@@ -12,25 +12,25 @@ func TestExtract_NonStream(t *testing.T) {
 		{
 			name:    "openai chat",
 			payload: `{"id":"x","choices":[],"usage":{"prompt_tokens":10,"completion_tokens":20,"total_tokens":30}}`,
-			want:    Usage{10, 20, 30},
+			want:    Usage{10, 20, 30, 0},
 			wantOK:  true,
 		},
 		{
 			name:    "openai responses (input/output tokens)",
 			payload: `{"usage":{"input_tokens":100,"output_tokens":40,"total_tokens":140}}`,
-			want:    Usage{100, 40, 140},
+			want:    Usage{100, 40, 140, 0},
 			wantOK:  true,
 		},
 		{
 			name:    "anthropic (no total → computed)",
 			payload: `{"type":"message","usage":{"input_tokens":25,"output_tokens":250}}`,
-			want:    Usage{25, 250, 275},
+			want:    Usage{25, 250, 275, 0},
 			wantOK:  true,
 		},
 		{
 			name:    "gemini usageMetadata",
 			payload: `{"usageMetadata":{"promptTokenCount":8,"candidatesTokenCount":16,"totalTokenCount":24}}`,
-			want:    Usage{8, 16, 24},
+			want:    Usage{8, 16, 24, 0},
 			wantOK:  true,
 		},
 		{
@@ -109,7 +109,7 @@ func TestExtract_OpenAIStream(t *testing.T) {
 	if hits != 1 {
 		t.Fatalf("expected exactly 1 usage frame, got %d", hits)
 	}
-	want := Usage{12, 8, 20}
+	want := Usage{12, 8, 20, 0}
 	if acc != want {
 		t.Fatalf("accumulated = %+v, want %+v", acc, want)
 	}
@@ -120,7 +120,7 @@ func TestMerge_MaxPerField(t *testing.T) {
 	b := Usage{PromptTokens: 25, CompletionTokens: 250, TotalTokens: 0}
 	got := a.Merge(b)
 	// total 派生为 max(0, 25+250)=275。
-	if got != (Usage{25, 250, 275}) {
+	if got != (Usage{25, 250, 275, 0}) {
 		t.Fatalf("merge = %+v", got)
 	}
 }
@@ -132,5 +132,59 @@ func TestMerge_KeepsLargerReportedTotal(t *testing.T) {
 	got := a.Merge(Usage{})
 	if got.TotalTokens != 100 {
 		t.Fatalf("total = %d, want 100", got.TotalTokens)
+	}
+}
+
+// TestExtract_CachedTokens 验证三家缓存字段解析 + 语义归一化:
+// PromptTokens 始终是"总输入"(含缓存), CachedPromptTokens 是其中缓存读子集。
+func TestExtract_CachedTokens(t *testing.T) {
+	cases := []struct {
+		name           string
+		payload        string
+		wantPrompt     int
+		wantCached     int
+		wantCompletion int
+	}{
+		{
+			// OpenAI: prompt_tokens 已含缓存, cached_tokens 是子集。
+			name:           "openai prompt_tokens_details.cached_tokens",
+			payload:        `{"usage":{"prompt_tokens":1000,"completion_tokens":100,"total_tokens":1100,"prompt_tokens_details":{"cached_tokens":800}}}`,
+			wantPrompt:     1000,
+			wantCached:     800,
+			wantCompletion: 100,
+		},
+		{
+			// Anthropic: input_tokens 不含缓存, 需把 cache_read+cache_creation 补进总输入。
+			name:           "anthropic cache_read + cache_creation",
+			payload:        `{"usage":{"input_tokens":200,"output_tokens":50,"cache_read_input_tokens":800,"cache_creation_input_tokens":100}}`,
+			wantPrompt:     1100, // 200 + 800 + 100
+			wantCached:     800,  // 仅缓存读打折
+			wantCompletion: 50,
+		},
+		{
+			// Gemini: promptTokenCount 已含缓存。
+			name:           "gemini cachedContentTokenCount",
+			payload:        `{"usageMetadata":{"promptTokenCount":1000,"candidatesTokenCount":100,"totalTokenCount":1100,"cachedContentTokenCount":600}}`,
+			wantPrompt:     1000,
+			wantCached:     600,
+			wantCompletion: 100,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := Extract([]byte(tc.payload))
+			if !ok {
+				t.Fatalf("expected ok")
+			}
+			if got.PromptTokens != tc.wantPrompt {
+				t.Fatalf("prompt = %d, want %d", got.PromptTokens, tc.wantPrompt)
+			}
+			if got.CachedPromptTokens != tc.wantCached {
+				t.Fatalf("cached = %d, want %d", got.CachedPromptTokens, tc.wantCached)
+			}
+			if got.CompletionTokens != tc.wantCompletion {
+				t.Fatalf("completion = %d, want %d", got.CompletionTokens, tc.wantCompletion)
+			}
+		})
 	}
 }

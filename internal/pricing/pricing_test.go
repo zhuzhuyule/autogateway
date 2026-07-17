@@ -69,3 +69,23 @@ func TestLookupPrecedence(t *testing.T) {
 		t.Fatalf("haiku output = %v, want 4", r.OutputPerM)
 	}
 }
+
+// TestCost_CacheDiscount 验证缓存输入按折扣计费, 且低于全额。
+func TestCost_CacheDiscount(t *testing.T) {
+	// claude sonnet: in $3/1M, cacheMult 0.1. prompt=1000(cached 800), completion=100.
+	u := usage.Usage{PromptTokens: 1000, CompletionTokens: 100, CachedPromptTokens: 800}
+	withCache := Cost("claude-3-5-sonnet-20241022", u)
+	// (1000-800)/1e6*3 + 800/1e6*3*0.1 + 100/1e6*15 = 0.0006 + 0.00024 + 0.0015 = 0.00234
+	if !approx(withCache, 0.00234) {
+		t.Fatalf("cached cost = %v, want 0.00234", withCache)
+	}
+
+	// 同样 token 但无缓存 → 更贵。
+	full := Cost("claude-3-5-sonnet-20241022", usage.Usage{PromptTokens: 1000, CompletionTokens: 100})
+	if !(withCache < full) {
+		t.Fatalf("cached cost %v should be < full cost %v", withCache, full)
+	}
+	if !approx(full, 0.0045) {
+		t.Fatalf("full cost = %v, want 0.0045", full)
+	}
+}

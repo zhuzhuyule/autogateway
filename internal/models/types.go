@@ -252,6 +252,9 @@ type RequestLog struct {
 	CompletionTokens int     `gorm:"not null;default:0" json:"completion_tokens"`
 	TotalTokens      int     `gorm:"not null;default:0" json:"total_tokens"`
 	CostUSD          float64 `gorm:"not null;default:0" json:"cost_usd"`
+	// PromptTokens 中被缓存命中的子集 (计费按折扣). 存出来便于审计成本口径与
+	// 后续算"缓存省了多少"。AutoMigrate 建列。
+	CachedPromptTokens int `gorm:"not null;default:0" json:"cached_prompt_tokens"`
 }
 
 // StatCard 用于仪表盘的单个统计卡片数据
