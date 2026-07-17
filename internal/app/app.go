@@ -10,6 +10,7 @@ import (
 
 	"autogateway/internal/config"
 	db "autogateway/internal/db/migrations"
+	"autogateway/internal/errtriage"
 	"autogateway/internal/handler"
 	"autogateway/internal/i18n"
 	"autogateway/internal/keypool"
@@ -40,6 +41,7 @@ type App struct {
 	requestLogService     *services.RequestLogService
 	cronChecker           *keypool.CronChecker
 	keyPoolProvider       *keypool.KeyProvider
+	errTriager            *errtriage.Triager
 	proxyServer           *proxy.ProxyServer
 	syncPeerManager       *services.SyncPeerManager
 	syncHandler           *handler.SyncHandler
@@ -64,6 +66,7 @@ type AppParams struct {
 	RequestLogService     *services.RequestLogService
 	CronChecker           *keypool.CronChecker
 	KeyPoolProvider       *keypool.KeyProvider
+	ErrTriager            *errtriage.Triager
 	ProxyServer           *proxy.ProxyServer
 	SyncPeerManager       *services.SyncPeerManager
 	SyncHandler           *handler.SyncHandler
@@ -87,6 +90,7 @@ func NewApp(params AppParams) *App {
 		requestLogService:     params.RequestLogService,
 		cronChecker:           params.CronChecker,
 		keyPoolProvider:       params.KeyPoolProvider,
+		errTriager:            params.ErrTriager,
 		proxyServer:           params.ProxyServer,
 		syncPeerManager:       params.SyncPeerManager,
 		syncHandler:           params.SyncHandler,
@@ -107,6 +111,10 @@ func (a *App) Start() error {
 	// 把 env AUTH_KEY 缓存为 bootstrap (master / slave 都需要,
 	// DB 里 auth_key 为空时由它兜底)
 	config.SetBootstrapAuthKey(a.configManager.GetAuthConfig().Key)
+
+	// 后置注入 LLM 错误归因兜底到 KeyProvider(构造期两者互为依赖, 只能在此打破循环)。
+	// master/slave 都代理流量, 都需要。默认关, 分组 opt-in 才生效。
+	a.keyPoolProvider.SetTriager(a.errTriager)
 
 	// Master 节点执行初始化
 	if a.configManager.IsMaster() {

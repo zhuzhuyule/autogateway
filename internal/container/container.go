@@ -10,6 +10,7 @@ import (
 	"autogateway/internal/config"
 	"autogateway/internal/db"
 	"autogateway/internal/encryption"
+	"autogateway/internal/errtriage"
 	"autogateway/internal/handler"
 	"autogateway/internal/httpclient"
 	"autogateway/internal/keypool"
@@ -126,6 +127,15 @@ func BuildContainer() (*dig.Container, error) {
 		return nil, err
 	}
 	if err := container.Provide(keypool.NewCronChecker); err != nil {
+		return nil, err
+	}
+	// LLM 错误归因兜底: 依赖 *services.GroupManager(按名解析 triage 分组) +
+	// *keypool.KeyProvider(取 key) + channel.Factory + store。用闭包吃具体类型再传给
+	// 接受接口的 errtriage.New, 免去单独的接口桥。经 App.Start 里 SetTriager 后置注入
+	// 回 KeyProvider(构造期两者互为依赖, 必须后置注入打破循环)。
+	if err := container.Provide(func(gm *services.GroupManager, kp *keypool.KeyProvider, cf *channel.Factory, st store.Store) *errtriage.Triager {
+		return errtriage.New(gm, kp, cf, st)
+	}); err != nil {
 		return nil, err
 	}
 

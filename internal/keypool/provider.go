@@ -1,6 +1,7 @@
 package keypool
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"autogateway/internal/config"
@@ -24,6 +25,7 @@ type KeyProvider struct {
 	settingsManager *config.SystemSettingsManager
 	encryptionSvc   encryption.Service
 	ledger          *ratelimit.Ledger
+	triager         ErrorTriager // 可选:LLM 错误归因兜底,经 SetTriager 后置注入
 }
 
 // NewProvider 创建一个新的 KeyProvider 实例。
@@ -135,8 +137,9 @@ func (p *KeyProvider) SelectKey(groupID uint, limits ratelimit.Limits) (*models.
 	return nil, app_errors.ErrNoActiveKeys
 }
 
-// UpdateStatus 异步地提交一个 Key 状态更新任务。
-func (p *KeyProvider) UpdateStatus(apiKey *models.APIKey, group *models.Group, isSuccess bool, errorMessage string) {
+// UpdateStatus 异步地提交一个 Key 状态更新任务。statusCode 是上游 HTTP 状态码
+// (0 表示传输错误 / 无响应),供错误归因分类器判断该失败是否该计到 key 头上。
+func (p *KeyProvider) UpdateStatus(apiKey *models.APIKey, group *models.Group, isSuccess bool, statusCode int, errorMessage string) {
 	go func() {
 		keyHashKey := fmt.Sprintf("key:%d", apiKey.ID)
 		activeKeysListKey := fmt.Sprintf("group:%d:active_keys", group.ID)
@@ -145,19 +148,45 @@ func (p *KeyProvider) UpdateStatus(apiKey *models.APIKey, group *models.Group, i
 			if err := p.handleSuccess(apiKey.ID, keyHashKey, activeKeysListKey); err != nil {
 				logrus.WithFields(logrus.Fields{"keyID": apiKey.ID, "error": err}).Error("Failed to handle key success")
 			}
-		} else {
-			if app_errors.IsUnCounted(errorMessage) {
-				logrus.WithFields(logrus.Fields{
-					"keyID": apiKey.ID,
-					"error": errorMessage,
-				}).Debug("Uncounted error, skipping failure handling")
-			} else {
-				if err := p.handleFailure(apiKey, group, keyHashKey, activeKeysListKey); err != nil {
-					logrus.WithFields(logrus.Fields{"keyID": apiKey.ID, "error": err}).Error("Failed to handle key failure")
-				}
-			}
+			return
+		}
+
+		if !p.shouldCountFailure(group, statusCode, errorMessage) {
+			logrus.WithFields(logrus.Fields{
+				"keyID":  apiKey.ID,
+				"status": statusCode,
+				"error":  errorMessage,
+			}).Debug("Uncounted error (not the key's fault), skipping failure handling")
+			return
+		}
+		if err := p.handleFailure(apiKey, group, keyHashKey, activeKeysListKey); err != nil {
+			logrus.WithFields(logrus.Fields{"keyID": apiKey.ID, "error": err}).Error("Failed to handle key failure")
 		}
 	}()
+}
+
+// shouldCountFailure 决定一次上游失败是否该计入 key 的 failure_count。
+//
+// Tier 1(规则,永远开):app_errors.Classify 按状态码+错误文本归因。请求错/
+// 限流/上游故障一律不计——只有 KeyError 和判不出的 Unknown 才可能计入。
+//
+// Tier 2(LLM 兜底,opt-in):仅当规则落到 Unknown 且分组开启时,才请 LLM
+// 二次判定;判定失败/未配置一律回退到「计入」(保守=保持历史行为,绝不因归因
+// 服务不可用就放过本该熔断的坏 key)。
+func (p *KeyProvider) shouldCountFailure(group *models.Group, statusCode int, errorMessage string) bool {
+	cat := app_errors.Classify(statusCode, errorMessage)
+	if !cat.CountsAgainstKey() {
+		return false
+	}
+	// 到这里 cat 是 KeyError(确定计入,不劳烦 LLM)或 Unknown。
+	if cat == app_errors.CategoryUnknown && p.triager != nil && group.EffectiveConfig.EnableLLMErrorTriage {
+		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+		defer cancel()
+		if count, ok := p.triager.ShouldCountAgainstKey(ctx, group, statusCode, errorMessage); ok {
+			return count
+		}
+	}
+	return true
 }
 
 // executeTransactionWithRetry wraps a database transaction with a retry mechanism.

@@ -95,16 +95,17 @@ func (u *channelUpstream) doRequest(ctx context.Context, group string, method, p
 
 	resp, err := ch.GetHTTPClient().Do(req)
 	if err != nil {
-		u.keypool.UpdateStatus(key, g, false, err.Error())
+		// 传输错误, 无 HTTP 响应 → statusCode 传 0。
+		u.keypool.UpdateStatus(key, g, false, 0, err.Error())
 		return nil, err
 	}
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode >= 400 {
-		// I1: 传真实上游错误 body(而非合成的 "status NNN"), 让 keypool 的
-		// IsUnCounted/ParseUpstreamError 能识别 429 限流等"不该计入 key 失败"
-		// 的错误, 与代理路径(proxy/server.go)行为一致, 避免污染健康 key。
-		u.keypool.UpdateStatus(key, g, false, string(raw))
+		// I1: 传真实上游错误 body + 状态码, 让 keypool 的错误归因分类器能识别
+		// 429 限流 / 400 请求错等"不该计入 key 失败"的错误, 与代理路径
+		// (proxy/server.go)行为一致, 避免污染健康 key。
+		u.keypool.UpdateStatus(key, g, false, resp.StatusCode, string(raw))
 		return nil, fmt.Errorf("upstream status %d: %s", resp.StatusCode, string(raw))
 	}
 	// M2: 成功不上报(与 proxy 一致, "请求成功不再重置成功次数, 减少 IO 消耗"),

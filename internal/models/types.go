@@ -47,6 +47,9 @@ type GroupConfig struct {
 	KeyValidationTimeoutSeconds  *int    `json:"key_validation_timeout_seconds,omitempty"`
 	EnableRequestBodyLogging     *bool   `json:"enable_request_body_logging,omitempty"`
 	ForceStreamUsage             *bool   `json:"force_stream_usage,omitempty"`
+	EnableLLMErrorTriage         *bool   `json:"enable_llm_error_triage,omitempty"`
+	LLMErrorTriageGroup          *string `json:"llm_error_triage_group,omitempty"`
+	LLMErrorTriageModel          *string `json:"llm_error_triage_model,omitempty"`
 }
 
 // HeaderRule defines a single rule for header manipulation.

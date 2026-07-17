@@ -562,8 +562,9 @@ func (ps *ProxyServer) handleAttemptFailure(ac *attemptContext, resp *http.Respo
 	}
 	ps.markRoutingCandidate(c, statusCode, parsedError, raCand, 0)
 
-	// 使用解析后的错误信息更新密钥状态
-	ps.keyProvider.UpdateStatus(apiKey, group, false, parsedError)
+	// 使用解析后的错误信息 + 状态码更新密钥状态(错误归因分类器据此判断
+	// 该失败该不该计到 key 头上)。
+	ps.keyProvider.UpdateStatus(apiKey, group, false, statusCode, parsedError)
 
 	// 当前子分组的 retry 用尽后,如果是聚合分组,尝试切换到下一个候选子分组(跨 sub-group failover)
 	subGroupExhausted := retryCount >= cfg.MaxRetries
@@ -642,8 +643,22 @@ func (ps *ProxyServer) handleAttemptFailure(ac *attemptContext, resp *http.Respo
 		}
 	}
 
+	// 错误归因: 请求本身不合法(request_error, 如 400 音频格式错)时, 换 key /
+	// 重试注定同样失败, 直接快速失败把上游错误回给客户端, 省掉无谓重试。仅对
+	// 非 aggregate、无路由候选的直连路径生效(聚合/路由场景另一个子分组可能支持
+	// 该 model, 不能提前放弃)。
+	failFast := app_errors.Classify(statusCode, parsedError).ShouldFailFast() &&
+		originalGroup.GroupType != "aggregate" &&
+		!ps.hasRoutingCandidate(c)
+	if failFast && !subGroupExhausted {
+		logrus.WithFields(logrus.Fields{
+			"status": statusCode,
+			"reason": parsedError,
+		}).Debug("Request-level error, failing fast without retry")
+	}
+
 	// 判断是否为最后一次尝试
-	isLastAttempt := subGroupExhausted
+	isLastAttempt := subGroupExhausted || failFast
 	requestType := models.RequestTypeRetry
 	if isLastAttempt {
 		requestType = models.RequestTypeFinal
