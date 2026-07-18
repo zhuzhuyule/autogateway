@@ -601,6 +601,7 @@ export default {
     minValueError: "Value cannot be less than {value}",
     inputNumber: "Please input number",
     inputContent: "Please input content",
+    selectGroup: "Select a group",
     saveSettings: "Save Settings",
     saving: "Saving...",
     globalProxyKeys: "Global Proxy Keys",

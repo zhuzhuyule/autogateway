@@ -582,6 +582,7 @@ export default {
     minValueError: "值不能小于{value}",
     inputNumber: "请输入数值",
     inputContent: "请输入内容",
+    selectGroup: "选择一个分组",
     saveSettings: "保存设置",
     saving: "保存中...",
     globalProxyKeys: "全局代理密钥",

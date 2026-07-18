@@ -601,6 +601,7 @@ export default {
     minValueError: "値は{value}より小さくできません",
     inputNumber: "数値を入力してください",
     inputContent: "内容を入力してください",
+    selectGroup: "グループを選択",
     saveSettings: "設定を保存",
     saving: "保存中...",
     globalProxyKeys: "グローバルプロキシキー",
