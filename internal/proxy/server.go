@@ -799,6 +799,9 @@ func (ps *ProxyServer) logRequest(
 
 	if finalError != nil {
 		logEntry.ErrorMessage = finalError.Error()
+		// ② 错误归因: 落库失败请求的规则层分类, 便于 dashboard 统计 request_error
+		// (免于拉黑 key) 占比。纯函数, 与 shouldCountFailure 里的判定同源。
+		logEntry.ErrorCategory = app_errors.Classify(statusCode, finalError.Error()).String()
 	}
 
 	if err := ps.requestLogService.Record(logEntry); err != nil {

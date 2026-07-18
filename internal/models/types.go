@@ -258,6 +258,12 @@ type RequestLog struct {
 	// PromptTokens 中被缓存命中的子集 (计费按折扣). 存出来便于审计成本口径与
 	// 后续算"缓存省了多少"。AutoMigrate 建列。
 	CachedPromptTokens int `gorm:"not null;default:0" json:"cached_prompt_tokens"`
+	// ErrorCategory 是失败请求的归因分类 (② 错误归因): key_error / request_error /
+	// rate_limited / provider_error / unknown; 成功请求为空。落库时用规则表
+	// (app_errors.Classify) 按 状态码+错误文本 同步计算, 供 dashboard 统计"多少错被判
+	// 请求错而免于拉黑 key"。注意: 这是规则层判定, LLM 兜底二次裁决 (仅 unknown 场景)
+	// 走异步路径, 不回填此列。AutoMigrate 建列。
+	ErrorCategory string `gorm:"type:varchar(20);index" json:"error_category"`
 }
 
 // StatCard 用于仪表盘的单个统计卡片数据
