@@ -152,10 +152,12 @@ export const keysApi = {
     );
   },
 
-  // 测试分组下指定模型的连通性 (后端会用一个活跃 key + 该模型 跑一次 ValidateKey)
+  // 测试分组下指定模型的连通性 (后端会用一个活跃 key + 该模型 跑一次探活)。
+  // modality: ""/"chat" 文本对话(默认)、"tts" 语音合成、"asr" 语音识别。
   async testGroupModel(
     groupId: number,
-    model: string
+    model: string,
+    modality = ""
   ): Promise<{
     is_valid: boolean;
     status_code: number;
@@ -163,12 +165,13 @@ export const keysApi = {
     error: string;
     duration_ms: number;
     model: string;
+    modality: string;
     resolved_group: string;
     is_via_aggregate: boolean;
   }> {
     const res = await http.post(
       `/groups/${groupId}/test-model`,
-      { model },
+      { model, modality },
       { hideMessage: true }
     );
     return res.data;

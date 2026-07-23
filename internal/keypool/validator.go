@@ -9,6 +9,7 @@ import (
 	"autogateway/internal/models"
 	"autogateway/internal/ratelimit"
 	"autogateway/internal/utils"
+	"strings"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -158,14 +159,26 @@ type ModelTestResult struct {
 }
 
 // TestModelConnectivity 尝试对 group 内的指定 model 发起一次最小载荷的探活.
-// 调用方应已把 aggregate 解析到具体的 sub-group 再传进来; 本方法只负责
-// "选 key + 用 modelName 替代 group.TestModel 重建一个 channel + 跑 ValidateKey".
+// 调用方应已把 aggregate 解析到具体的 sub-group 再传进来. modality 决定测试形态:
+// ""/"chat"/"text" 走文本 chat 探活; "tts"/"asr" 走对应的音频端点探活(见 modality_probe.go)。
 // 所选 key 不会被标记 invalid (绕过 keypoolProvider.UpdateStatus).
-func (s *KeyValidator) TestModelConnectivity(group *models.Group, modelName string) (*ModelTestResult, error) {
+func (s *KeyValidator) TestModelConnectivity(group *models.Group, modelName, modality string) (*ModelTestResult, error) {
 	if modelName == "" {
 		return nil, fmt.Errorf("model name is required")
 	}
+	switch strings.ToLower(strings.TrimSpace(modality)) {
+	case "", "chat", "text":
+		return s.testChatConnectivity(group, modelName)
+	case "tts", "asr":
+		return s.testModalityConnectivity(group, modelName, strings.ToLower(strings.TrimSpace(modality)))
+	default:
+		return nil, fmt.Errorf("unsupported test modality %q (want chat/tts/asr)", modality)
+	}
+}
 
+// testChatConnectivity 是原文本 chat 探活: 选 key + 用 modelName 替代 group.TestModel
+// 重建 channel + 跑 ValidateKey。
+func (s *KeyValidator) testChatConnectivity(group *models.Group, modelName string) (*ModelTestResult, error) {
 	apiKey, err := s.keypoolProvider.SelectKey(group.ID, ratelimit.Limits{})
 	if err != nil {
 		return nil, err

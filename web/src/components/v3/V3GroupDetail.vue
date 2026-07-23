@@ -950,6 +950,15 @@ function modelTestTooltip(modelId: string): string {
   return parts.join(" · ");
 }
 
+// 测试模态: ""/"chat" 文本对话(默认)、"tts" 语音合成、"asr" 语音识别。
+// 单测与一键测试都按这个值发对应的探活请求。
+const testModality = ref<string>("");
+const testModalityOptions = computed(() => [
+  { label: t("v3.testModalityChat"), value: "" },
+  { label: t("v3.testModalityTts"), value: "tts" },
+  { label: t("v3.testModalityAsr"), value: "asr" },
+]);
+
 async function testModel(modelId: string) {
   if (!props.group?.id) {
     return;
@@ -959,7 +968,7 @@ async function testModel(modelId: string) {
   }
   testingModels.value.add(modelId);
   try {
-    const res = await keysApi.testGroupModel(props.group.id, modelId);
+    const res = await keysApi.testGroupModel(props.group.id, modelId, testModality.value);
     modelTestResults.value = {
       ...modelTestResults.value,
       [modelId]: {
@@ -2366,6 +2375,15 @@ const filterCounts = computed(() => ({
             <span class="v3-chip" style="font-size: 10px">{{ exposedModels.length }}</span>
             <span class="v5-section-head__hint">{{ t("v3.exposedHint") || "白名单 — 仅这些模型可调用,可加别名,支持拖拽排序" }}</span>
             <div class="v5-section-head__spacer" style="flex: 1"></div>
+            <!-- 测试模态: 单测与一键测试都按此模态发探活(文本/TTS/ASR) -->
+            <n-select
+              v-model:value="testModality"
+              :options="testModalityOptions"
+              size="tiny"
+              style="width: 130px; margin-right: 8px"
+              :consistent-menu-width="false"
+              :title="t('v3.testModalityTip')"
+            />
             <!-- P11.38: 一键测试 - 测当前 filteredExposed 列表里的所有 model. < 30 显示 -->
             <button
               v-if="filteredExposed.length > 0 && filteredExposed.length < 30"

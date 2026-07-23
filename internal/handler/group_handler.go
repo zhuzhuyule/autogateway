@@ -114,6 +114,8 @@ func (s *Server) CreateGroup(c *gin.Context) {
 // model 必须与 group 的 available_models 中暴露的某个具体型号匹配.
 type TestGroupModelRequest struct {
 	Model string `json:"model" binding:"required"`
+	// Modality 决定测试形态: ""/"chat" 文本对话(默认)、"tts" 语音合成、"asr" 语音识别。
+	Modality string `json:"modality"`
 }
 
 // TestGroupModel 用一个活跃 key 对指定 model 发起一次最小载荷的探活, 验证
@@ -168,7 +170,7 @@ func (s *Server) TestGroupModel(c *gin.Context) {
 		targetGroup = resolved
 	}
 
-	result, err := s.KeyService.TestModelConnectivity(targetGroup, modelName)
+	result, err := s.KeyService.TestModelConnectivity(targetGroup, modelName, req.Modality)
 	if err != nil {
 		response.Error(c, app_errors.NewAPIError(app_errors.ErrInternalServer, err.Error()))
 		return
@@ -181,6 +183,7 @@ func (s *Server) TestGroupModel(c *gin.Context) {
 		"error":            result.Error,
 		"duration_ms":      result.DurationMs,
 		"model":            result.Model,
+		"modality":         req.Modality,
 		"resolved_group":   targetGroup.Name,
 		"is_via_aggregate": group.GroupType == "aggregate",
 	})
