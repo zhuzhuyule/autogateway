@@ -683,24 +683,39 @@ const groupModels = computed<string[]>(() => {
 
 // 模型 → 服务它的子分组(provider)名列表. 聚合视图用: 每个模型标出由哪些
 // 子分组供给. 归一化按 lowercase 与 groupModels 对齐.
-const modelProviderMap = computed<Map<string, string[]>>(() => {
-  const m = new Map<string, string[]>();
+// 聚合分组: model → 提供它的子分组列表(带 id/host, 供模型卡展示 ProviderLogo
+// + 点击跳到该子分组)。
+interface ModelProvider {
+  name: string;
+  id: number;
+  host: string;
+}
+const modelProviderMap = computed<Map<string, ModelProvider[]>>(() => {
+  const m = new Map<string, ModelProvider[]>();
   if (!isAggregate.value) return m;
   for (const sg of subGroups.value) {
-    const name = sg.group?.display_name || sg.group?.name || "";
+    const g = sg.group;
+    const gid = g?.id;
+    if (!g || !gid) continue;
+    const name = g.display_name || g.name || "";
     if (!name) continue;
-    for (const raw of effectiveModelsFor(sg.group)) {
+    const host = (g.upstreams as { url?: string }[] | undefined)?.[0]?.url || "";
+    for (const raw of effectiveModelsFor(g)) {
       const key = (raw || "").trim().toLowerCase();
       if (!key) continue;
       const arr = m.get(key) || [];
-      if (!arr.includes(name)) arr.push(name);
+      if (!arr.some(p => p.id === gid)) arr.push({ name, id: gid, host });
       m.set(key, arr);
     }
   }
   return m;
 });
-function providersFor(modelId: string): string[] {
+function providersFor(modelId: string): ModelProvider[] {
   return modelProviderMap.value.get(modelId.toLowerCase()) || [];
+}
+// 跳到某个子分组详情(聚合分组模型卡的 provider 入口)。
+function goToSubGroup(id?: number) {
+  if (id) emit("select-group", id);
 }
 
 // model → 24h 折算成本/用量, 给模型卡挂成本 chip(①成本可观测性). 与 ModelCatalog 同款.
@@ -2473,15 +2488,23 @@ const filterCounts = computed(() => ({
                 </n-tooltip>
                 <CapabilityIcons :tags="tagsForModel(modelId)" :size="11" />
 
-                <span
+                <button
                   v-if="isAggregate && providersFor(modelId).length"
-                  class="v3-chip v5-modelcard__provider"
-                  style="flex-shrink: 0; font-size: 10px"
-                  :title="t('v5.servedBy', { providers: providersFor(modelId).join(', ') })"
+                  type="button"
+                  class="v5-modelcard__provider-btn"
+                  :title="t('v5.servedBy', { providers: providersFor(modelId).map(p => p.name).join(', ') })"
+                  @click.stop="goToSubGroup(providersFor(modelId)[0].id)"
                 >
-                  {{ providersFor(modelId)[0]
-                  }}<template v-if="providersFor(modelId).length > 1"> +{{ providersFor(modelId).length - 1 }}</template>
-                </span>
+                  <ProviderLogo
+                    :hint="providersFor(modelId)[0].name"
+                    :host="providersFor(modelId)[0].host"
+                    :fallback-initial="providersFor(modelId)[0].name"
+                    :size="13"
+                    style="border-radius: 3px"
+                  />
+                  <span>{{ providersFor(modelId)[0].name
+                  }}<template v-if="providersFor(modelId).length > 1"> +{{ providersFor(modelId).length - 1 }}</template></span>
+                </button>
                 <span
                   v-if="costChipFor(modelId)"
                   class="v3-chip"
@@ -2606,15 +2629,23 @@ const filterCounts = computed(() => ({
                 </n-tooltip>
                 <CapabilityIcons :tags="tagsForModel(modelId)" :size="11" />
 
-                <span
+                <button
                   v-if="isAggregate && providersFor(modelId).length"
-                  class="v3-chip v5-modelcard__provider"
-                  style="flex-shrink: 0; font-size: 10px"
-                  :title="t('v5.servedBy', { providers: providersFor(modelId).join(', ') }) || ('由 ' + providersFor(modelId).join(', ') + ' 提供')"
+                  type="button"
+                  class="v5-modelcard__provider-btn"
+                  :title="t('v5.servedBy', { providers: providersFor(modelId).map(p => p.name).join(', ') })"
+                  @click.stop="goToSubGroup(providersFor(modelId)[0].id)"
                 >
-                  {{ providersFor(modelId)[0]
-                  }}<template v-if="providersFor(modelId).length > 1"> +{{ providersFor(modelId).length - 1 }}</template>
-                </span>
+                  <ProviderLogo
+                    :hint="providersFor(modelId)[0].name"
+                    :host="providersFor(modelId)[0].host"
+                    :fallback-initial="providersFor(modelId)[0].name"
+                    :size="13"
+                    style="border-radius: 3px"
+                  />
+                  <span>{{ providersFor(modelId)[0].name
+                  }}<template v-if="providersFor(modelId).length > 1"> +{{ providersFor(modelId).length - 1 }}</template></span>
+                </button>
                 <span
                   v-if="costChipFor(modelId)"
                   class="v3-chip"
@@ -2673,11 +2704,12 @@ const filterCounts = computed(() => ({
               class="v5-modelcard"
               :class="{
                 'v5-modelcard--blocked': blockedSet.has(modelId),
-                'v5-modelcard--selected': isSelected(modelId),
+                'v5-modelcard--selected': !isAggregate && isSelected(modelId),
                 'v5-modelcard--testfail': modelTestState(modelId)?.ok === false,
                 'v5-modelcard--testing': testingModels.has(modelId),
+                'v5-modelcard--linkable': isAggregate && providersFor(modelId).length > 0,
               }"
-              @click="toggleSelected(modelId)"
+              @click="isAggregate ? goToSubGroup(providersFor(modelId)[0]?.id) : toggleSelected(modelId)"
             >
               <div class="v5-modelcard__row" style="align-items: flex-start; gap: 6px">
                 <code
@@ -2736,15 +2768,23 @@ const filterCounts = computed(() => ({
                 </n-tooltip>
                 <CapabilityIcons :tags="tagsForModel(modelId)" :size="11" />
 
-                <span
+                <button
                   v-if="isAggregate && providersFor(modelId).length"
-                  class="v3-chip v5-modelcard__provider"
-                  style="flex-shrink: 0; font-size: 10px"
-                  :title="t('v5.servedBy', { providers: providersFor(modelId).join(', ') })"
+                  type="button"
+                  class="v5-modelcard__provider-btn"
+                  :title="t('v5.servedBy', { providers: providersFor(modelId).map(p => p.name).join(', ') })"
+                  @click.stop="goToSubGroup(providersFor(modelId)[0].id)"
                 >
-                  {{ providersFor(modelId)[0]
-                  }}<template v-if="providersFor(modelId).length > 1"> +{{ providersFor(modelId).length - 1 }}</template>
-                </span>
+                  <ProviderLogo
+                    :hint="providersFor(modelId)[0].name"
+                    :host="providersFor(modelId)[0].host"
+                    :fallback-initial="providersFor(modelId)[0].name"
+                    :size="13"
+                    style="border-radius: 3px"
+                  />
+                  <span>{{ providersFor(modelId)[0].name
+                  }}<template v-if="providersFor(modelId).length > 1"> +{{ providersFor(modelId).length - 1 }}</template></span>
+                </button>
                 <span
                   v-if="costChipFor(modelId)"
                   class="v3-chip"

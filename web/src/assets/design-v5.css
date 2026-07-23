@@ -748,7 +748,11 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  flex-wrap: wrap;
+  /* nowrap + 不被压缩: 空间不足时靠前面的 spacer 吸收, 别名整体右对齐,
+     不再换行导致 "@别名" 文字竖排。 */
+  flex-wrap: nowrap;
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 .v5-modelcard__alias {
   display: inline-flex;
@@ -784,6 +788,46 @@
   border-color: var(--v3-info);
   color: var(--v3-info);
   background: var(--v3-info-soft);
+}
+.v5-modelcard__alias-add,
+.v5-modelcard__alias {
+  white-space: nowrap;
+}
+
+/* 聚合模型卡的 provider 入口: ProviderLogo + 名, 可点跳到该子分组。
+   从原来挤在 chip 堆里的纯文字标签, 提升为显眼、可点的来源标识。 */
+.v5-modelcard__provider-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+  max-width: 160px;
+  padding: 2px 8px 2px 4px;
+  border: 1px solid var(--v3-line);
+  border-radius: 999px;
+  background: var(--v3-surface-2);
+  color: var(--v3-ink-2);
+  font: 600 10.5px/1 var(--v3-sans);
+  cursor: pointer;
+  transition: all 120ms;
+}
+.v5-modelcard__provider-btn > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.v5-modelcard__provider-btn:hover {
+  border-color: var(--v3-accent);
+  color: var(--v3-accent);
+  background: var(--v3-accent-soft, var(--v3-surface-3));
+}
+
+/* 聚合模型卡整卡可点(跳子分组): 手型 + 悬浮微提示。 */
+.v5-modelcard--linkable {
+  cursor: pointer;
+}
+.v5-modelcard--linkable:hover {
+  border-color: var(--v3-accent);
 }
 
 /* per-model 连通性测试图标. 默认中性, 测过一次后根据结果着色让用户一眼看到状态. */
