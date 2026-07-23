@@ -115,6 +115,15 @@ func shouldValidateJSONSuccess(path string, isStream bool) bool {
 }
 
 func validateJSONSuccessResponse(resp *http.Response) error {
+	// 只能可靠校验"无压缩"或"gzip"(标准库能解)的响应体。其它编码
+	// (br / zstd / deflate 等,标准库不解或此处未解)无法校验其明文, 直接放行,
+	// 避免把正常的压缩成功响应误判为失败、触发无谓 failover。校验的本意是抓
+	// "200 但 body 是空/HTML 错误页"的伪成功, 不该误杀压缩响应。
+	enc := strings.ToLower(strings.TrimSpace(resp.Header.Get("Content-Encoding")))
+	if enc != "" && enc != "gzip" {
+		return nil
+	}
+
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return fmt.Errorf("failed to read upstream success response: %w", err)

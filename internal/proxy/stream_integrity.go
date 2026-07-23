@@ -51,6 +51,38 @@ func streamWithIntegrity(c *gin.Context, resp *http.Response, isOpenAI bool, idl
 	// 原样写给客户端 (含被检视的首个 data 帧).
 	var buffered bytes.Buffer
 
+	// header-hold 兜底超时: 上游返回 200 头但 body 迟迟不来时, 下面的阻塞 ReadBytes
+	// 会永久挂起 (ResponseHeaderTimeout 只管到响应头为止)。这里加一个"首字节最长等待":
+	// 用户配了 StreamIdleTimeout 就用它 (更严格); 没配 (0) 用内置 firstByteFloor 兜底,
+	// 避免永久转圈。首字节之后的 idle 仍由 flushAndStream 按 idleTimeout (0=关) 处理,
+	// 不在这里误杀慢/推理流。
+	const firstByteFloor = 300 * time.Second
+	headerHoldTimeout := idleTimeout
+	if headerHoldTimeout <= 0 {
+		headerHoldTimeout = firstByteFloor
+	}
+	var hhTimer *time.Timer
+	var hhExpired atomic.Bool
+	if headerHoldTimeout > 0 {
+		hhTimer = time.AfterFunc(headerHoldTimeout, func() {
+			hhExpired.Store(true)
+			resp.Body.Close() // 关 body → 阻塞的 ReadBytes 返回 err → 未发头 → 无感 failover
+		})
+	}
+	stopHH := func() {
+		if hhTimer != nil {
+			hhTimer.Stop()
+		}
+	}
+	defer stopHH()
+
+	// enterStream 在进入透传前停掉 header-hold 计时器 (flushAndStream 会按 idleTimeout
+	// 重建自己的 idle 计时器), 避免 header-hold 计时器在透传中途误关 body。
+	enterStream := func() streamOutcome {
+		stopHH()
+		return flushAndStream(c, resp, &buffered, reader, isOpenAI, idleTimeout)
+	}
+
 	for {
 		line, err := reader.ReadBytes('\n')
 		if len(line) > 0 {
@@ -71,7 +103,7 @@ func streamWithIntegrity(c *gin.Context, resp *http.Response, isOpenAI bool, idl
 					}
 				}
 				// 有效首帧 → 发头并放行透传.
-				return flushAndStream(c, resp, &buffered, reader, isOpenAI, idleTimeout)
+				return enterStream()
 			}
 		}
 
@@ -79,13 +111,20 @@ func streamWithIntegrity(c *gin.Context, resp *http.Response, isOpenAI bool, idl
 			break
 		}
 		if err != nil {
-			// 读上游出错 (非 EOF), 且还没发头 → failover (statusCode 0 = 网络错误).
-			return streamOutcome{failed: true, statusCode: 0, parsedError: err.Error()}
+			// 读上游出错 (非 EOF), 且还没发头 → failover。若是 header-hold 兜底超时
+			// 关掉的 body, 给明确的 504 + 说明; 否则 statusCode 0 = 普通网络错误。
+			msg := err.Error()
+			sc := 0
+			if hhExpired.Load() {
+				msg = "upstream idle before first byte (header-hold timeout)"
+				sc = http.StatusGatewayTimeout
+			}
+			return streamOutcome{failed: true, statusCode: sc, parsedError: msg}
 		}
 
 		// 防止上游只发无效行 (注释/空行) 把缓冲撑爆: 超过上限就当作"确有数据"放行.
 		if buffered.Len() >= firstChunkBufCap {
-			return flushAndStream(c, resp, &buffered, reader, isOpenAI, idleTimeout)
+			return enterStream()
 		}
 	}
 
@@ -100,7 +139,7 @@ func streamWithIntegrity(c *gin.Context, resp *http.Response, isOpenAI bool, idl
 	}
 	// 非 OpenAI 等场景: 有字节但没有可识别的 data 帧. 仍视为"有数据"放行透传,
 	// 避免误杀 (上游可能用非 OpenAI 的帧格式).
-	return flushAndStream(c, resp, &buffered, reader, isOpenAI, idleTimeout)
+	return enterStream()
 }
 
 // flushAndStream 设置 SSE 响应头, 发 c.Status, 写已缓冲字节并 flush,
