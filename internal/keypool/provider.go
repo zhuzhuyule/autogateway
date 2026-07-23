@@ -42,9 +42,24 @@ func NewProvider(db *gorm.DB, store store.Store, settingsManager *config.SystemS
 // SelectKey 为指定的分组原子性地选择并轮换一个可用的 APIKey。
 func (p *KeyProvider) SelectKey(groupID uint, limits ratelimit.Limits) (*models.APIKey, error) {
 	activeKeysListKey := fmt.Sprintf("group:%d:active_keys", groupID)
-	// 防御性最大跳过次数. 正常路径一发命中, 这是 store/db desync 兜底.
-	// 设 16 而不是无限循环, 避免上层 bug 让 SelectKey 卡死.
-	const maxSkip = 16
+	// 最大跳过次数随池大小自适应: 至少能把整个活跃池扫一遍(+8 desync buffer),
+	// 这样限流/冷却中的 key 较多时不会被固定小上限提前挡住、误报"无可用 key";
+	// 上限 512 兜住失控. 下限 16 保持对小池的旧行为.
+	maxSkip := 16
+	if n, err := p.store.LLen(activeKeysListKey); err == nil {
+		if want := int(n) + 8; want > maxSkip {
+			maxSkip = want
+		}
+	}
+	if maxSkip > 512 {
+		maxSkip = 512
+	}
+
+	// cooledKeyID/cooledDetails 记录本轮"仅因冷却被跳过"的第一把 key。冷却是软的:
+	// 有非冷却可用 key 就用它(避开刚故障的); 若整池都在冷却, 退回用这把 fallback,
+	// 让请求仍能打到上游拿到真实错误, 而不是误报"无可用 key"。
+	var cooledKeyID uint64
+	var cooledDetails map[string]string
 
 	for attempt := 0; attempt < maxSkip; attempt++ {
 		// 1. Atomically rotate the key ID from the list
@@ -91,6 +106,17 @@ func (p *KeyProvider) SelectKey(groupID uint, limits ratelimit.Limits) (*models.
 			continue
 		}
 
+		// key 级冷却(软跳过): 被上游限流(429)/瞬态故障(5xx)的 key 打了 TTL 冷却标记,
+		// 冷却期内先跳过它去找非冷却的(不 LRem, 到期自动恢复), 但记住它作 fallback。
+		// 根治标准分组里坏 key 一直参与确定性轮转导致的"同一 API 时通时不通"。
+		if cooled, err := p.store.Exists(fmt.Sprintf("key:%d:cooldown", keyID)); err == nil && cooled {
+			if cooledKeyID == 0 {
+				cooledKeyID = keyID
+				cooledDetails = keyDetails
+			}
+			continue
+		}
+
 		// 速率账本准入：当前窗口已达上限 → 跳过选下一个（不 LRem，额度会恢复）
 		if p.ledger != nil && !limits.IsZero() {
 			ok, err := p.ledger.Allow(groupID, uint(keyID), limits)
@@ -101,40 +127,59 @@ func (p *KeyProvider) SelectKey(groupID uint, limits ratelimit.Limits) (*models.
 			}
 		}
 
-		// 3. Manually unmarshal the map into an APIKey struct
-		failureCount, _ := strconv.ParseInt(keyDetails["failure_count"], 10, 64)
-		createdAt, _ := strconv.ParseInt(keyDetails["created_at"], 10, 64)
-
-		// Decrypt the key value for use by channels
-		encryptedKeyValue := keyDetails["key_string"]
-		decryptedKeyValue, err := p.encryptionSvc.Decrypt(encryptedKeyValue)
-		if err != nil {
-			// If decryption fails, try to use the value as-is (backward compatibility for unencrypted keys)
-			logrus.WithFields(logrus.Fields{
-				"keyID": keyID,
-				"error": err,
-			}).Debug("Failed to decrypt key value, using as-is for backward compatibility")
-			decryptedKeyValue = encryptedKeyValue
-		}
-
-		if p.ledger != nil && !limits.IsZero() {
-			if err := p.ledger.Record(groupID, uint(keyID), limits); err != nil {
-				logrus.WithError(err).Warn("ratelimit Record failed")
-			}
-		}
-
-		return &models.APIKey{
-			ID:           uint(keyID),
-			KeyValue:     decryptedKeyValue,
-			Status:       keyDetails["status"],
-			FailureCount: failureCount,
-			GroupID:      groupID,
-			CreatedAt:    time.Unix(createdAt, 0),
-		}, nil
+		return p.buildSelectedKey(groupID, keyID, keyDetails, limits), nil
 	}
 
-	// 跳过 maxSkip 次后还没找到有效 key, 当作整组没活 key 处理.
+	// 没有非冷却可用 key: 若有冷却 fallback, 退回用它(整池冷却时让请求仍能打上游,
+	// 拿到真实错误而非误报无 key)。否则当作整组没活 key。
+	if cooledKeyID != 0 {
+		return p.buildSelectedKey(groupID, cooledKeyID, cooledDetails, limits), nil
+	}
 	return nil, app_errors.ErrNoActiveKeys
+}
+
+// buildSelectedKey 把 store 里的 key hash 组装成可用的 *APIKey(解密 key 值 +
+// 若配了限流则记一次账)。SelectKey 的正常命中与冷却 fallback 两条路径共用。
+func (p *KeyProvider) buildSelectedKey(groupID uint, keyID uint64, keyDetails map[string]string, limits ratelimit.Limits) *models.APIKey {
+	failureCount, _ := strconv.ParseInt(keyDetails["failure_count"], 10, 64)
+	createdAt, _ := strconv.ParseInt(keyDetails["created_at"], 10, 64)
+
+	encryptedKeyValue := keyDetails["key_string"]
+	decryptedKeyValue, err := p.encryptionSvc.Decrypt(encryptedKeyValue)
+	if err != nil {
+		// 解密失败按原值用(兼容未加密的历史 key)。
+		logrus.WithFields(logrus.Fields{"keyID": keyID, "error": err}).Debug("Failed to decrypt key value, using as-is for backward compatibility")
+		decryptedKeyValue = encryptedKeyValue
+	}
+
+	if p.ledger != nil && !limits.IsZero() {
+		if err := p.ledger.Record(groupID, uint(keyID), limits); err != nil {
+			logrus.WithError(err).Warn("ratelimit Record failed")
+		}
+	}
+
+	return &models.APIKey{
+		ID:           uint(keyID),
+		KeyValue:     decryptedKeyValue,
+		Status:       keyDetails["status"],
+		FailureCount: failureCount,
+		GroupID:      groupID,
+		CreatedAt:    time.Unix(createdAt, 0),
+	}
+}
+
+// CoolDownKey 给一把 key 打一个 TTL 冷却标记, SelectKey 在冷却期内跳过它。
+// 用于被上游限流(429)/瞬态故障(5xx)的 key —— 不拉黑、不失效, 只是暂时不选,
+// TTL 到期自动恢复。直接 Set 覆盖(不严格取 max): 连续错误会重置冷却窗口,
+// 影响可忽略。dur<=0 时不做任何事。
+func (p *KeyProvider) CoolDownKey(keyID uint, dur time.Duration) {
+	if dur <= 0 {
+		return
+	}
+	cooldownKey := fmt.Sprintf("key:%d:cooldown", keyID)
+	if err := p.store.Set(cooldownKey, []byte("1"), dur); err != nil {
+		logrus.WithFields(logrus.Fields{"keyID": keyID, "error": err}).Debug("Failed to set key cooldown")
+	}
 }
 
 // UpdateStatus 异步地提交一个 Key 状态更新任务。statusCode 是上游 HTTP 状态码

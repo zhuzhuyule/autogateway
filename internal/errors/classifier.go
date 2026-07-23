@@ -128,6 +128,15 @@ func (c Category) ShouldFailFast() bool {
 	return c == CategoryRequestError
 }
 
+// ShouldCooldown 报告该失败是否应给这把 key 打一个短时冷却(暂时不选它,
+// 到期自动恢复),而不是拉黑。只有 RateLimited(被限流)和 ProviderError
+// (上游故障)——这两类 key 本身没坏、只是暂时不可用,晾一会即可,避免确定性
+// 轮转反复选中它,造成"同一 API 时通时不通"。KeyError 走拉黑;RequestError
+// 已快速失败;Unknown 保守计入拉黑路径,都不在此冷却。
+func (c Category) ShouldCooldown() bool {
+	return c == CategoryRateLimited || c == CategoryProviderError
+}
+
 // String 便于日志/响应头输出。
 func (c Category) String() string {
 	switch c {

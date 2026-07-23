@@ -16,6 +16,7 @@ import (
 	"autogateway/internal/config"
 	"autogateway/internal/encryption"
 	app_errors "autogateway/internal/errors"
+	"autogateway/internal/failover"
 	"autogateway/internal/keypool"
 	"autogateway/internal/models"
 	"autogateway/internal/pricing"
@@ -565,6 +566,17 @@ func (ps *ProxyServer) handleAttemptFailure(ac *attemptContext, resp *http.Respo
 	// 使用解析后的错误信息 + 状态码更新密钥状态(错误归因分类器据此判断
 	// 该失败该不该计到 key 头上)。
 	ps.keyProvider.UpdateStatus(apiKey, group, false, statusCode, parsedError)
+
+	// key 级冷却: 被限流(429)/上游故障(5xx)的 key 暂时晾开(不拉黑, 到期自动恢复),
+	// 避免确定性轮转反复选中它造成"同一 API 时通时不通"。只对"不计入 key"的瞬态错
+	// 冷却; 冷却时长用 failover 策略(区分秒级限流/日额耗尽/5xx), 复用上面算好的
+	// Retry-After(raCand)。标准分组此前完全没有这层, 是本次修复的核心。
+	if app_errors.Classify(statusCode, parsedError).ShouldCooldown() {
+		fclass := failover.Classify(statusCode, parsedError)
+		if dur, _ := failover.DefaultCooldownPolicy().Decide(fclass, raCand, 0); dur > 0 {
+			ps.keyProvider.CoolDownKey(apiKey.ID, dur)
+		}
+	}
 
 	// 当前子分组的 retry 用尽后,如果是聚合分组,尝试切换到下一个候选子分组(跨 sub-group failover)
 	subGroupExhausted := retryCount >= cfg.MaxRetries
