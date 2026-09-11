@@ -81,7 +81,15 @@ func (s *AggregateGroupService) ValidateSubGroups(ctx context.Context, channelTy
 			return nil, NewI18nError(app_errors.ErrValidation, "validation.sub_group_cannot_be_aggregate", nil)
 		}
 		if sg.ChannelType != channelType {
-			return nil, NewI18nError(app_errors.ErrValidation, "validation.sub_group_channel_mismatch", nil)
+			// 跨协议子分组:转发时由 internal/proxy 的协议转换层把请求/响应
+			// 翻译成目标协议。放行与否取决于这一对协议目前有没有实现转换。
+			if !crossProtocolAllowed(channelType, sg.ChannelType) {
+				return nil, NewI18nError(app_errors.ErrValidation, "validation.sub_group_channel_mismatch", nil)
+			}
+			// 跨协议子分组的校验端点天然不同(如 /v1/messages vs
+			// /v1/chat/completions),不能参与下面的端点一致性比较。
+			subGroupMap[sg.ID] = sg
+			continue
 		}
 
 		sgEndpoint := utils.GetValidationEndpoint(&sg)
@@ -503,6 +511,26 @@ func (s *AggregateGroupService) EnsureSystemAggregates(ctx context.Context, shar
 		logrus.Infof("system aggregate group %s created (id=%d, name=%s)", sp.Role, group.ID, group.Name)
 	}
 	return nil
+}
+
+// crossProtocolAllowed 报告聚合与其子分组之间是否允许跨协议挂载。
+//
+// 放行后由 internal/proxy 的协议转换层在转发时翻译,但**只放行已经实现转换的
+// 协议对** —— 放行一个没有转换实现的组合,等于让请求静默拿到形状错误的响应。
+// 目前只有 openai ⇄ anthropic 这一对(见 internal/apicompat)。
+//
+// 注意:自动挂载(AutoJoinSystemAggregate)按 channel_type 硬映射,只会挂同类型
+// 的分组,所以跨协议永远来自管理员显式添加 —— 不会出现"新建个 Groq 组就被
+// Anthropic 客户端打爆"的意外。
+func crossProtocolAllowed(aggregateChannelType, subChannelType string) bool {
+	switch {
+	case aggregateChannelType == "anthropic" && subChannelType == "openai":
+		return true
+	case aggregateChannelType == "openai" && subChannelType == "anthropic":
+		return true
+	default:
+		return false
+	}
 }
 
 // AutoJoinSystemAggregate 把新建的 standard 分组自动挂入对应 channel_type 的系统默认聚合.

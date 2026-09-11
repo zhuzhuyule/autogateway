@@ -303,11 +303,39 @@ func (ps *ProxyServer) executeRequestWithRetry(
 ) {
 	cfg := group.EffectiveConfig
 
+	// 协议转换:入站协议 ≠ 目标节点协议时,改写发往上游的 body 与路径。
+	//
+	// bodyBytes 本身保持原样 —— 它同时用于落库(客户端视角)与模型提取,
+	// 转换结果只放进 outBody。这样每次重试/failover 都会针对新的目标节点
+	// 重新判定协议(换到不同 channel 的子分组时转换链也跟着变)。
+	tr := planTranslation(c.Request.URL.Path, group.ChannelType)
+	outBody := tr.convertRequest(bodyBytes)
+
+	// 流式转译(事件流状态机 + 断流兜底)尚未实现。这里显式拒绝,而不是把
+	// 上游另一种协议的 SSE 原样透给客户端 —— 那会让客户端解析到一半才炸,
+	// 极难排查。非流式不受影响。
+	if tr.needed && isStream {
+		logrus.WithFields(logrus.Fields{
+			"group":       group.Name,
+			"from":        tr.from,
+			"to":          tr.to,
+			"target_path": tr.upstreamPath(c.Request.URL.Path),
+		}).Warn("cross-protocol streaming translation not implemented, rejecting request")
+		ps.logRequest(c, originalGroup, group, nil, startTime, http.StatusNotImplemented,
+			errors.New("cross-protocol streaming translation is not supported yet"),
+			isStream, "", channelHandler, bodyBytes, models.RequestTypeFinal)
+		response.Error(c, app_errors.NewAPIErrorWithUpstream(http.StatusNotImplemented,
+			"TRANSLATION_UNSUPPORTED",
+			"cross-protocol streaming translation is not supported yet; use a non-streaming request or a same-protocol sub-group"))
+		return
+	}
+
 	// ①成本可观测性: OpenAI chat 流式且开启 ForceStreamUsage 时, 注入
 	// stream_options.include_usage 让上游回传 usage 帧 (否则拿不到 token 用量)。
 	// 幂等: retry 递归重入也只会注入一次 (已存在则跳过)。
+	// 注入作用在 outBody 上 —— 协议转换后它已经是 Chat 形状,才有 stream_options。
 	if isStream && cfg.ForceStreamUsage && group.ChannelType == "openai" {
-		bodyBytes = injectStreamUsage(bodyBytes)
+		outBody = injectStreamUsage(outBody)
 	}
 
 	// 速率账本: 每次 failover 进入本函数都会对所选 key 预占一次额度 (Record).
@@ -322,7 +350,16 @@ func (ps *ProxyServer) executeRequestWithRetry(
 		return
 	}
 
-	upstreamURL, err := channelHandler.BuildUpstreamURL(c.Request.URL, originalGroup.Name)
+	// 转换会改变目标路径(如 /v1/messages → /v1/chat/completions),必须在
+	// BuildUpstreamURL 之前把改写后的路径交给它,否则会拿旧协议路径去拼上游地址。
+	targetURL := c.Request.URL
+	if tr.needed {
+		rewritten := *c.Request.URL
+		rewritten.Path = tr.upstreamPath(c.Request.URL.Path)
+		targetURL = &rewritten
+	}
+
+	upstreamURL, err := channelHandler.BuildUpstreamURL(targetURL, originalGroup.Name)
 	if err != nil {
 		response.Error(c, app_errors.NewAPIError(app_errors.ErrInternalServer, fmt.Sprintf("Failed to build upstream URL: %v", err)))
 		return
@@ -338,13 +375,13 @@ func (ps *ProxyServer) executeRequestWithRetry(
 	}
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(ctx, c.Request.Method, upstreamURL, bytes.NewReader(bodyBytes))
+	req, err := http.NewRequestWithContext(ctx, c.Request.Method, upstreamURL, bytes.NewReader(outBody))
 	if err != nil {
 		logrus.Errorf("Failed to create upstream request: %v", err)
 		response.Error(c, app_errors.ErrInternalServer)
 		return
 	}
-	req.ContentLength = int64(len(bodyBytes))
+	req.ContentLength = int64(len(outBody))
 
 	req.Header = c.Request.Header.Clone()
 
@@ -354,7 +391,7 @@ func (ps *ProxyServer) executeRequestWithRetry(
 	req.Header.Del("X-Goog-Api-Key")
 
 	// Apply model redirection
-	finalBodyBytes, err := channelHandler.ApplyModelRedirect(req, bodyBytes, group)
+	finalBodyBytes, err := channelHandler.ApplyModelRedirect(req, outBody, group)
 	if err != nil {
 		response.Error(c, app_errors.NewAPIError(app_errors.ErrBadRequest, err.Error()))
 		ps.logRequest(c, originalGroup, group, apiKey, startTime, http.StatusBadRequest, err, isStream, upstreamURL, channelHandler, bodyBytes, models.RequestTypeFinal)
@@ -362,7 +399,7 @@ func (ps *ProxyServer) executeRequestWithRetry(
 	}
 
 	// Update request body if it was modified by redirection
-	if !bytes.Equal(finalBodyBytes, bodyBytes) {
+	if !bytes.Equal(finalBodyBytes, outBody) {
 		req.Body = io.NopCloser(bytes.NewReader(finalBodyBytes))
 		req.ContentLength = int64(len(finalBodyBytes))
 	}
@@ -511,7 +548,7 @@ func (ps *ProxyServer) executeRequestWithRetry(
 			}
 		}
 		c.Status(resp.StatusCode)
-		ps.handleNormalResponse(c, resp, channelHandler.ExtractModel(c, bodyBytes))
+		ps.handleNormalResponse(c, resp, channelHandler.ExtractModel(c, bodyBytes), tr)
 	}
 
 	ps.logRequest(c, originalGroup, group, apiKey, startTime, resp.StatusCode, nil, isStream, upstreamURL, channelHandler, bodyBytes, models.RequestTypeFinal)

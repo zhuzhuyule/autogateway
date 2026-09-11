@@ -2,8 +2,17 @@
 
 > 触发:V2EX《micro-one-api 协议转换: Chat ↔ Responses ↔ Messages》(https://www.v2ex.com/t/1241256)
 > 对应 Roadmap:`README.md:305` `- [ ] 跨 channel 协议翻译(OpenAI ↔ Anthropic ↔ Gemini)`
-> 状态:**待评审,未写任何生产代码**
+> 状态:**最小 MVP 已实现(分支 `feat/apicompat-anthropic-chat`),非流式可用,流式未做**
 > 日期:2026-09-11
+
+**已落地:**
+- `internal/apicompat` —— Anthropic ⇄ Chat 双向转换 + 防御性规范化(30 用例)
+- `internal/usage.Anthropic()` —— 包容桶 → 互斥桶逆投影
+- `internal/proxy/protocol_bridge.go` —— 转换规划与 body/路径改写
+- `internal/proxy/server.go` / `response_handlers.go` —— 请求前、响应后两个 hook
+- `aggregate_group_service.go` —— 放行 `openai ⇄ anthropic` 跨协议子分组挂载
+
+**未做:**流式转换(命中时返回 501 并明确说明原因)、Gemini、Responses。
 
 ---
 
@@ -227,11 +236,13 @@ C 的连带好处:自动挂载规则不用动,不会一建 Groq 组就被 Anthro
 
 3. **自动挂载不受影响。** `AutoJoinSystemAggregate` 按 `SystemRoleForChannelType` 只挂同类型,不会有"一建 Groq 组就被 Anthropic 客户端打爆"的意外。
 
-**一个必须加的护栏(否则会静默错配):**
+**~~一个必须加的护栏~~ —— 实际上已经自带了,不用写:**
 
-> 异协议子分组**只允许通过 alias 命中进入候选池**;raw 字符串匹配与 family 匹配阶段必须排除它们。
+实现时发现 `selectNextForModelExcluding`(`subgroup_manager.go:366-381`)走的是**严格路由**:请求的 model 必须落在某个子分组的 `ExposedModels ∪ AvailableModels` 里,**没有任何子分组声明能 serve 就直接返回 ""**(上层 404),不会退化到全量 SWRR。
 
-否则 `claude-*` 没配 alias 时会走 `SelectSubGroupForModel` 的全量 SWRR 兜底(`subgroup_manager.go:67` 的 graceful degrade),请求被静默打到 openai 组、拿 Llama 的回答当 Claude 返回。这是方案 A 唯一真实的风险,加这一条就没了。
+也就是说:`claude-sonnet-4-5` 在 Groq 组不声明的情况下根本不会被选中,**"静默拿 Llama 当 Claude 返回"这条风险不存在**。跨协议子分组只可能通过两条路被选中 —— P4 alias 命中,或者该子分组的模型缓存里真的有这个模型名(如 OpenRouter 本身就以 OpenAI 兼容协议暴露 Claude)。两条都是合理的。
+
+不需要为护栏写任何代码。**注意**:这是建立在严格路由之上的,如果哪天把聚合层改成"未命中就退化到全量 SWRR",这条护栏会失效 —— 到时候需要补上"异协议子分组只能由 alias 命中"。
 
 **工作量**:非流式打通 2-3 天,+ 流式 3-4 天,合计约 **1 周**。
 **更小的验证版**:只做 `internal/apicompat` + 测试(不发流量),1 天,用来判断值不值得继续。
