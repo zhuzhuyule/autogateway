@@ -47,11 +47,27 @@ const formData = reactive<{
   sub_groups: [{ group_id: null, weight: 1 }],
 });
 
+// 跨协议转译:聚合分组允许挂载"协议不同但可互转"的子分组,网关会在转发时
+// 自动做协议转换。允许的组合必须与后端
+// internal/services.aggregate_group_service.go 的 crossProtocolAllowed 一致,
+// 否则前端放行、后端 400。
+function isProtocolCompatible(aggregateType?: string, subType?: string): boolean {
+  if (!aggregateType || !subType) {
+    return false;
+  }
+  if (aggregateType === subType) {
+    return true;
+  }
+  const pair = [aggregateType, subType].sort().join("|");
+  return pair === "anthropic|openai";
+}
+
 const getAvailableOptions = computed(() => {
   if (!props.aggregateGroup?.channel_type) {
     return [];
   }
 
+  const aggregateType = props.aggregateGroup.channel_type;
   const existingIds = props.existingSubGroups.map(sg => sg.group.id);
 
   return props.groups
@@ -60,7 +76,7 @@ const getAvailableOptions = computed(() => {
         return false;
       }
 
-      if (group.channel_type !== props.aggregateGroup?.channel_type) {
+      if (!isProtocolCompatible(aggregateType, group.channel_type)) {
         return false;
       }
 
@@ -75,7 +91,12 @@ const getAvailableOptions = computed(() => {
       return true;
     })
     .map(group => ({
-      label: getGroupDisplayName(group),
+      // 跨协议的子分组标出来 —— 否则用户看到 anthropic 聚合组里挂了个
+      // openai 分组会以为是配错了。
+      label: isProtocolCompatible(aggregateType, group.channel_type) &&
+        group.channel_type !== aggregateType
+        ? `${getGroupDisplayName(group)} · ${t("keys.crossProtocolTag")}`
+        : getGroupDisplayName(group),
       value: group?.id,
     }));
 });
@@ -157,6 +178,15 @@ async function handleSubmit() {
 const canAddMore = computed(() => {
   return formData.sub_groups.length < getAvailableOptions.value.length;
 });
+
+// 只有 openai / anthropic 两种协议之间存在转译通道,其它协议组合不提示。
+const crossProtocolHint = computed(() => {
+  const type = props.aggregateGroup?.channel_type;
+  if (type !== "openai" && type !== "anthropic") {
+    return "";
+  }
+  return t("keys.crossProtocolHint");
+});
 </script>
 
 <template>
@@ -185,6 +215,8 @@ const canAddMore = computed(() => {
               {{ t("keys.channelType") }}: {{ aggregateGroup?.channel_type?.toUpperCase() }}
             </span>
           </div>
+
+          <p v-if="crossProtocolHint" class="v3-protocol-hint">{{ crossProtocolHint }}</p>
 
           <div class="v3-sub-group-list">
             <div
@@ -308,6 +340,12 @@ const canAddMore = computed(() => {
   font: 600 13px/1.2 var(--v3-sans);
   color: var(--v3-ink);
   margin: 0;
+}
+
+.v3-protocol-hint {
+  margin: -4px 0 0;
+  font: 400 12px/1.5 var(--v3-sans);
+  color: var(--v3-ink-3);
 }
 
 .v3-sub-group-list {

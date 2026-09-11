@@ -2,17 +2,22 @@
 
 > 触发:V2EX《micro-one-api 协议转换: Chat ↔ Responses ↔ Messages》(https://www.v2ex.com/t/1241256)
 > 对应 Roadmap:`README.md:305` `- [ ] 跨 channel 协议翻译(OpenAI ↔ Anthropic ↔ Gemini)`
-> 状态:**最小 MVP 已实现(分支 `feat/apicompat-anthropic-chat`),非流式可用,流式未做**
+> 状态:**P0 + P1 已实现(分支 `feat/apicompat-anthropic-chat`),非流式与流式双向均已打通**
 > 日期:2026-09-11
 
 **已落地:**
 - `internal/apicompat` —— Anthropic ⇄ Chat 双向转换 + 防御性规范化(30 用例)
+- `internal/apicompat/stream.go` —— 双向流式状态机(事件重排 + 幂等 `Finalize()` 断流兜底,13 用例)
 - `internal/usage.Anthropic()` —— 包容桶 → 互斥桶逆投影
 - `internal/proxy/protocol_bridge.go` —— 转换规划与 body/路径改写
+- `internal/proxy/stream_translate.go` —— 流式转译管道(header-hold 到**转换后**首帧)
 - `internal/proxy/server.go` / `response_handlers.go` —— 请求前、响应后两个 hook
 - `aggregate_group_service.go` —— 放行 `openai ⇄ anthropic` 跨协议子分组挂载
 
-**未做:**流式转换(命中时返回 501 并明确说明原因)、Gemini、Responses。
+**未做:**Gemini、Responses(见 §6 的 P2/P3)。
+
+**测试覆盖:**`internal/apicompat` 43 用例、`internal/proxy` 12 用例(含 5 个流式端到端
+与 2 个"同协议逐字节不变"回归护栏)、`internal/usage` 2 用例。`go test -race` 全绿。
 
 ---
 
@@ -143,7 +148,12 @@ C 的连带好处:自动挂载规则不用动,不会一建 Groq 组就被 Anthro
 - 响应转换插在 `proxy/response_handlers.go:20`
 - **触发条件**:仅当「入站协议 ≠ 目标节点协议」。不映射的节点完全不进这条路径
 
-### 5.2 流式 —— 影响**中→高**,但可延后
+### 5.2 流式 —— 影响**中→高**,但可延后(已实现)
+
+> **已落地**(`internal/proxy/stream_translate.go` + `internal/apicompat/stream.go`)。
+> 上表四行全部按"处理"列实现:转译流走独立管道,header-hold 后移到**转换后**
+> 首帧,终止符按协议识别(`[DONE]` ↔ `message_stop`),断流由幂等 `Finalize()`
+> 合成终止事件并保留 `truncated=true`。
 
 现有 `stream_integrity.go` 是字节级透传,会撞三处:
 
@@ -278,9 +288,18 @@ internal/apicompat/
 
 **验收**:`/anthropic/v1/messages` 能经映射节点打到 openai 子分组并正确返回;**不配置任何映射时,行为与今天逐字节一致**。
 
-### P2 —— 流式双向
+### P2 —— 流式双向(已完成)
 
-先做单向(Anthropic 客户端 → openai 上游),跑稳再做反向。
+双向一次做完,不用分两批 —— 两个状态机共用同一套"块生命周期"抽象,反向的边际
+成本比预估低。落地要点:
+
+- `ChatToAnthropicStream`:Chat 平铺 delta → Anthropic 严格有序块生命周期
+  (`start → delta* → stop`),thinking/text/tool_use 切换时先 close 再 open。
+- `AnthropicToChatStream`:`output_index → 客户端 tool index` 翻译;孤儿
+  `input_json_delta`(没见过 start 的)直接丢弃,防止乱序分片污染输出。
+- 两端 `Finalize()` 幂等 —— 上游断流时补 `message_stop` / `[DONE]`,否则 Claude
+  Code 会一直挂。
+- usage 从**上游原始帧**累积(口径 = 上游实际消耗),只有写给客户端的字节才投影。
 
 ### P3 —— Gemini / Responses 边
 
@@ -309,8 +328,8 @@ internal/apicompat/
 
 ## 9. 待决策
 
-1. hub 选 Chat(本文论证)还是 Responses(若把 Codex/Claude Code 列为一等公民,结论可能变)
-2. 目标客户端是否包含 Claude Code / Cline / Cursor → **决定 P2 流式是否并入 P1**
-3. 是否只做 Anthropic → OpenAI 单向(§8)
-4. 映射模型名是复用 alias 机制还是独立映射表
-5. Gemini 边的优先级
+1. ~~hub 选 Chat(本文论证)还是 Responses~~ → **已定:Chat**(§4.1)
+2. ~~目标客户端是否包含 Claude Code / Cline / Cursor~~ → **包含,流式已并入 P1**
+3. ~~是否只做 Anthropic → OpenAI 单向~~ → **否,双向都做了**(反向边际成本很低)
+4. 映射模型名是复用 alias 机制还是独立映射表 —— MVP 阶段复用 `model_aliases`,未验证是否够用
+5. Gemini 边的优先级 —— 未定,取决于是否有 Gemini 客户端需求

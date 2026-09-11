@@ -282,6 +282,9 @@ export default {
       "サブグループにモデル一覧のキャッシュがありません。先にサブグループで更新してください",
     displayName: "表示名",
     channelType: "チャンネルタイプ",
+    crossProtocolHint:
+      "異なるプロトコルのサブグループも追加できます(openai ⇄ anthropic)。ゲートウェイが自動変換します。",
+    crossProtocolTag: "プロトコル変換",
     sortOrder: "並び順",
     testModel: "テストモデル",
     testPath: "テストパス",

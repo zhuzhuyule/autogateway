@@ -277,6 +277,9 @@ export default {
     aggregatedModelsEmpty: "子分组尚未拉取过模型列表,请先在子分组中刷新",
     displayName: "显示名称",
     channelType: "渠道类型",
+    crossProtocolHint:
+      "支持挂载协议不同的子分组(openai ⇄ anthropic),网关会在转发时自动做协议转换。",
+    crossProtocolTag: "跨协议",
     sortOrder: "排序",
     testModel: "测试模型",
     testPath: "测试路径",

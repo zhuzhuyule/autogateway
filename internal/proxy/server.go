@@ -311,25 +311,6 @@ func (ps *ProxyServer) executeRequestWithRetry(
 	tr := planTranslation(c.Request.URL.Path, group.ChannelType)
 	outBody := tr.convertRequest(bodyBytes)
 
-	// 流式转译(事件流状态机 + 断流兜底)尚未实现。这里显式拒绝,而不是把
-	// 上游另一种协议的 SSE 原样透给客户端 —— 那会让客户端解析到一半才炸,
-	// 极难排查。非流式不受影响。
-	if tr.needed && isStream {
-		logrus.WithFields(logrus.Fields{
-			"group":       group.Name,
-			"from":        tr.from,
-			"to":          tr.to,
-			"target_path": tr.upstreamPath(c.Request.URL.Path),
-		}).Warn("cross-protocol streaming translation not implemented, rejecting request")
-		ps.logRequest(c, originalGroup, group, nil, startTime, http.StatusNotImplemented,
-			errors.New("cross-protocol streaming translation is not supported yet"),
-			isStream, "", channelHandler, bodyBytes, models.RequestTypeFinal)
-		response.Error(c, app_errors.NewAPIErrorWithUpstream(http.StatusNotImplemented,
-			"TRANSLATION_UNSUPPORTED",
-			"cross-protocol streaming translation is not supported yet; use a non-streaming request or a same-protocol sub-group"))
-		return
-	}
-
 	// ①成本可观测性: OpenAI chat 流式且开启 ForceStreamUsage 时, 注入
 	// stream_options.include_usage 让上游回传 usage 帧 (否则拿不到 token 用量)。
 	// 幂等: retry 递归重入也只会注入一次 (已存在则跳过)。
@@ -515,8 +496,14 @@ func (ps *ProxyServer) executeRequestWithRetry(
 		// #10 header-hold + #11 空/error 帧检测: 流式不提前发头, 推迟到 streamWithIntegrity
 		// 见到首个有效 chunk 才发 (resp.Header + c.Status 都在 streamWithIntegrity 内部).
 		// 200-but-empty / 首帧即 error 且未发头 → 走无感 failover (handleAttemptFailure).
-		isOpenAI := group.ChannelType == "openai" || group.ChannelType == "openai-response"
-		out := ps.streamWithIntegrity(c, resp, isOpenAI, time.Duration(group.EffectiveConfig.StreamIdleTimeout)*time.Second)
+		var out streamOutcome
+		if tr.needed {
+			// 跨协议流式:走转换流(事件重排 + 断流兜底),字节不再原样透传。
+			out = streamTranslated(c, resp, tr, time.Duration(group.EffectiveConfig.StreamIdleTimeout)*time.Second)
+		} else {
+			isOpenAI := group.ChannelType == "openai" || group.ChannelType == "openai-response"
+			out = ps.streamWithIntegrity(c, resp, isOpenAI, time.Duration(group.EffectiveConfig.StreamIdleTimeout)*time.Second)
+		}
 		if out.failed && !out.wroteToClient {
 			// 还没向客户端发头 → 安全 failover. handleAttemptFailure 内部会 logRequest,
 			// 此处直接 return 不再走下方成功 logRequest, 避免双重记账.

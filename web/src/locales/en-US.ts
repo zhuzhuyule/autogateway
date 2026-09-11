@@ -284,6 +284,9 @@ export default {
       "Sub-groups have no cached model lists. Refresh in each sub-group first.",
     displayName: "Display Name",
     channelType: "Channel Type",
+    crossProtocolHint:
+      "Sub-groups with a different protocol are allowed (openai ⇄ anthropic) — the gateway translates on the fly.",
+    crossProtocolTag: "cross-protocol",
     sortOrder: "Sort Order",
     testModel: "Test Model",
     testPath: "Test Path",
