@@ -87,6 +87,19 @@ func (f usageFields) normalize() Usage {
 	}
 }
 
+// Anthropic 把包容桶投影成 Anthropic 的**互斥桶**:input_tokens 不含缓存读,
+// 缓存读作为第三个返回值单独给出。与 normalize 互为逆运算。
+//
+// 协议转译(Chat 响应 → Anthropic 响应)必须用这个投影:直接把
+// PromptTokens 当作 Anthropic 的 input_tokens,会让客户端看到的输入 token
+// 系统性高估(缓存读被算进去了),成本账也跟着错。
+//
+// 钳制:缓存子集不可能超过总输入,防上游脏数据导致 input_tokens 变成负数。
+func (u Usage) Anthropic() (inputTokens, outputTokens, cacheRead int) {
+	cached := min(u.CachedPromptTokens, u.PromptTokens)
+	return u.PromptTokens - cached, u.CompletionTokens, cached
+}
+
 // Extract 从一段 JSON (非流式完整响应体, 或单个 SSE data payload) 解析 usage。
 // 未找到任何非零用量时返回 (Usage{}, false)。
 func Extract(payload []byte) (Usage, bool) {
