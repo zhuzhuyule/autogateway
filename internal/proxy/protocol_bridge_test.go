@@ -63,6 +63,18 @@ func TestPlanTranslation(t *testing.T) {
 			path: "/openai/v1/embeddings", channelType: "anthropic",
 			wantNeeded: false,
 		},
+		{
+			// 自定义命名分组走 /proxy/{group}/... 前缀,判定逻辑必须与系统快捷
+			// 路由一致 —— 否则"用系统路径能转、用自定义路径就不转"会非常难查。
+			name: "自定义命名分组 /proxy/{group}/v1/messages —— 同样识别为 Anthropic",
+			path: "/proxy/my-agg/v1/messages", channelType: "openai",
+			wantNeeded: true, wantFrom: apicompat.FormatAnthropic, wantTo: apicompat.FormatChatCompletions,
+		},
+		{
+			name: "自定义命名分组 /proxy/{group}/v1/chat/completions —— 打到 anthropic 节点",
+			path: "/proxy/my-agg/v1/chat/completions", channelType: "anthropic",
+			wantNeeded: true, wantFrom: apicompat.FormatChatCompletions, wantTo: apicompat.FormatAnthropic,
+		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

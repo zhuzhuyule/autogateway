@@ -302,7 +302,7 @@ GET  /proxy/{group_name}/v1/models
 - [x] `RESET_AUTH_KEY` 一键重置登录密钥(指纹幂等)
 - [x] Mission Console v3 UI + Playground
 - [ ] New Group 三步流程(pick provider → get key → paste & test)
-- [ ] 跨 channel 协议翻译(OpenAI ↔ Anthropic ↔ Gemini)
+- [ ] 跨 channel 协议翻译(OpenAI ↔ Anthropic ↔ Gemini)— **OpenAI ⇄ Anthropic 已完成**(非流式 + 流式,Gemini 待做)
 - [ ] 用量配额、预算告警、按 Key 计费
 - [ ] OAuth / SSO 登录
 - [ ] 子分组健康度自动权重调整

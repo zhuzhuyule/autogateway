@@ -21,6 +21,61 @@
 
 ---
 
+## 0.5 如何启用(三步,无需改任何客户端)
+
+转译**不是开关**,不需要开启任何配置项。它由"聚合分组里挂了一个协议不同的子分组"
+这个事实自动触发 —— 没挂就完全不发生。
+
+### 第 1 步:建聚合分组,channel_type 选 `anthropic`
+
+这个分组是给 Anthropic 客户端用的(Claude Code / Cline / Anthropic SDK)。
+
+### 第 2 步:把 OpenAI 子分组挂进去
+
+在子分组选择器里现在能选到 `openai` 类型的分组了(以前会被过滤掉),选项后面会
+带一个「· 跨协议」标记。这是本次唯一的前端改动点。
+
+> 注意:只有 `openai ⇄ anthropic` 这一对能互挂。挂 `gemini` 仍然会被拒绝 ——
+> 放行一个没有转换实现的组合,等于让请求静默拿到形状错误的响应。
+
+### 第 3 步:配 alias,把模型名映射过去 —— **这步不能省**
+
+转译解决"结构",不解决"模型名"。`claude-*` 在 Groq 上并不存在,所以:
+
+```
+alias: claude-sonnet-4-5  →  (groq-openai 子分组, llama-3.3-70b)
+alias: claude-haiku-4-5   →  (groq-openai 子分组, llama-3.1-8b-instant)
+```
+
+少了这步会怎样?聚合层的严格路由 `selectNextForModelExcluding` 在没有任何子分组
+声明 serve 该模型时**直接 404**,不会退化到全量 SWRR 去乱打。所以表现是清晰的
+"model not served",而不是"静默拿 Llama 当 Claude"—— 但请求就是不通。
+
+alias 命中后链路:`rewriteBodyModel` 先把**入站** body 的 model 改成 real_model,
+再进转译层,所以转译后上游收到的就是 `llama-3.3-70b`。
+
+### 验收命令
+
+端口默认 `3001`(`PORT` 环境变量可覆盖),鉴权用
+`Authorization: Bearer <AUTH_KEY>` 或该分组的 `proxy_keys`。
+
+```bash
+# Anthropic 客户端 → OpenAI 上游(非流式)
+curl -X POST http://localhost:3001/anthropic/v1/messages \
+  -H "Authorization: Bearer $AUTH_KEY" \
+  -H "anthropic-version: 2023-06-01" \
+  -H "content-type: application/json" \
+  -d '{"model":"claude-sonnet-4-5","max_tokens":64,"messages":[{"role":"user","content":"hi"}]}'
+
+# 加 "stream": true 即走流式,应返回 event: message_start ... message_stop
+# 自定义分组走 /proxy/{group_name}/v1/messages
+```
+
+判定标准:响应是 Anthropic 形状(`type: "message"` / `content[]` / `stop_reason`),
+**且不含任何 `choices` 字段**;实际 serve 的模型是 alias 指向的那个。
+
+---
+
 ## 0. 一句话结论
 
 **值得做,影响中等偏大但完全可控,并且可以 100% 增量交付。**
