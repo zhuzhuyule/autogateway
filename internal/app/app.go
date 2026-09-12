@@ -250,6 +250,17 @@ func (a *App) Start() error {
 			return fmt.Errorf("V2_7_0 (slave) invite_tokens failed: %w", err)
 		}
 		a.settingsManager.Initialize(a.storage, a.groupManager, a.configManager.IsMaster())
+
+		// Slave 也要把 DB 里已有的 key 补进 key 池。
+		// store 不是持久化的, 而 mesh sync 只在**变更**时触发 —— 启动前就已经
+		// active 的 key 不会被重新加回来, 于是每次重启后所有代理请求都 503
+		// NO_KEYS_AVAILABLE, 得手动 validate-group 才能恢复。
+		// 这里走非破坏性补齐(HydrateStoreFromDB), 不会覆盖 Master 运行期的
+		// active_keys 顺序 / failure_count; 失败只告警不拦启动 —— Slave 的 DB
+		// 可能首次加入时还是空的, 拦下来会让节点永远等不到那次能自愈的 sync。
+		if err := a.keyPoolProvider.HydrateStoreFromDB(); err != nil {
+			logrus.WithError(err).Warn("hydrate key pool from DB failed (non-fatal, will retry on next sync)")
+		}
 		a.syncPeerManager.SetBroadcaster(a.syncHandler)
 		a.syncPeerManager.Start(context.Background())
 	}

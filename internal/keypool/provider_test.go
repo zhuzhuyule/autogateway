@@ -12,6 +12,7 @@ import (
 	"autogateway/internal/store"
 
 	"github.com/glebarez/sqlite"
+	"gorm.io/datatypes"
 	"gorm.io/gorm"
 )
 
@@ -482,5 +483,105 @@ func TestSyncGroupKeysFromDB_RepairsMissingCredential(t *testing.T) {
 	}
 	if hash["key_string"] != keyValue {
 		t.Errorf("after sync, key_string = %q, want %q", hash["key_string"], keyValue)
+	}
+}
+
+// TestHydrateStoreFromDB_SeedsMissingKeys 覆盖 Slave 启动时的补齐:
+// store 是空的, DB 里有 key → 补齐后必须能选出来。
+func TestHydrateStoreFromDB_SeedsMissingKeys(t *testing.T) {
+	const groupID = uint(41)
+
+	db := newTestDB(t)
+	if err := db.AutoMigrate(&models.Group{}); err != nil {
+		t.Fatalf("automigrate groups: %v", err)
+	}
+	if err := db.Create(&models.Group{
+		ID: groupID, Name: "hydrate-a",
+		Upstreams: datatypes.JSON([]byte("[]")), ChannelType: "openai",
+	}).Error; err != nil {
+		t.Fatalf("create group: %v", err)
+	}
+	if err := db.Create(&models.APIKey{
+		ID: 411, KeyValue: "sk-hydrate-411", GroupID: groupID, Status: models.KeyStatusActive,
+	}).Error; err != nil {
+		t.Fatalf("create key: %v", err)
+	}
+
+	s := store.NewMemoryStore()
+	p := newTestProviderWithDB(s, newNoopEncryption(t), db)
+
+	if err := p.HydrateStoreFromDB(); err != nil {
+		t.Fatalf("HydrateStoreFromDB: %v", err)
+	}
+
+	hash, err := s.HGetAll("key:411")
+	if err != nil {
+		t.Fatalf("HGetAll: %v", err)
+	}
+	if hash["key_string"] != "sk-hydrate-411" {
+		t.Fatalf("hydrated hash key_string = %q, want sk-hydrate-411", hash["key_string"])
+	}
+
+	sel, err := p.SelectKey(groupID, ratelimit.Limits{})
+	if err != nil {
+		t.Fatalf("SelectKey after hydrate: %v", err)
+	}
+	if sel.KeyValue != "sk-hydrate-411" {
+		t.Errorf("SelectKey KeyValue = %q, want sk-hydrate-411", sel.KeyValue)
+	}
+}
+
+// TestHydrateStoreFromDB_DoesNotClobberRuntimeState 保证补齐是**非破坏性**的:
+// 已存在的 hash 不被 DB 值覆盖, 运行期累计的 failure_count 必须保住。
+// 这是它跟 LoadKeysFromDB 的关键区别 —— 否则一个 Slave 重启就会把 Master
+// 维护的运行时状态冲掉。
+func TestHydrateStoreFromDB_DoesNotClobberRuntimeState(t *testing.T) {
+	const groupID, keyID = uint(42), uint(421)
+
+	db := newTestDB(t)
+	if err := db.AutoMigrate(&models.Group{}); err != nil {
+		t.Fatalf("automigrate groups: %v", err)
+	}
+	if err := db.Create(&models.Group{
+		ID: groupID, Name: "hydrate-b",
+		Upstreams: datatypes.JSON([]byte("[]")), ChannelType: "openai",
+	}).Error; err != nil {
+		t.Fatalf("create group: %v", err)
+	}
+	// DB 里 failure_count = 0 (还没落库), 但运行期 store 里已经累计到 7。
+	if err := db.Create(&models.APIKey{
+		ID: keyID, KeyValue: "sk-hydrate-421", GroupID: groupID, Status: models.KeyStatusActive,
+	}).Error; err != nil {
+		t.Fatalf("create key: %v", err)
+	}
+
+	s := store.NewMemoryStore()
+	p := newTestProviderWithDB(s, newNoopEncryption(t), db)
+
+	keyHashKey := fmt.Sprintf("key:%d", keyID)
+	if err := s.HSet(keyHashKey, map[string]any{
+		"id":            fmt.Sprint(keyID),
+		"key_string":    "sk-hydrate-421",
+		"status":        models.KeyStatusActive,
+		"failure_count": "7",
+		"group_id":      fmt.Sprint(groupID),
+		"created_at":    "0",
+	}); err != nil {
+		t.Fatalf("HSet existing hash: %v", err)
+	}
+	if err := s.LPush(fmt.Sprintf("group:%d:active_keys", groupID), keyID); err != nil {
+		t.Fatalf("LPush: %v", err)
+	}
+
+	if err := p.HydrateStoreFromDB(); err != nil {
+		t.Fatalf("HydrateStoreFromDB: %v", err)
+	}
+
+	hash, err := s.HGetAll(keyHashKey)
+	if err != nil {
+		t.Fatalf("HGetAll: %v", err)
+	}
+	if hash["failure_count"] != "7" {
+		t.Errorf("failure_count = %q, want \"7\" (补齐不能覆盖运行期状态)", hash["failure_count"])
 	}
 }

@@ -516,6 +516,40 @@ func (p *KeyProvider) SyncGroupKeysFromDB(groupID uint) error {
 	return nil
 }
 
+// HydrateStoreFromDB 把 DB 里"store 中还没有"的 key 补进 key 池。
+//
+// 与 LoadKeysFromDB 的区别: LoadKeysFromDB 是 Master 的"以 DB 为准"全量初始化
+// —— 它会 Delete 并重建每个 group 的 active_keys 列表, 并用 DB 值覆盖 hash。
+// Slave 不能这么做: 多实例共享同一个 store 时, 一个 Slave 重启就会把 Master
+// 运行期维护的 active_keys 顺序冲掉。
+//
+// 但 Slave 又**必须**在启动时补一次。原因是 store 不是持久化的, 而 mesh sync
+// 只在**变更**时触发 (sync_service / sync_snapshot 合并收尾才调
+// SyncGroupKeysFromDB) —— 启动前就已经 active 的 key 永远不会被重新加回来。
+// 结果是: Slave 每次重启后 store 都是空的, 所有代理请求 503 NO_KEYS_AVAILABLE,
+// 必须手动 validate-group 才能恢复 (实测踩过, 而且那一步还引出了"空凭据打上游")。
+//
+// 所以这里复用 SyncGroupKeysFromDB 的**非破坏性**语义逐个 group 补齐:
+// 只补缺失的 hash / 把该 active 的 key 加回 active_keys, 已存在的 hash 一律
+// 不动 (保护运行期累计的 failure_count)。
+func (p *KeyProvider) HydrateStoreFromDB() error {
+	var groupIDs []uint
+	if err := p.db.Model(&models.Group{}).
+		Where("deleted_at IS NULL").
+		Pluck("id", &groupIDs).Error; err != nil {
+		return fmt.Errorf("hydrate store: list groups: %w", err)
+	}
+
+	for _, groupID := range groupIDs {
+		if err := p.SyncGroupKeysFromDB(groupID); err != nil {
+			return fmt.Errorf("hydrate store: %w", err)
+		}
+	}
+
+	logrus.WithField("groups", len(groupIDs)).Debug("Key pool hydrated from DB (non-destructive).")
+	return nil
+}
+
 // AddKeys 批量添加新的 Key 到池和数据库中。
 func (p *KeyProvider) AddKeys(groupID uint, keys []models.APIKey) error {
 	if len(keys) == 0 {
