@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"testing"
 
-	app_errors "autogateway/internal/errors"
 	"autogateway/internal/encryption"
+	app_errors "autogateway/internal/errors"
 	"autogateway/internal/models"
 	"autogateway/internal/ratelimit"
 	"autogateway/internal/store"
@@ -339,5 +339,148 @@ func TestSyncGroupKeysFromDB_Disabled(t *testing.T) {
 	_, selErr := p.SelectKey(groupID, ratelimit.Limits{})
 	if !errors.Is(selErr, app_errors.ErrNoActiveKeys) {
 		t.Errorf("after sync: expected ErrNoActiveKeys, got %v", selErr)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 回归: 残缺 hash 不能进轮转 (空凭据打上游)
+//
+// 线上现象: Slave 节点不跑 LoadKeysFromDB, store 是空的; 手动 validate-group
+// 校验通过后 handleSuccess 只写了 {status, failure_count} 两个字段, 于是
+// active_keys 里出现了一把**没有 key_string** 的 key。SelectKey 照常返回它,
+// 请求带着 "Authorization: Bearer " (空凭据) 打到上游 —— Gitee 对空 bearer
+// 返回的是一个与真实原因无关的 400 Bad Request, 排查成本极高。
+// ---------------------------------------------------------------------------
+
+// TestHandleSuccess_MaterializesFullHash 保证 handleSuccess 在 store 里没有
+// hash 时会写出**完整**的 hash(含 key_string), 而不是残缺的两字段版本。
+func TestHandleSuccess_MaterializesFullHash(t *testing.T) {
+	const groupID, keyID = uint(1), uint(101)
+	const keyValue = "sk-regression-full-hash"
+
+	db := newTestDB(t)
+	if err := db.Create(&models.APIKey{
+		ID:       keyID,
+		KeyValue: keyValue,
+		GroupID:  groupID,
+		Status:   models.KeyStatusActive,
+	}).Error; err != nil {
+		t.Fatalf("create key row: %v", err)
+	}
+
+	s := store.NewMemoryStore()
+	p := newTestProviderWithDB(s, newNoopEncryption(t), db)
+
+	keyHashKey := fmt.Sprintf("key:%d", keyID)
+	activeListKey := fmt.Sprintf("group:%d:active_keys", groupID)
+
+	// store 里完全没有这把 key 的痕迹 —— 模拟 Slave 冷启动 + 首次校验通过。
+	if err := p.handleSuccess(keyID, keyHashKey, activeListKey); err != nil {
+		t.Fatalf("handleSuccess: %v", err)
+	}
+
+	hash, err := s.HGetAll(keyHashKey)
+	if err != nil {
+		t.Fatalf("HGetAll: %v", err)
+	}
+	if hash["key_string"] != keyValue {
+		t.Fatalf("store hash key_string = %q, want %q (残缺 hash 会让请求带空凭据打上游)",
+			hash["key_string"], keyValue)
+	}
+	if hash["status"] != models.KeyStatusActive {
+		t.Errorf("store hash status = %q, want %q", hash["status"], models.KeyStatusActive)
+	}
+
+	// 端到端: 选出来的 key 必须带着真凭据。
+	sel, err := p.SelectKey(groupID, ratelimit.Limits{})
+	if err != nil {
+		t.Fatalf("SelectKey: %v", err)
+	}
+	if sel.KeyValue != keyValue {
+		t.Errorf("SelectKey KeyValue = %q, want %q", sel.KeyValue, keyValue)
+	}
+}
+
+// TestSelectKey_EvictsHashWithoutCredential 保证缺 key_string 的 hash 会被
+// 逐出轮转并报 ErrNoActiveKeys —— 宁可失败也不发一个空凭据的上游请求。
+func TestSelectKey_EvictsHashWithoutCredential(t *testing.T) {
+	const groupID, keyID = uint(2), uint(202)
+
+	s := store.NewMemoryStore()
+	p := newTestProvider(s, newNoopEncryption(t), nil)
+
+	keyHashKey := fmt.Sprintf("key:%d", keyID)
+	activeListKey := fmt.Sprintf("group:%d:active_keys", groupID)
+
+	// 手工造出线上那个残缺 hash: 只有 status + failure_count, 没有 key_string。
+	if err := s.HSet(keyHashKey, map[string]any{
+		"status":        models.KeyStatusActive,
+		"failure_count": "0",
+	}); err != nil {
+		t.Fatalf("HSet partial hash: %v", err)
+	}
+	if err := s.LPush(activeListKey, keyID); err != nil {
+		t.Fatalf("LPush active list: %v", err)
+	}
+
+	_, err := p.SelectKey(groupID, ratelimit.Limits{})
+	if !errors.Is(err, app_errors.ErrNoActiveKeys) {
+		t.Fatalf("SelectKey with credential-less hash: got %v, want ErrNoActiveKeys "+
+			"(绝不能返回一把空 key 让请求打到上游)", err)
+	}
+
+	// 必须从 active_keys 摘出去, 否则每次轮转都白转一圈。
+	n, err := s.LLen(activeListKey)
+	if err != nil {
+		t.Fatalf("LLen: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("active_keys length = %d, want 0 (残缺 key 应被逐出)", n)
+	}
+}
+
+// TestSyncGroupKeysFromDB_RepairsMissingCredential 保证 mesh sync 路径遇到
+// "hash 在但没凭据" 时会用 DB 真值整体重建, 而不是只修 status 就放行。
+func TestSyncGroupKeysFromDB_RepairsMissingCredential(t *testing.T) {
+	const groupID, keyID = uint(3), uint(303)
+	const keyValue = "sk-regression-sync-repair"
+
+	db := newTestDB(t)
+	if err := db.Create(&models.APIKey{
+		ID:       keyID,
+		KeyValue: keyValue,
+		GroupID:  groupID,
+		Status:   models.KeyStatusActive,
+	}).Error; err != nil {
+		t.Fatalf("create key row: %v", err)
+	}
+
+	s := store.NewMemoryStore()
+	p := newTestProviderWithDB(s, newNoopEncryption(t), db)
+
+	keyHashKey := fmt.Sprintf("key:%d", keyID)
+	activeListKey := fmt.Sprintf("group:%d:active_keys", groupID)
+
+	// 残缺 hash + 已在 active list (模拟历史脏数据)。
+	if err := s.HSet(keyHashKey, map[string]any{
+		"status":        models.KeyStatusActive,
+		"failure_count": "0",
+	}); err != nil {
+		t.Fatalf("HSet partial hash: %v", err)
+	}
+	if err := s.LPush(activeListKey, keyID); err != nil {
+		t.Fatalf("LPush: %v", err)
+	}
+
+	if err := p.SyncGroupKeysFromDB(groupID); err != nil {
+		t.Fatalf("SyncGroupKeysFromDB: %v", err)
+	}
+
+	hash, err := s.HGetAll(keyHashKey)
+	if err != nil {
+		t.Fatalf("HGetAll: %v", err)
+	}
+	if hash["key_string"] != keyValue {
+		t.Errorf("after sync, key_string = %q, want %q", hash["key_string"], keyValue)
 	}
 }

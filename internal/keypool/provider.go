@@ -1,15 +1,15 @@
 package keypool
 
 import (
-	"context"
-	"errors"
-	"fmt"
 	"autogateway/internal/config"
 	"autogateway/internal/encryption"
 	app_errors "autogateway/internal/errors"
 	"autogateway/internal/models"
 	"autogateway/internal/ratelimit"
 	"autogateway/internal/store"
+	"context"
+	"errors"
+	"fmt"
 	"math/rand"
 	"strconv"
 	"strings"
@@ -84,14 +84,21 @@ func (p *KeyProvider) SelectKey(groupID uint, limits ratelimit.Limits) (*models.
 		}
 
 		// 防御性 check: hash 不存在 (被 SyncGroupKeysFromDB Delete 但 active_keys
-		// LRem 没及时) 或 status 非 active (被对端 sync 标 invalid 但 active_keys
-		// 没清干净) → 跳过这把 key + 从 active_keys LRem 出去, 让下次 Rotate
-		// 直接拿下一把. 这是 store/db desync 的最后一道闸, 兜住直接 SQL 改 db
+		// LRem 没及时) / status 非 active (被对端 sync 标 invalid 但 active_keys
+		// 没清干净) / 缺凭据 (key_string 空, hash 被只写 status 的路径建出来) →
+		// 跳过这把 key + 从 active_keys LRem 出去, 让下次 Rotate 直接拿下一把.
+		// 这是 store/db desync 的最后一道闸, 兜住直接 SQL 改 db
 		// 或未来新路径绕过 store 同步的场景.
-		if len(keyDetails) == 0 || keyDetails["status"] != models.KeyStatusActive {
+		// 缺凭据**绝不能**放行: 空 key 打上游只会拿到一个跟真实原因无关的 4xx
+		// (Gitee 对 "Bearer " 返回 400), 掩盖掉真正的问题. 宁可这里报 no active keys.
+		missingCredential := len(keyDetails) > 0 && keyDetails["key_string"] == ""
+		if len(keyDetails) == 0 || keyDetails["status"] != models.KeyStatusActive || missingCredential {
 			reason := "status_not_active"
-			if len(keyDetails) == 0 {
+			switch {
+			case len(keyDetails) == 0:
 				reason = "hash_missing"
+			case missingCredential:
+				reason = "missing_credential"
 			}
 			logrus.WithFields(logrus.Fields{
 				"groupID": groupID,
@@ -100,7 +107,9 @@ func (p *KeyProvider) SelectKey(groupID uint, limits ratelimit.Limits) (*models.
 				"status":  keyDetails["status"],
 			}).Warn("SelectKey: stale entry in active_keys, evicting and re-rotating")
 			_ = p.store.LRem(activeKeysListKey, 0, uint(keyID))
-			if len(keyDetails) > 0 {
+			// 缺凭据时保留 hash: status/failure_count 依然有效, 下次完整重载
+			// (LoadKeysFromDB / SyncGroupKeysFromDB) 能原地补齐, 不必从 DB 重建.
+			if len(keyDetails) > 0 && !missingCredential {
 				_ = p.store.Delete(keyHashKey)
 			}
 			continue
@@ -293,7 +302,17 @@ func (p *KeyProvider) handleSuccess(keyID uint, keyHashKey, activeKeysListKey st
 			return fmt.Errorf("failed to update key in DB: %w", err)
 		}
 
-		if err := p.store.HSet(keyHashKey, updates); err != nil {
+		// hash 必须带 key_string —— 只写 status/failure_count 会留下一个没有凭据的
+		// 残缺 hash, SelectKey 选出来就是空串, 请求会带着 "Authorization: Bearer "
+		// 打到上游(实测 Gitee 返回一个与真实原因无关的 400 Bad Request)。
+		// 这条路径可能是 hash 的**唯一**创建者: Slave 节点不跑 LoadKeysFromDB,
+		// 校验通过时 handleSuccess 就是第一个碰 store 的人。用刚锁定的 DB 行补齐
+		// 完整字段(含 KeyValue), 再把 updates 覆盖上去保证语义不变。
+		fullHash := p.apiKeyToMap(&key)
+		for k, v := range updates {
+			fullHash[k] = v
+		}
+		if err := p.store.HSet(keyHashKey, fullHash); err != nil {
 			return fmt.Errorf("failed to update key details in store: %w", err)
 		}
 
@@ -377,37 +396,37 @@ func (p *KeyProvider) LoadKeysFromDB() error {
 	validGroups := p.db.Model(&models.Group{}).Select("id").Where("deleted_at IS NULL")
 	err := p.db.Model(&models.APIKey{}).Where("group_id IN (?)", validGroups).
 		FindInBatches(&batchKeys, batchSize, func(tx *gorm.DB, batch int) error {
-		logrus.Debugf("Processing batch %d with %d keys...", batch, len(batchKeys))
+			logrus.Debugf("Processing batch %d with %d keys...", batch, len(batchKeys))
 
-		var pipeline store.Pipeliner
-		if redisStore, ok := p.store.(store.RedisPipeliner); ok {
-			pipeline = redisStore.Pipeline()
-		}
+			var pipeline store.Pipeliner
+			if redisStore, ok := p.store.(store.RedisPipeliner); ok {
+				pipeline = redisStore.Pipeline()
+			}
 
-		for _, key := range batchKeys {
-			keyHashKey := fmt.Sprintf("key:%d", key.ID)
-			keyDetails := p.apiKeyToMap(key)
+			for _, key := range batchKeys {
+				keyHashKey := fmt.Sprintf("key:%d", key.ID)
+				keyDetails := p.apiKeyToMap(key)
 
-			if pipeline != nil {
-				pipeline.HSet(keyHashKey, keyDetails)
-			} else {
-				if err := p.store.HSet(keyHashKey, keyDetails); err != nil {
-					logrus.WithFields(logrus.Fields{"keyID": key.ID, "error": err}).Error("Failed to HSet key details")
+				if pipeline != nil {
+					pipeline.HSet(keyHashKey, keyDetails)
+				} else {
+					if err := p.store.HSet(keyHashKey, keyDetails); err != nil {
+						logrus.WithFields(logrus.Fields{"keyID": key.ID, "error": err}).Error("Failed to HSet key details")
+					}
+				}
+
+				if key.Status == models.KeyStatusActive {
+					allActiveKeyIDs[key.GroupID] = append(allActiveKeyIDs[key.GroupID], key.ID)
 				}
 			}
 
-			if key.Status == models.KeyStatusActive {
-				allActiveKeyIDs[key.GroupID] = append(allActiveKeyIDs[key.GroupID], key.ID)
+			if pipeline != nil {
+				if err := pipeline.Exec(); err != nil {
+					return fmt.Errorf("failed to execute pipeline for batch %d: %w", batch, err)
+				}
 			}
-		}
-
-		if pipeline != nil {
-			if err := pipeline.Exec(); err != nil {
-				return fmt.Errorf("failed to execute pipeline for batch %d: %w", batch, err)
-			}
-		}
-		return nil
-	}).Error
+			return nil
+		}).Error
 
 	if err != nil {
 		return fmt.Errorf("failed during batch processing of keys: %w", err)
@@ -474,6 +493,14 @@ func (p *KeyProvider) SyncGroupKeysFromDB(groupID uint) error {
 		if err != nil || len(existingHash) == 0 {
 			// hash 不存在 → 新 key 同步过来, 建 hash + 加 active list
 			_ = p.store.HSet(keyHashKey, p.apiKeyToMap(k))
+			_ = p.store.LPush(activeListKey, k.ID)
+			continue
+		}
+		// 缺凭据的残缺 hash (被只写 status 的路径建出来) 不能只修 status —— 那样
+		// 它会带着空 key 进轮转. 用 DB 真值整体重建, 顺带把 failure_count 归位.
+		if existingHash["key_string"] == "" {
+			_ = p.store.HSet(keyHashKey, p.apiKeyToMap(k))
+			_ = p.store.LRem(activeListKey, 0, k.ID)
 			_ = p.store.LPush(activeListKey, k.ID)
 			continue
 		}

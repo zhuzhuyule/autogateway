@@ -325,3 +325,89 @@ func TestAnthropicStreamEventMarshal(t *testing.T) {
 		t.Errorf("index zero dropped: %s", raw)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// 回归: message_delta 必须带权威 usage
+//
+// 线上现象: Anthropic 侧收到 message_delta.usage.input_tokens = 0。
+// 原因是 OpenAI 的 usage 帧在**流尾**才到, message_start 时还不知道 input;
+// message_delta 是 Anthropic 协议里唯一能报总量的地方, 漏掉 InputTokens
+// 客户端就只能读到零值(AnthropicUsage.InputTokens 没有 omitempty)。
+// 同时 OpenAI 的 prompt_tokens 是包容桶(含缓存), Anthropic 的 input_tokens
+// 是互斥桶 —— 必须减去缓存命中, 否则开 prompt cache 的上游会重复计量。
+// ---------------------------------------------------------------------------
+
+func TestChatToAnthropicStream_MessageDeltaCarriesFinalUsage(t *testing.T) {
+	s := NewChatToAnthropicStream()
+
+	s.Process(&ChatStreamChunk{ID: "c1", Model: "m", Choices: []ChatStreamChoice{
+		{Delta: ChatStreamDelta{Role: "assistant"}},
+	}})
+	s.Process(&ChatStreamChunk{ID: "c1", Model: "m", Choices: []ChatStreamChoice{
+		{Delta: ChatStreamDelta{Content: "hi"}},
+	}})
+
+	// OpenAI 流尾的 usage 帧: prompt=100 其中 30 命中缓存, completion=7。
+	// Anthropic 互斥桶口径 → input_tokens = 100 - 30 = 70。
+	final := s.Process(&ChatStreamChunk{
+		ID: "c1", Model: "m",
+		Choices: []ChatStreamChoice{{Delta: ChatStreamDelta{}, FinishReason: strPtr("stop")}},
+		Usage: &ChatUsage{
+			PromptTokens:        100,
+			CompletionTokens:    7,
+			PromptTokensDetails: &ChatPromptTokensDetails{CachedTokens: 30},
+		},
+	})
+	final = append(final, s.Finalize()...)
+
+	var got *AnthropicUsage
+	for _, ev := range final {
+		if ev.Type == "message_delta" {
+			got = ev.Usage
+		}
+	}
+	if got == nil {
+		t.Fatal("no message_delta emitted")
+	}
+	if got.InputTokens != 70 {
+		t.Errorf("message_delta usage.input_tokens = %d, want 70 (100 prompt - 30 cached)", got.InputTokens)
+	}
+	if got.OutputTokens != 7 {
+		t.Errorf("message_delta usage.output_tokens = %d, want 7", got.OutputTokens)
+	}
+	if got.CacheReadInputTokens != 30 {
+		t.Errorf("message_delta usage.cache_read_input_tokens = %d, want 30", got.CacheReadInputTokens)
+	}
+}
+
+// TestChatToAnthropicStream_UsageSurvivesMissingCacheDetails 保证上游不给
+// prompt_tokens_details 时 input_tokens 就是 prompt_tokens 全量, 不被误减。
+func TestChatToAnthropicStream_UsageSurvivesMissingCacheDetails(t *testing.T) {
+	s := NewChatToAnthropicStream()
+
+	s.Process(&ChatStreamChunk{ID: "c1", Model: "m", Choices: []ChatStreamChoice{
+		{Delta: ChatStreamDelta{Role: "assistant"}},
+	}})
+	final := s.Process(&ChatStreamChunk{
+		ID: "c1", Model: "m",
+		Choices: []ChatStreamChoice{{Delta: ChatStreamDelta{}, FinishReason: strPtr("stop")}},
+		Usage:   &ChatUsage{PromptTokens: 42, CompletionTokens: 3},
+	})
+	final = append(final, s.Finalize()...)
+
+	var got *AnthropicUsage
+	for _, ev := range final {
+		if ev.Type == "message_delta" {
+			got = ev.Usage
+		}
+	}
+	if got == nil {
+		t.Fatal("no message_delta emitted")
+	}
+	if got.InputTokens != 42 {
+		t.Errorf("input_tokens = %d, want 42 (no cache details → full prompt)", got.InputTokens)
+	}
+	if got.CacheReadInputTokens != 0 {
+		t.Errorf("cache_read_input_tokens = %d, want 0", got.CacheReadInputTokens)
+	}
+}

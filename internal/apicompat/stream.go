@@ -80,6 +80,7 @@ type ChatToAnthropicStream struct {
 
 	inputTokens  int
 	outputTokens int
+	cacheRead    int
 	stopReason   string
 }
 
@@ -102,8 +103,19 @@ func (s *ChatToAnthropicStream) Process(chunk *ChatStreamChunk) []AnthropicStrea
 		s.model = chunk.Model
 	}
 	if chunk.Usage != nil {
-		s.inputTokens = max(s.inputTokens, chunk.Usage.PromptTokens)
+		// OpenAI 的 prompt_tokens 是**包容桶**(含缓存命中), Anthropic 的
+		// input_tokens 是**互斥桶** —— 必须投影, 否则开了 prompt cache 的上游
+		// 会把缓存那部分重复计进 input_tokens。与 usage.Usage.Anthropic() 同口径。
+		cached := 0
+		if chunk.Usage.PromptTokensDetails != nil {
+			cached = chunk.Usage.PromptTokensDetails.CachedTokens
+		}
+		if cached > chunk.Usage.PromptTokens {
+			cached = chunk.Usage.PromptTokens // 防脏数据: 缓存子集不可能超过总输入
+		}
+		s.inputTokens = max(s.inputTokens, chunk.Usage.PromptTokens-cached)
 		s.outputTokens = max(s.outputTokens, chunk.Usage.CompletionTokens)
+		s.cacheRead = max(s.cacheRead, cached)
 	}
 
 	if !s.started {
@@ -195,7 +207,14 @@ func (s *ChatToAnthropicStream) Finalize() []AnthropicStreamEvent {
 	out = append(out, AnthropicStreamEvent{
 		Type:  "message_delta",
 		Delta: map[string]any{"stop_reason": stopReason, "stop_sequence": nil},
-		Usage: &AnthropicUsage{OutputTokens: s.outputTokens},
+		// message_delta 是 Anthropic 协议里**唯一**带权威总量的地方 —— OpenAI 的
+		// usage 帧在流尾才到, message_start 时还不知道 input_tokens。这里必须把
+		// 三个桶都带上; 漏了 InputTokens 客户端会读到 0(实测就是这个问题)。
+		Usage: &AnthropicUsage{
+			InputTokens:          s.inputTokens,
+			OutputTokens:         s.outputTokens,
+			CacheReadInputTokens: s.cacheRead,
+		},
 	})
 	out = append(out, AnthropicStreamEvent{Type: "message_stop"})
 	return out
