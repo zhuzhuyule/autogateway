@@ -74,6 +74,25 @@ curl -X POST http://localhost:3001/anthropic/v1/messages \
 判定标准:响应是 Anthropic 形状(`type: "message"` / `content[]` / `stop_reason`),
 **且不含任何 `choices` 字段**;实际 serve 的模型是 alias 指向的那个。
 
+### 本地实测踩过的坑(2026-09-12)
+
+用 Gitee AI 做真实上游验证时,连续踩了三个**与转译无关**的坑,记下来省下次时间:
+
+1. **Slave 节点冷启动后 key 池曾是空的** → 所有请求 503 `NO_KEYS_AVAILABLE`。
+   根因:`LoadKeysFromDB()` 在 `app.go` 里位于 `if IsMaster()` 分支内,而
+   mesh sync 只在**变更**时触发,启动前就已 active 的 key 永远补不回来。
+   **已修**(`88abc48`):新增 `HydrateStoreFromDB()`,Slave 启动时走非破坏性
+   补齐。现在冷重启后直接就能用,不需要手动干预。
+
+2. **管理 API 的鉴权 key 在 DB 里,不在 `.env`**。`system_settings.auth_key`
+   才是生效值,拿 `.env` 的 `AUTH_KEY` 会 401。
+
+3. **免费额度 token 调不了付费模型**。Gitee 的免费 key 打 `GLM-5.2` 会返回
+   `当前 API 不支持免费体验，请使用付费访问令牌调用`。验收请挑一个
+   `free_models` 里的模型(如 `Qwen3-8B`)挂 alias。
+   另注:Gitee 对**空 bearer**返回的是 `400 Bad Request` 而不是 401,这个
+   反直觉的行为一度把排查带偏 —— 空凭据本身是 `4034937` 修掉的真 bug。
+
 ---
 
 ## 0. 一句话结论
