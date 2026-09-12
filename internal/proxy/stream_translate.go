@@ -58,6 +58,13 @@ func streamTranslated(c *gin.Context, resp *http.Response, tr translation, idleT
 				c.Header(key, value)
 			}
 		}
+		// 与 streamWithIntegrity 的 flushAndStream 保持一致: 这几个头不能指望
+		// 上游给对。尤其 X-Accel-Buffering —— 少了它, 前置 nginx 会把整条 SSE
+		// 缓冲到流结束才吐给客户端, 流式就废了。
+		c.Header("Content-Type", "text/event-stream")
+		c.Header("Cache-Control", "no-cache")
+		c.Header("Connection", "keep-alive")
+		c.Header("X-Accel-Buffering", "no")
 		c.Status(resp.StatusCode)
 		if _, err := c.Writer.Write(buffered.Bytes()); err != nil {
 			logrus.WithError(err).Debug("write buffered translated stream head")

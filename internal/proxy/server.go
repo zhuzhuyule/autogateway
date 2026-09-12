@@ -530,6 +530,13 @@ func (ps *ProxyServer) executeRequestWithRetry(
 		stashUsage(c, out.usage)
 	} else {
 		for key, values := range resp.Header {
+			// 转译会重写响应体, 长度必然与上游不同 —— Content-Length 交给 gin
+			// 按实际写入字节重算, 照抄上游会让客户端读到一半就断 (curl exit 18)。
+			// Content-Encoding 同理: 我们要写的是明文, 照抄 gzip 会让客户端去解
+			// 一段没压缩的字节。两者都由 handleNormalResponse 收尾。
+			if tr.needed && (key == "Content-Length" || key == "Content-Encoding") {
+				continue
+			}
 			for _, value := range values {
 				c.Header(key, value)
 			}

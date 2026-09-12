@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"fmt"
 	"io"
 	"net/http"
 
@@ -26,14 +27,17 @@ func (ps *ProxyServer) handleNormalResponse(c *gin.Context, resp *http.Response,
 		// 已读到的部分仍尽力回写。
 	}
 
-	// 解析用量。若响应被压缩, 解压一份副本仅用于解析; 原始 body 原样回写以保留
-	// Content-Encoding。解压失败 (未知编码等) 则跳过用量解析, 不影响转发。
-	parseBody := body
+	// 若响应被压缩, 解压一份副本。原始 body 保留用于回写(不转译时), 副本用于
+	// 解析用量 —— 以及转译(JSON 解析器看不懂 gzip)。
+	// decoded==true 表示 body 确实是明文(上游未压缩, 或压缩已成功解开)。
+	parseBody, decoded := body, true
 	if enc := resp.Header.Get("Content-Encoding"); enc != "" {
-		if decoded, derr := utils.DecompressResponse(enc, body); derr == nil {
-			parseBody = decoded
+		decoded = false
+		if plain, derr := utils.DecompressResponse(enc, body); derr == nil {
+			parseBody, decoded = plain, true
 		}
 	}
+
 	// 用量解析作用在**上游原始**响应上 —— usage.Extract 本身跨协议宽容,
 	// 而且这样成本口径始终是"上游实际消耗",不受转换影响。
 	if u, ok := usage.Extract(parseBody); ok {
@@ -42,7 +46,20 @@ func (ps *ProxyServer) handleNormalResponse(c *gin.Context, resp *http.Response,
 	}
 
 	// 协议转换:把上游响应翻回客户端请求的协议形状。
-	body = tr.convertResponse(body)
+	//
+	// 转译必须在**明文**上做。调用方在 tr.needed 时已经丢掉了上游的
+	// Content-Length / Content-Encoding, 所以这里写出去的必须是明文 —— 若
+	// 压缩体解不开, 就只能放弃转译并把编码头补回去, 否则客户端会拿到一段
+	// 没有 Content-Encoding 的压缩字节, 直接乱码。
+	if tr.needed {
+		if decoded {
+			body = tr.convertResponse(parseBody)
+		} else {
+			c.Header("Content-Encoding", resp.Header.Get("Content-Encoding"))
+			logUpstreamError("translation skipped: cannot decode upstream response body",
+				fmt.Errorf("unsupported or malformed encoding %q", resp.Header.Get("Content-Encoding")))
+		}
+	}
 
 	if _, werr := c.Writer.Write(body); werr != nil {
 		logUpstreamError("copying response body", werr)

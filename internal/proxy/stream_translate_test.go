@@ -121,6 +121,22 @@ func TestE2E_AnthropicStreamInboundToOpenAIUpstream(t *testing.T) {
 		t.Errorf("upstream path = %q, want /v1/chat/completions", gotPath)
 	}
 
+	// SSE 响应头必须与 streamWithIntegrity 一致 —— 尤其 X-Accel-Buffering,
+	// 少了它前置 nginx 会把整条流缓冲到结束才吐, 流式就废了。
+	if got := rec.Header().Get("X-Accel-Buffering"); got != "no" {
+		t.Errorf("X-Accel-Buffering = %q, want \"no\"", got)
+	}
+	if got := rec.Header().Get("Content-Type"); !strings.Contains(got, "text/event-stream") {
+		t.Errorf("Content-Type = %q, want text/event-stream", got)
+	}
+	// 转译后的字节数必然与上游不同, 上游的 framing 头不能照抄
+	if got := rec.Header().Get("Content-Encoding"); got != "" {
+		t.Errorf("stale Content-Encoding forwarded on stream: %q", got)
+	}
+	if got := rec.Header().Get("Content-Length"); got != "" {
+		t.Errorf("stale Content-Length forwarded on stream: %q", got)
+	}
+
 	body := rec.Body.String()
 	// 必须是 Anthropic 事件形状,不能漏出 Chat chunk
 	if strings.Contains(body, "chat.completion.chunk") {

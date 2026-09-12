@@ -1,9 +1,12 @@
 package proxy
 
 import (
+	"bytes"
+	"compress/gzip"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -247,6 +250,88 @@ func TestE2E_AnthropicInboundToOpenAIUpstream(t *testing.T) {
 	}
 	if strings.Contains(out, `"choices"`) {
 		t.Errorf("OpenAI shape leaked to client: %s", out)
+	}
+}
+
+// TestE2E_TranslatedResponse_NoStaleFramingHeaders 回归护栏:转译会重写响应体,
+// 上游的 Content-Length / Content-Encoding 必须被丢弃。
+//
+// 这两个头照抄会各自造成一种线上故障:
+//   - Content-Length: 客户端按上游长度读, 读到一半就断 (curl exit 18)
+//   - Content-Encoding: 上游 gzip 压缩体解不开 JSON, 转译静默失效, 客户端
+//     拿到 OpenAI 形状的响应还以为拿到了 Anthropic
+func TestE2E_TranslatedResponse_NoStaleFramingHeaders(t *testing.T) {
+	db := charTestDB(t)
+	st := store.NewMemoryStore()
+
+	// 上游返回 gzip 压缩体, 且带 Content-Encoding 与压缩后的 Content-Length。
+	plain := `{"id":"c1","object":"chat.completion","model":"gpt-4o",` +
+		`"choices":[{"index":0,"message":{"role":"assistant","content":"hello there"},"finish_reason":"stop"}],` +
+		`"usage":{"prompt_tokens":100,"completion_tokens":20,"total_tokens":120}}`
+	var gz bytes.Buffer
+	zw := gzip.NewWriter(&gz)
+	if _, err := zw.Write([]byte(plain)); err != nil {
+		t.Fatalf("gzip write: %v", err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("gzip close: %v", err)
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Encoding", "gzip")
+		w.Header().Set("Content-Length", strconv.Itoa(gz.Len()))
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(gz.Bytes())
+	}))
+	defer srv.Close()
+
+	std := &models.Group{
+		Name: "gz-openai", GroupType: "standard", ChannelType: "openai",
+		TestModel: "gpt-4o",
+		Upstreams: []byte(`[{"url":"` + srv.URL + `","weight":1}]`),
+	}
+	if err := db.Create(std).Error; err != nil {
+		t.Fatalf("create group: %v", err)
+	}
+
+	ps := buildProxyWithRealClients(t, db, st)
+	group, err := ps.groupManager.GetGroupByName("gz-openai")
+	if err != nil {
+		t.Fatalf("get group: %v", err)
+	}
+	seedKeyIntoStore(t, st, group.ID, 921, "keyGz")
+	handler, err := ps.channelFactory.GetChannel(group)
+	if err != nil {
+		t.Fatalf("get channel: %v", err)
+	}
+
+	inbound := `{"model":"claude-sonnet-4-5","max_tokens":64,"messages":[{"role":"user","content":"hi"}]}`
+	c, rec := newGinCtxWithPath("/anthropic/v1/messages", inbound)
+	ps.executeRequestWithRetry(c, handler, group, group, []byte(inbound), false, time.Now(), 0, map[string]bool{}, "claude-sonnet-4-5")
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+
+	// 1) 转译确实生效了(而不是因为 gzip 解析失败而静默跳过)
+	if !strings.Contains(body, `"type":"message"`) {
+		t.Errorf("translation did not happen (gzip body not decoded?): %s", body)
+	}
+	if strings.Contains(body, `"choices"`) {
+		t.Errorf("OpenAI shape leaked to client: %s", body)
+	}
+	// 2) Content-Encoding 必须去掉 —— 我们写的是明文
+	if enc := rec.Header().Get("Content-Encoding"); enc != "" {
+		t.Errorf("stale Content-Encoding forwarded: %q", enc)
+	}
+	// 3) Content-Length 要么不设, 要么等于实际写入长度
+	if cl := rec.Header().Get("Content-Length"); cl != "" {
+		if cl != strconv.Itoa(len(body)) {
+			t.Errorf("Content-Length = %s, actual body = %d bytes", cl, len(body))
+		}
 	}
 }
 
