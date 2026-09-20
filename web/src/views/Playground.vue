@@ -73,13 +73,13 @@ const authKey = useAuthKey();
 const videoQueueOpen = ref(false);
 
 interface Attachment {
-  // 仅 image 走 OpenAI multimodal 协议; 视频协议各家不同 (Gemini 有 video_url
-  // 但非标准), 先不做.
-  id: string; // 持久化主键 — dataUrl 存 IndexedDB, localStorage 只留元数据
-  kind: "image";
+  // "image" also carries OpenAI multimodal chat input; generated images and
+  // videos reuse this as persistent storage (IndexedDB by id).
+  id: string; // persistence key; dataUrl lives in IndexedDB, localStorage keeps metadata only
+  kind: "image" | "video";
   name: string;
   mime: string;
-  dataUrl: string; // base64 data URL — 存 IndexedDB(按 id), localStorage 不存
+  dataUrl: string; // base64 data URL, stored in IndexedDB (by id), never in localStorage
 }
 interface ChatUsage {
   prompt_tokens?: number;
@@ -140,6 +140,11 @@ const sending = ref(false);
 const pendingAttachments = ref<Attachment[]>([]);
 const fileInputRef = ref<HTMLInputElement | null>(null);
 const MAX_IMAGE_MB = 8;
+// Opening the page via file:// (double-clicking dist/index.html) resolves
+// every relative /api and /proxy request to file:///... and the browser
+// rejects them: image generation, pasted-file reads and the model list all
+// fail. Surfaced as a warning banner in the UI.
+const IS_FILE_PROTOCOL = location.protocol === "file:";
 
 // 最近上传过的图片(快速复用). 持久化到 localStorage, 总大小软上限 4MB
 // 防止撑爆 quota; 满了从末尾 pop 老的.
@@ -153,7 +158,7 @@ function loadRecentImages() {
     if (raw) {
       const arr = JSON.parse(raw) as Attachment[];
       // 兼容旧数据(无 id): 补一个 id, 保证后续持久化/预览 key 稳定
-      recentImages.value = arr.map(a => (a.id ? a : { ...a, id: crypto.randomUUID() }));
+      recentImages.value = arr.map(a => (a.id ? a : { ...a, id: uid() }));
     }
   } catch {
     // ignore
@@ -653,8 +658,39 @@ async function reconcileVideoTasks() {
     for (const m of s.messages) {
       if (!m.videoTaskId || m.phase === "done") continue;
       const tk = byId.get(m.videoTaskId);
-      if (tk) reconcileMessage(m, tk, texts, now);
+      if (!tk) {
+        continue;
+      }
+      const changed = reconcileMessage(m, tk, texts, now);
+      // Once the task completes, inline the hosted video into an IndexedDB
+      // attachment: upstream video URLs expire, a plain markdown hotlink
+      // would break when the user revisits the chat later.
+      if (changed && tk.status === "completed" && tk.video_url && !m.attachments?.length) {
+        void persistRemoteMedia(m, tk.video_url, "video");
+      }
     }
+  }
+}
+
+// persistRemoteMedia downloads a generated media URL and attaches it to the
+// message. On failure (expired link / CORS) the markdown hotlink in content
+// is kept as-is, showing something beats showing nothing.
+async function persistRemoteMedia(m: ChatMessage, url: string, kind: "image" | "video"): Promise<void> {
+  try {
+    const dataUrl = await remoteToDataUrl(url);
+    const ext = kind === "video" ? "mp4" : "png";
+    m.attachments = [
+      {
+        id: uid(),
+        kind,
+        name: `generated-${Date.now()}.${ext}`,
+        mime: kind === "video" ? "video/mp4" : "image/png",
+        dataUrl,
+      },
+    ];
+    m.content = "";
+  } catch (e) {
+    console.warn(`[playground] failed to persist generated ${kind}:`, e);
   }
 }
 
@@ -944,13 +980,47 @@ function fmtBytes(n: number): string {
   return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }
 
-async function readAsDataUrl(file: File): Promise<string> {
+// crypto.randomUUID only exists in secure contexts (https / localhost).
+// Called from a file:// or http://LAN-IP page it throws TypeError, which the
+// old catch blocks surfaced as a bogus "read failed" error.
+function uid(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `id-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+async function readAsDataUrl(file: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const r = new FileReader();
     r.onerror = () => reject(r.error);
-    r.onload = () => resolve(r.result as string);
+    r.onload = () => {
+      // onload can also carry an empty result (Chrome does this for released
+      // clipboard Files): treat as failure, never let an empty dataUrl in.
+      if (typeof r.result === "string" && r.result) {
+        resolve(r.result);
+      } else {
+        reject(new Error("empty read result"));
+      }
+    };
     r.readAsDataURL(file);
   });
+}
+
+// Remote media (upstream-hosted image/video URLs) is downloaded and inlined
+// as a dataURL. Those URLs commonly expire (DALL-E links die after ~1 hour),
+// and a broken <img> in an old message is worse than one extra fetch here.
+const MAX_REMOTE_MEDIA_MB = 64;
+async function remoteToDataUrl(url: string): Promise<string> {
+  const resp = await fetch(url);
+  if (!resp.ok) {
+    throw new Error(`HTTP ${resp.status}`);
+  }
+  const blob = await resp.blob();
+  if (blob.size > MAX_REMOTE_MEDIA_MB * 1024 * 1024) {
+    throw new Error(`remote media too large (${fmtBytes(blob.size)})`);
+  }
+  return readAsDataUrl(blob);
 }
 
 async function onFileChange(e: Event) {
@@ -970,7 +1040,7 @@ async function onFileChange(e: Event) {
     try {
       const dataUrl = await readAsDataUrl(f);
       const att: Attachment = {
-        id: crypto.randomUUID(),
+        id: uid(),
         kind: "image",
         name: f.name,
         mime: f.type || "image/png",
@@ -1048,27 +1118,63 @@ async function sendImage(groupName: string, modelName: string, prompt: string) {
       asst.doneAt = Date.now();
       return;
     }
-    const json = (await resp.json()) as {
+    // Read the body as text first, then parse: upstreams and intermediate
+    // layers occasionally return 200 + non-JSON (HTML error page, empty
+    // body). A bare resp.json() would throw a raw SyntaxError that reads
+    // like a network failure and tells nothing.
+    const rawText = await resp.text();
+    let json: {
       data?: Array<{ url?: string; b64_json?: string; revised_prompt?: string }>;
       usage?: { total_tokens?: number; input_tokens?: number; output_tokens?: number };
     };
+    try {
+      json = JSON.parse(rawText);
+    } catch {
+      asst.content = `[parse error] ${t("playground.invalidJsonResponse")}: ${rawText.slice(0, 200)}`;
+      asst.error = true;
+      asst.phase = "done";
+      asst.doneAt = Date.now();
+      return;
+    }
     const items = json.data || [];
     if (items.length === 0) {
       asst.content = t("playground.emptyResponse");
       asst.error = true;
     } else {
-      // OpenAI 返回有 url (托管) 或 b64_json (内嵌). 都转 markdown image, 渲
-      // 染器会出 <img>. revised_prompt (如果有) 作为图片下方说明.
-      const lines: string[] = [];
+      // OpenAI returns either url (hosted) or b64_json (inline). Hosted URLs
+      // expire, so download each image into an IndexedDB-backed attachment;
+      // fall back to hotlinking markdown only when the download fails.
+      const parts: string[] = [];
+      const atts: Attachment[] = [];
       for (const it of items) {
-        const src = it.url || (it.b64_json ? `data:image/png;base64,${it.b64_json}` : "");
-        if (!src) continue;
-        lines.push(`![](${src})`);
+        let dataUrl = "";
+        if (it.b64_json) {
+          dataUrl = `data:image/png;base64,${it.b64_json}`;
+        } else if (it.url) {
+          try {
+            dataUrl = await remoteToDataUrl(it.url);
+          } catch (e) {
+            console.warn("[playground] image download failed, hotlinking url:", e);
+            parts.push(`![](${it.url})`);
+          }
+        }
+        if (dataUrl) {
+          atts.push({
+            id: uid(),
+            kind: "image",
+            name: `generated-${Date.now()}.png`,
+            mime: "image/png",
+            dataUrl,
+          });
+        }
         if (it.revised_prompt) {
-          lines.push(`*${it.revised_prompt}*`);
+          parts.push(`*${it.revised_prompt}*`);
         }
       }
-      asst.content = lines.join("\n\n");
+      if (atts.length) {
+        asst.attachments = atts;
+      }
+      asst.content = parts.join("\n\n");
       asst.firstByteAt = Date.now();
     }
     if (json.usage) {
@@ -1161,35 +1267,54 @@ async function onPaste(e: ClipboardEvent) {
     return; // 走默认 paste, 不动文字
   }
   e.preventDefault();
-  for (const f of imageFiles) {
+  type PasteRead =
+    | { ok: true; f: File; name: string; dataUrl: string }
+    | { ok: false; name: string };
+  // Critical: every readAsDataURL must start before the paste handler
+  // returns synchronously. The clipboard Files reference transient pasteboard
+  // data; Chrome invalidates them once the event stack unwinds, so a read
+  // started later throws NotReadableError (the "read failed" toast).
+  const reads: Promise<PasteRead | null>[] = imageFiles.map((f) => {
+    const name = f.name || `${t("playground.pastedImage")}-${Date.now()}.png`;
     if (f.size > MAX_IMAGE_MB * 1024 * 1024) {
       message.error(
         t("playground.attachmentTooLarge", {
-          name: f.name || t("playground.pastedImage"),
+          name,
           size: fmtBytes(f.size),
           max: `${MAX_IMAGE_MB} MB`,
         }),
       );
+      return Promise.resolve(null);
+    }
+    return readAsDataUrl(f).then<PasteRead, PasteRead>(
+      (dataUrl) => ({ ok: true, f, name, dataUrl }),
+      (err) => {
+        console.error("[playground] pasted image read failed:", name, err);
+        return { ok: false, name };
+      },
+    );
+  });
+  const settled = (await Promise.all(reads)).filter((r): r is PasteRead => r !== null);
+  const failedNames: string[] = [];
+  for (const r of settled) {
+    if (!r.ok) {
+      failedNames.push(r.name);
       continue;
     }
-    try {
-      const dataUrl = await readAsDataUrl(f);
-      const att: Attachment = {
-        id: crypto.randomUUID(),
-        kind: "image",
-        name: f.name || `${t("playground.pastedImage")}-${Date.now()}.png`,
-        mime: f.type || "image/png",
-        dataUrl,
-      };
-      pendingAttachments.value.push(att);
-      pushRecentImage(att);
-    } catch {
-      message.error(
-        t("playground.attachmentReadFailed", {
-          name: f.name || t("playground.pastedImage"),
-        }),
-      );
-    }
+    const att: Attachment = {
+      id: uid(),
+      kind: "image",
+      name: r.name,
+      mime: r.f.type || "image/png",
+      dataUrl: r.dataUrl,
+    };
+    pendingAttachments.value.push(att);
+    pushRecentImage(att);
+  }
+  if (failedNames.length) {
+    message.error(
+      t("playground.attachmentReadFailed", { name: failedNames.join(", ") }),
+    );
   }
 }
 
@@ -1282,7 +1407,10 @@ async function send() {
   }
 
   for (const m of windowMsgs) {
-    if (m.attachments && m.attachments.length) {
+    // Attachments are multimodal input only for user turns; assistant-side
+    // attachments here are generated media persisted for display and must
+    // not be sent back upstream.
+    if (m.role === "user" && m.attachments && m.attachments.length) {
       const parts: Part[] = [];
       if (m.content) {
         parts.push({ type: "text", text: m.content });
@@ -1294,7 +1422,10 @@ async function send() {
       }
       payloadMsgs.push({ role: m.role, content: parts });
     } else {
-      payloadMsgs.push({ role: m.role, content: m.content });
+      // An assistant turn whose body was pure generated media has empty text;
+      // OpenAI-compatible upstreams reject empty assistant content.
+      const text = m.role === "assistant" && !m.content && m.attachments?.length ? "[generated media]" : m.content;
+      payloadMsgs.push({ role: m.role, content: text });
     }
   }
 
@@ -1617,6 +1748,12 @@ function modalityLabel(m: Modality): string {
       <template v-else>
         <!-- System prompt — 多行可调高度, 跟下方输入框样式一致 -->
         <div class="pg__sys">
+          <!-- On a file:// page every relative request (/api, /proxy) fails
+               to even leave the browser, so say it up front. Nested inside the
+               sys row so the .pg__main grid template stays untouched. -->
+          <div v-if="IS_FILE_PROTOCOL" class="pg__warn">
+            {{ t("playground.fileProtocolWarning") }}
+          </div>
           <textarea
             v-model="systemPrompt"
             class="pg__sys-input"
@@ -1667,20 +1804,29 @@ function modalityLabel(m: Modality): string {
               <div class="pg__thinking-body">{{ m.thinking }}</div>
             </details>
 
-            <!-- user 附件缩略图 (图片) -->
-            <div v-if="m.role === 'user' && m.attachments && m.attachments.length" class="pg__atts">
-              <n-image-group>
-                <n-image
-                  v-for="(a, ai) in m.attachments"
+            <!-- Attachment media (user uploads + generated images/videos).
+                 dataUrl is hydrated from IndexedDB; v-show keeps layout
+                 stable until hydration lands. -->
+            <div v-if="m.attachments && m.attachments.length" class="pg__atts">
+              <template v-for="(a, ai) in m.attachments" :key="ai">
+                <video
+                  v-if="a.kind === 'video'"
                   v-show="a.dataUrl"
-                  :key="ai"
+                  controls
+                  preload="metadata"
+                  :src="a.dataUrl"
+                  class="pg__att-video"
+                />
+                <n-image
+                  v-else
+                  v-show="a.dataUrl"
                   :src="a.dataUrl"
                   :alt="a.name"
                   :width="96"
                   object-fit="cover"
                   class="pg__att-thumb"
                 />
-              </n-image-group>
+              </template>
             </div>
             <!-- 正文: markdown 渲染 (assistant 才走 markdown) -->
             <div
@@ -2399,6 +2545,16 @@ function modalityLabel(m: Modality): string {
   flex-shrink: 0;
   background: #fff;
 }
+.pg__warn {
+  margin-bottom: 8px;
+  padding: 8px 10px;
+  border: 1px solid #ffd591;
+  border-radius: 6px;
+  background: #fff7e6;
+  color: #874d00;
+  font: 400 12.5px var(--v3-sans, sans-serif);
+  line-height: 1.5;
+}
 .pg__sys-input {
   width: 100%;
   padding: 8px 10px;
@@ -2825,6 +2981,14 @@ function modalityLabel(m: Modality): string {
   border-radius: 6px;
   display: block;
   border: 1px solid rgba(255, 255, 255, 0.2);
+}
+.pg__att-video {
+  max-width: 480px;
+  max-height: 320px;
+  border-radius: 6px;
+  display: block;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: #000;
 }
 .pg__empty {
   flex: 1;

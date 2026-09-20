@@ -3,9 +3,13 @@ package keypool
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"image"
+	"image/color"
+	"image/png"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -18,16 +22,39 @@ import (
 	"autogateway/internal/ratelimit"
 )
 
-// testModalityConnectivity 对 TTS / ASR 模型发一次针对性探活。不走 chat 的
-// ValidateKey, 而是复用 ChannelProxy 接口原语(BuildUpstreamURL / ModifyRequest /
-// GetHTTPClient)按模态构造请求 —— 与 video_task_upstream 发非-chat 上游请求同一手法。
+// imageProbeTimeout is the floor for image-generation probes: producing an
+// image is slow by nature and must not be killed by the short key-validation
+// timeout. Larger configured values win.
+const imageProbeTimeout = 5 * time.Minute
+
+// redPixelPng encodes a 1x1 solid-red PNG at runtime as the vision probe
+// input. Same rationale as silentWav: no external fixture needed.
+func redPixelPng() []byte {
+	var buf bytes.Buffer
+	img := image.NewRGBA(image.Rect(0, 0, 1, 1))
+	img.Set(0, 0, color.RGBA{R: 255, A: 255})
+	if err := png.Encode(&buf, img); err != nil {
+		// Encoding an in-memory image never fails; the empty fallback only
+		// degrades the probe request body.
+		return nil
+	}
+	return buf.Bytes()
+}
+
+// testModalityConnectivity probes TTS / ASR / image-generation / vision
+// models with a targeted request. Instead of chat's ValidateKey it reuses
+// ChannelProxy primitives (BuildUpstreamURL / ModifyRequest / GetHTTPClient)
+// and builds the request per modality, same approach as video_task_upstream.
 //
-// 约束: 仅适用于 OpenAI 兼容 channel 的音频端点(/v1/audio/speech、
-// /v1/audio/transcriptions)。判定标准:
-//   - 2xx → 可达(IsValid=true)。
-//   - ASR 的 400 类"请求错"(我们的静音测试音频常被拒为 too short/invalid) 归因为
-//     "端点+key 可达, 只是测试音频不合规" → 仍判 IsValid=true, 但在 Error 里注明。
-//   - 其余非 2xx → 不可达(IsValid=false), 带上游解析错误。
+// Constraint: only OpenAI-compatible channels are covered (/v1/audio/speech,
+// /v1/audio/transcriptions, /v1/images/generations, and /v1/chat/completions
+// with image_url content). Verdict:
+//   - 2xx -> reachable (IsValid=true).
+//   - ASR 400-class "request errors" (our silent test audio is often rejected
+//     as too short/invalid) prove the endpoint and key are reachable -> still
+//     IsValid=true, with the reason noted in Error.
+//   - any other non-2xx -> unreachable (IsValid=false), with the parsed
+//     upstream error.
 func (s *KeyValidator) testModalityConnectivity(group *models.Group, modelName, modality string) (*ModelTestResult, error) {
 	apiKey, err := s.keypoolProvider.SelectKey(group.ID, ratelimit.Limits{})
 	if err != nil {
@@ -54,7 +81,14 @@ func (s *KeyValidator) testModalityConnectivity(group *models.Group, modelName, 
 		return nil, fmt.Errorf("failed to build upstream url: %w", err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(group.EffectiveConfig.KeyValidationTimeoutSeconds)*time.Second)
+	// Generating a real image takes 30s+ routinely, so the generic
+	// key-validation timeout (20s by default) would falsely fail it;
+	// raise the floor to imageProbeTimeout for this modality only.
+	timeoutSec := group.EffectiveConfig.KeyValidationTimeoutSeconds
+	if modality == "image" && timeoutSec < int(imageProbeTimeout/time.Second) {
+		timeoutSec = int(imageProbeTimeout / time.Second)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutSec)*time.Second)
 	defer cancel()
 
 	out := &ModelTestResult{Model: modelName, URL: reqURL}
@@ -127,6 +161,41 @@ func buildModalityRequest(modality, modelName string) (path string, body io.Read
 			return "", nil, "", cErr
 		}
 		return "/v1/audio/transcriptions", &buf, mw.FormDataContentType(), nil
+	case "image":
+		// Image-generation probe: minimal prompt, single image. Size uses the
+		// OpenAI baseline 1024x1024: most compatible providers only accept
+		// the standard values, and custom small sizes tend to 400.
+		payload, mErr := json.Marshal(map[string]any{
+			"model":  modelName,
+			"prompt": "a tiny red circle on white background",
+			"n":      1,
+			"size":   "1024x1024",
+		})
+		if mErr != nil {
+			return "", nil, "", mErr
+		}
+		return "/v1/images/generations", bytes.NewReader(payload), "application/json", nil
+	case "vision":
+		// Vision-input probe: a chat/completions turn carrying one solid-color
+		// image, verifying the model accepts multimodal image_url content
+		// (text-only models fail here with 400, which is the point).
+		payload, mErr := json.Marshal(map[string]any{
+			"model": modelName,
+			"messages": []any{map[string]any{
+				"role": "user",
+				"content": []any{
+					map[string]any{"type": "text", "text": "What color is this image? Answer in one word."},
+					map[string]any{"type": "image_url", "image_url": map[string]any{
+						"url": "data:image/png;base64," + base64.StdEncoding.EncodeToString(redPixelPng()),
+					}},
+				},
+			}},
+			"max_tokens": 8,
+		})
+		if mErr != nil {
+			return "", nil, "", mErr
+		}
+		return "/v1/chat/completions", bytes.NewReader(payload), "application/json", nil
 	default:
 		return "", nil, "", fmt.Errorf("unsupported modality %q", modality)
 	}

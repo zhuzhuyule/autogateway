@@ -158,10 +158,13 @@ type ModelTestResult struct {
 	Model      string `json:"model"`
 }
 
-// TestModelConnectivity 尝试对 group 内的指定 model 发起一次最小载荷的探活.
-// 调用方应已把 aggregate 解析到具体的 sub-group 再传进来. modality 决定测试形态:
-// ""/"chat"/"text" 走文本 chat 探活; "tts"/"asr" 走对应的音频端点探活(见 modality_probe.go)。
-// 所选 key 不会被标记 invalid (绕过 keypoolProvider.UpdateStatus).
+// TestModelConnectivity probes the given model inside the group with a
+// minimal payload. Callers must already resolve an aggregate to a concrete
+// sub-group. modality selects the probe shape: ""/"chat"/"text" run the text
+// chat probe; "tts"/"asr" hit the audio endpoints; "image" hits
+// /v1/images/generations; "vision" sends chat with image input
+// (see modality_probe.go). The selected key is never marked invalid
+// (keypoolProvider.UpdateStatus is bypassed).
 func (s *KeyValidator) TestModelConnectivity(group *models.Group, modelName, modality string) (*ModelTestResult, error) {
 	if modelName == "" {
 		return nil, fmt.Errorf("model name is required")
@@ -169,10 +172,10 @@ func (s *KeyValidator) TestModelConnectivity(group *models.Group, modelName, mod
 	switch strings.ToLower(strings.TrimSpace(modality)) {
 	case "", "chat", "text":
 		return s.testChatConnectivity(group, modelName)
-	case "tts", "asr":
+	case "tts", "asr", "image", "vision":
 		return s.testModalityConnectivity(group, modelName, strings.ToLower(strings.TrimSpace(modality)))
 	default:
-		return nil, fmt.Errorf("unsupported test modality %q (want chat/tts/asr)", modality)
+		return nil, fmt.Errorf("unsupported test modality %q (want chat/tts/asr/image/vision)", modality)
 	}
 }
 

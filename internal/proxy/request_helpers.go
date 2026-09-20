@@ -111,7 +111,11 @@ func shouldValidateJSONSuccess(path string, isStream bool) bool {
 	}
 	return strings.Contains(path, "chat/completions") ||
 		strings.Contains(path, "messages") ||
-		strings.Contains(path, "generateContent")
+		strings.Contains(path, "generateContent") ||
+		// Image endpoints (images/generations etc.) also answer with JSON:
+		// upstreams (especially aggregators / free providers) frequently
+		// return 200 + an HTML error page, which must not pass through.
+		strings.Contains(path, "images/")
 }
 
 func validateJSONSuccessResponse(resp *http.Response) error {

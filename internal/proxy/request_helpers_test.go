@@ -124,6 +124,12 @@ func TestShouldValidateJSONSuccess(t *testing.T) {
 	if shouldValidateJSONSuccess("/proxy/openai/v1/models", false) {
 		t.Fatalf("expected models endpoint to skip chat JSON validation")
 	}
+	if !shouldValidateJSONSuccess("/proxy/openai/v1/images/generations", false) {
+		t.Fatalf("expected images generations to require JSON validation")
+	}
+	if shouldValidateJSONSuccess("/proxy/openai/v1/images/generations", true) {
+		t.Fatalf("expected streaming responses to skip JSON validation")
+	}
 }
 
 func TestValidateJSONSuccessResponseRejectsHTML(t *testing.T) {

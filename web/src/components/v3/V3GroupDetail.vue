@@ -8,7 +8,7 @@ import GroupCopyModal from "@/components/keys/GroupCopyModal.vue";
 import GroupFormModal from "@/components/keys/GroupFormModal.vue";
 import ModelAliasModal from "@/components/keys/ModelAliasModal.vue";
 import V3SubGroupTable from "@/components/v3/V3SubGroupTable.vue";
-import { findFreeModel, findProviderByUpstreams, isFree, isRecommended } from "@/data/freeProviders";
+import { findFreeModel, findProviderByUpstreams, isFree, isRecommended, modalityOf } from "@/data/freeProviders";
 import type { APIKey, Group, GroupStatsResponse, KeyStatus, SubGroupInfo } from "@/types/models";
 import { appState, triggerSyncOperationRefresh } from "@/utils/app-state";
 import { copy as copyToClipboard } from "@/utils/clipboard";
@@ -892,7 +892,10 @@ type ModelTestState = {
   error?: string;
   resolved?: string;
   viaAgg?: boolean;
-  // localStorage 持久化时间戳, 让 hover tooltip 能显示 "5 分钟前测过"
+  // Which probe shape was used (chat / image / vision / tts / asr), resolved
+  // per model even in auto mode, surfaced in the hover tooltip.
+  modality?: string;
+  // localStorage persistence timestamp so the tooltip can show "tested 5m ago"
   testedAt?: number;
 };
 const modelTestResults = ref<Record<string, ModelTestState>>({});
@@ -944,6 +947,10 @@ function modelTestTooltip(modelId: string): string {
   }
   const parts: string[] = [];
   parts.push(s.ok ? "✓ OK" : "✗ FAIL");
+  if (s.modality) {
+    const label = testModalityOptions.value.find(o => o.value === s.modality)?.label;
+    parts.push(t("v3.testViaModality", { mode: label || s.modality }));
+  }
   if (s.statusCode) {
     parts.push(`HTTP ${s.statusCode}`);
   }
@@ -965,14 +972,37 @@ function modelTestTooltip(modelId: string): string {
   return parts.join(" · ");
 }
 
-// 测试模态: ""/"chat" 文本对话(默认)、"tts" 语音合成、"asr" 语音识别。
-// 单测与一键测试都按这个值发对应的探活请求。
+// Test modality selector. "" means auto-detect per model (image-generation /
+// vision capabilities from the registry, otherwise plain chat); explicit
+// values force one request shape for every probe in this run.
+// Single-model and bulk tests both go through this.
 const testModality = ref<string>("");
 const testModalityOptions = computed(() => [
-  { label: t("v3.testModalityChat"), value: "" },
+  { label: t("v3.testModalityAuto"), value: "" },
+  { label: t("v3.testModalityChat"), value: "chat" },
+  { label: t("v3.testModalityImage"), value: "image" },
+  { label: t("v3.testModalityVision"), value: "vision" },
   { label: t("v3.testModalityTts"), value: "tts" },
   { label: t("v3.testModalityAsr"), value: "asr" },
 ]);
+
+// Registry capabilities are authoritative; modalityOf() adds the local
+// name-heuristic fallback the Playground already relies on. Video models
+// fall back to chat here since there is no dedicated video probe.
+function resolveTestModality(modelId: string): "chat" | "image" | "vision" {
+  const pid = matchedProvider.value?.id;
+  const caps = lookupRegistry(pid, modelId)?.capabilities || [];
+  if (caps.includes("image-generation")) {
+    return "image";
+  }
+  if (caps.includes("vision")) {
+    return "vision";
+  }
+  if (modalityOf(pid, modelId, caps) === "image") {
+    return "image";
+  }
+  return "chat";
+}
 
 async function testModel(modelId: string) {
   if (!props.group?.id) {
@@ -982,8 +1012,12 @@ async function testModel(modelId: string) {
     return;
   }
   testingModels.value.add(modelId);
+  // In auto mode each model gets the probe shape matching its capabilities
+  // (text / image-generation / vision), instead of blasting chat payloads at
+  // everything.
+  const modality = testModality.value === "" ? resolveTestModality(modelId) : testModality.value;
   try {
-    const res = await keysApi.testGroupModel(props.group.id, modelId, testModality.value);
+    const res = await keysApi.testGroupModel(props.group.id, modelId, modality);
     modelTestResults.value = {
       ...modelTestResults.value,
       [modelId]: {
@@ -993,6 +1027,7 @@ async function testModel(modelId: string) {
         error: res.is_valid ? undefined : res.error || `HTTP ${res.status_code}`,
         resolved: res.resolved_group,
         viaAgg: res.is_via_aggregate,
+        modality,
         testedAt: Date.now(),
       },
     };
@@ -2390,7 +2425,7 @@ const filterCounts = computed(() => ({
             <span class="v3-chip" style="font-size: 10px">{{ exposedModels.length }}</span>
             <span class="v5-section-head__hint">{{ t("v3.exposedHint") || "白名单 — 仅这些模型可调用,可加别名,支持拖拽排序" }}</span>
             <div class="v5-section-head__spacer" style="flex: 1"></div>
-            <!-- 测试模态: 单测与一键测试都按此模态发探活(文本/TTS/ASR) -->
+            <!-- Test modality selector: applies to both single and bulk probes. -->
             <n-select
               v-model:value="testModality"
               :options="testModalityOptions"
@@ -2399,9 +2434,11 @@ const filterCounts = computed(() => ({
               :consistent-menu-width="false"
               :title="t('v3.testModalityTip')"
             />
-            <!-- P11.38: 一键测试 - 测当前 filteredExposed 列表里的所有 model. < 30 显示 -->
+            <!-- Bulk-test every model in the current filtered list. No size cap:
+                 the worker pool runs with fixed concurrency, so a big list
+                 stays safe for the provider. -->
             <button
-              v-if="filteredExposed.length > 0 && filteredExposed.length < 30"
+              v-if="filteredExposed.length > 0"
               class="v3-btn v3-btn--sm"
               :disabled="bulkTesting"
               :title="t('v3.bulkTestTip')"
@@ -2544,9 +2581,11 @@ const filterCounts = computed(() => ({
             <span class="v3-chip" style="font-size: 10px">{{ filteredAvailable.length }} / {{ groupModels.length }}</span>
             <span class="v5-section-head__hint">{{ t("v3.upstreamHint") || "上游声明的全部模型 — 从这里把模型加入上方「已暴露」白名单" }}</span>
             <div class="v5-section-head__spacer" style="flex: 1"></div>
-            <!-- P11.38: 当前 filtered < 30 时提供一键测试 (上限保护 provider) -->
+            <!-- Bulk-test every model in the current filtered list. No size cap:
+                 the worker pool runs with fixed concurrency, so a big list
+                 stays safe for the provider. -->
             <button
-              v-if="filteredAvailable.length > 0 && filteredAvailable.length < 30"
+              v-if="filteredAvailable.length > 0"
               class="v3-btn v3-btn--sm"
               :disabled="bulkTesting"
               :title="t('v3.bulkTestTip')"
@@ -2679,9 +2718,10 @@ const filterCounts = computed(() => ({
         <!-- PASSTHROUGH MODE / AGGREGATE: 单列表 -->
         <!-- =================================== -->
         <template v-else>
-          <!-- P11.38: filtered < 30 时加一键测试 head; 否则保持原来无 head 极简布局 -->
+          <!-- Head row with bulk-test button; shown for any list size since
+               testing is progressive (fixed worker pool, not all-at-once). -->
           <div
-            v-if="filteredAvailable.length > 0 && filteredAvailable.length < 30"
+            v-if="filteredAvailable.length > 0"
             class="v5-section-head"
           >
             <span class="v5-section-head__title">{{ t("v3.allModelsTitle") || "全部模型" }}</span>

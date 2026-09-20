@@ -114,7 +114,10 @@ func (s *Server) CreateGroup(c *gin.Context) {
 // model 必须与 group 的 available_models 中暴露的某个具体型号匹配.
 type TestGroupModelRequest struct {
 	Model string `json:"model" binding:"required"`
-	// Modality 决定测试形态: ""/"chat" 文本对话(默认)、"tts" 语音合成、"asr" 语音识别。
+	// Modality selects the probe shape: ""/"chat" text conversation (default),
+	// "tts" speech synthesis, "asr" transcription, "image" image generation,
+	// "vision" chat with image input. The valid set is enforced by
+	// keypool.TestModelConnectivity.
 	Modality string `json:"modality"`
 }
 
