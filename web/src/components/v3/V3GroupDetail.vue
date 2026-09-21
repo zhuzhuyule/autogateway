@@ -8,7 +8,7 @@ import GroupCopyModal from "@/components/keys/GroupCopyModal.vue";
 import GroupFormModal from "@/components/keys/GroupFormModal.vue";
 import ModelAliasModal from "@/components/keys/ModelAliasModal.vue";
 import V3SubGroupTable from "@/components/v3/V3SubGroupTable.vue";
-import { findFreeModel, findProviderByUpstreams, isFree, isRecommended, modalityOf } from "@/data/freeProviders";
+import { findFreeModel, findProviderByUpstreams, isFree, isRecommended, probeModalityOf, type ProbeModality } from "@/data/freeProviders";
 import type { APIKey, Group, GroupStatsResponse, KeyStatus, SubGroupInfo } from "@/types/models";
 import { appState, triggerSyncOperationRefresh } from "@/utils/app-state";
 import { copy as copyToClipboard } from "@/utils/clipboard";
@@ -39,6 +39,7 @@ import { NIcon, NPagination, NSpin, NTooltip, useDialog, useMessage } from "naiv
 import FreeBadge from "@/components/common/FreeBadge.vue";
 import SpeedBadge from "@/components/common/SpeedBadge.vue";
 import CapabilityIcons from "@/components/common/CapabilityIcons.vue";
+import ProbeModalityChip from "@/components/common/ProbeModalityChip.vue";
 import ProviderLogo from "@/components/common/ProviderLogo.vue";
 import { freeModelsRef, getFreeStatus, lookupRegistry } from "@/api/freemodels";
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
@@ -986,22 +987,57 @@ const testModalityOptions = computed(() => [
   { label: t("v3.testModalityAsr"), value: "asr" },
 ]);
 
-// Registry capabilities are authoritative; modalityOf() adds the local
-// name-heuristic fallback the Playground already relies on. Video models
-// fall back to chat here since there is no dedicated video probe.
-function resolveTestModality(modelId: string): "chat" | "image" | "vision" {
-  const pid = matchedProvider.value?.id;
-  const caps = lookupRegistry(pid, modelId)?.capabilities || [];
-  if (caps.includes("image-generation")) {
-    return "image";
+// Per-card probe override. Group config is validated against the backend
+// GroupConfig schema, so an unknown UI-only key cannot live there; the
+// override is kept in localStorage beside the per-model test results.
+const probeOverrides = ref<Record<string, ProbeModality>>({});
+
+function probeOverridesKey(gid: number | undefined): string {
+  return `model_probe_modality_${gid ?? "none"}`;
+}
+
+watch(
+  () => props.group?.id,
+  (newId) => {
+    if (!newId) {
+      probeOverrides.value = {};
+      return;
+    }
+    try {
+      const raw = localStorage.getItem(probeOverridesKey(newId));
+      probeOverrides.value = raw ? (JSON.parse(raw) as Record<string, ProbeModality>) : {};
+    } catch {
+      probeOverrides.value = {};
+    }
+  },
+  { immediate: true },
+);
+
+function probeModalityFor(modelId: string): { modality: ProbeModality; manual: boolean } {
+  const override = probeOverrides.value[modelId];
+  if (override) {
+    return { modality: override, manual: true };
   }
-  if (caps.includes("vision")) {
-    return "vision";
+  const reg = lookupRegistry(matchedProvider.value?.id, modelId);
+  const caps = [...(reg?.capabilities || []), ...(reg?.tags || [])];
+  return { modality: probeModalityOf(matchedProvider.value?.id, modelId, caps), manual: false };
+}
+
+function setProbeModality(modelId: string, modality: ProbeModality | "") {
+  if (modality === "") {
+    delete probeOverrides.value[modelId];
+  } else {
+    probeOverrides.value[modelId] = modality;
   }
-  if (modalityOf(pid, modelId, caps) === "image") {
-    return "image";
+  const gid = props.group?.id;
+  if (!gid) {
+    return;
   }
-  return "chat";
+  try {
+    localStorage.setItem(probeOverridesKey(gid), JSON.stringify(probeOverrides.value));
+  } catch {
+    /* quota / private mode — silent */
+  }
 }
 
 async function testModel(modelId: string) {
@@ -1012,10 +1048,11 @@ async function testModel(modelId: string) {
     return;
   }
   testingModels.value.add(modelId);
-  // In auto mode each model gets the probe shape matching its capabilities
-  // (text / image-generation / vision), instead of blasting chat payloads at
-  // everything.
-  const modality = testModality.value === "" ? resolveTestModality(modelId) : testModality.value;
+  // Auto mode gives every model the probe shape matching its capabilities;
+  // an explicit global selector overrides all cards, a per-card pin overrides
+  // only that model.
+  const modality =
+    testModality.value === "" ? probeModalityFor(modelId).modality : testModality.value;
   try {
     const res = await keysApi.testGroupModel(props.group.id, modelId, modality);
     modelTestResults.value = {
@@ -2524,6 +2561,10 @@ const filterCounts = computed(() => ({
                   {{ speedReasonFor(modelId) }}
                 </n-tooltip>
                 <CapabilityIcons :tags="tagsForModel(modelId)" :size="11" />
+                <ProbeModalityChip
+                  :probe="probeModalityFor(modelId)"
+                  @select="(m: ProbeModality | '') => setProbeModality(modelId, m)"
+                />
 
                 <button
                   v-if="isAggregate && providersFor(modelId).length"
@@ -2667,6 +2708,10 @@ const filterCounts = computed(() => ({
                   {{ speedReasonFor(modelId) }}
                 </n-tooltip>
                 <CapabilityIcons :tags="tagsForModel(modelId)" :size="11" />
+                <ProbeModalityChip
+                  :probe="probeModalityFor(modelId)"
+                  @select="(m: ProbeModality | '') => setProbeModality(modelId, m)"
+                />
 
                 <button
                   v-if="isAggregate && providersFor(modelId).length"
@@ -2807,6 +2852,10 @@ const filterCounts = computed(() => ({
                   {{ speedReasonFor(modelId) }}
                 </n-tooltip>
                 <CapabilityIcons :tags="tagsForModel(modelId)" :size="11" />
+                <ProbeModalityChip
+                  :probe="probeModalityFor(modelId)"
+                  @select="(m: ProbeModality | '') => setProbeModality(modelId, m)"
+                />
 
                 <button
                   v-if="isAggregate && providersFor(modelId).length"

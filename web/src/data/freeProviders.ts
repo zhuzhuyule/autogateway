@@ -1387,3 +1387,46 @@ export function modalityOf(
   }
   return "chat";
 }
+
+// ============================================================================
+// Probe shape — which request body a per-model connectivity test sends
+// ============================================================================
+
+export type ProbeModality = "chat" | "image" | "vision" | "tts" | "asr";
+
+/**
+ * Resolve the probe shape for a model. Registry capabilities/tags are
+ * authoritative; the model-id keyword pass only covers models the registry
+ * does not know. Modalities without a probe endpoint (video, embeddings,
+ * rerank) fall back to chat, which is what the backend accepts anyway.
+ */
+export function probeModalityOf(
+  providerId: string | undefined,
+  modelId: string,
+  capabilities?: string[]
+): ProbeModality {
+  const caps = capabilities || [];
+  if (caps.includes("image-generation")) {
+    return "image";
+  }
+  if (caps.includes("speech-synthesis")) {
+    return "tts";
+  }
+  if (caps.includes("speech-recognition")) {
+    return "asr";
+  }
+  if (caps.includes("vision")) {
+    return "vision";
+  }
+  if (modalityOf(providerId, modelId, caps) === "image") {
+    return "image";
+  }
+  const lower = modelId.toLowerCase();
+  if (/(?:^|[/_.-])tts(?:[/_.-]|$)/.test(lower)) {
+    return "tts";
+  }
+  if (/(?:^|[/_.-])(whisper|asr|transcription?)/.test(lower)) {
+    return "asr";
+  }
+  return "chat";
+}
