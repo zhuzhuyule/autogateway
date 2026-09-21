@@ -814,9 +814,34 @@ body.dark,
   flex: 1;
   min-height: 0;
 }
+/* Both columns scroll inside the scrollport instead of stretching the page:
+   with many groups the sidebar footer (create group / aggregate) would
+   otherwise land far below the fold. */
+.v3-main-content:has(.v3-page-keys) {
+  min-height: 0;
+}
+.v3-page-keys {
+  min-height: 0;
+}
+.v3-layout-keys > * {
+  min-height: 0;
+}
+.v3-layout-keys > :not(.v3-gl) {
+  overflow: auto;
+}
 @media (max-width: 900px) {
   .v3-layout-keys {
     grid-template-columns: 1fr;
+  }
+  /* Stacked layout goes back to page-level scrolling. */
+  .v3-main-content:has(.v3-page-keys) {
+    min-height: auto;
+  }
+  .v3-layout-keys > :not(.v3-gl) {
+    overflow: visible;
+  }
+  .v3-gl {
+    max-height: 340px;
   }
 }
 .v3-gl {
@@ -835,6 +860,9 @@ body.dark,
   overflow: auto;
   padding: 6px 6px;
   flex: 1;
+  /* Without this the flex item's automatic minimum size keeps the list at
+     content height, which pushes the footer out of the viewport. */
+  min-height: 0;
 }
 .v3-gl__sect {
   padding: 12px 8px 6px;

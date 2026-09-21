@@ -748,10 +748,14 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  /* nowrap + 不被压缩: 空间不足时靠前面的 spacer 吸收, 别名整体右对齐,
-     不再换行导致 "@别名" 文字竖排。 */
-  flex-wrap: nowrap;
-  flex-shrink: 0;
+  /* Wrap between chips instead of spilling past the card border: with several
+     aliases the row's intrinsic width exceeds the card, and nowrap +
+     flex-shrink: 0 pushed "@别名" outside the card. Individual chips keep
+     their own nowrap so a label never breaks into vertical text. */
+  flex-wrap: wrap;
+  flex-shrink: 1;
+  min-width: 0;
+  justify-content: flex-end;
   white-space: nowrap;
 }
 .v5-modelcard__alias {
@@ -766,6 +770,12 @@
   border: 1px solid oklch(from var(--v3-info) l c h / 0.1);
   cursor: pointer;
   transition: filter 100ms;
+  min-width: 0;
+}
+.v5-modelcard__alias > span {
+  max-width: 130px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .v5-modelcard__alias:hover {
   filter: brightness(0.96);
