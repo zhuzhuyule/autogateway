@@ -13,6 +13,7 @@ import type { APIKey, Group, GroupStatsResponse, KeyStatus, SubGroupInfo } from 
 import { appState, triggerSyncOperationRefresh } from "@/utils/app-state";
 import { copy as copyToClipboard } from "@/utils/clipboard";
 import { getGroupDisplayName, maskKey } from "@/utils/display";
+import { clearGroupStorage } from "@/utils/group-storage";
 import {
   AddOutline,
   Checkmark,
@@ -1163,10 +1164,14 @@ watch(
 // Save filters on change
 watch([modelSearch, modelFilterFree], () => {
   if (!props.group?.id) return;
-  localStorage.setItem(`group_models_filter_${props.group.id}`, JSON.stringify({
-    search: modelSearch.value,
-    freeOnly: modelFilterFree.value
-  }));
+  try {
+    localStorage.setItem(`group_models_filter_${props.group.id}`, JSON.stringify({
+      search: modelSearch.value,
+      freeOnly: modelFilterFree.value
+    }));
+  } catch {
+    /* quota / private mode — filters stay in memory for this session */
+  }
 });
 
 
@@ -1758,6 +1763,7 @@ function deleteGroup() {
       d.loading = true;
       try {
         await keysApi.deleteGroup(id);
+        clearGroupStorage(id);
         emit("refresh");
       } finally {
         d.loading = false;

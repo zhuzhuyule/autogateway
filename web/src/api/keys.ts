@@ -172,7 +172,9 @@ export const keysApi = {
     const res = await http.post(
       `/groups/${groupId}/test-model`,
       { model, modality },
-      { hideMessage: true }
+      // Image probes have a 5-minute floor server-side; the default 60s
+      // timeout would abort while the upstream is still generating.
+      { hideMessage: true, timeout: 5 * 60 * 1000 + 30 * 1000 }
     );
     return res.data;
   },
