@@ -507,6 +507,7 @@ export default {
     subGroup: "子分组",
     totalSubGroups: "共 {total} 个子分组",
     sortedByWeight: "按权重降序排序",
+    sortedByPriorityThenWeight: "按优先级、再按权重排序",
     noSubGroups: "暂无子分组",
     loadFailed: "加载子分组列表失败",
     removeSubGroup: "移除子分组",

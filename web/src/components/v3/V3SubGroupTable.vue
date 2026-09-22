@@ -62,7 +62,10 @@ const rows = computed<SubGroupRow[]>(() => {
       percentage: total > 0 ? Math.round((sg.weight / total) * 100) : 0,
       status: statusOf(sg),
     }))
-    .sort((a, b) => b.weight - a.weight);
+    // 排序与**实际选路优先级**一致: 先 priority 升序(数值越小越优先),
+    // 再 weight 降序。全同优先级(默认 100)时结果与原来纯按 weight 降序完全一致,
+    // 所以存量用户看到的顺序不变。
+    .sort((a, b) => (a.priority ?? 100) - (b.priority ?? 100) || b.weight - a.weight);
 });
 
 const filtered = computed(() => {
@@ -379,7 +382,7 @@ function viewSubGroup(id?: number) {
         <template v-if="filtered.length !== rows.length">/ {{ rows.length }}</template>
       </span>
       <span>
-        {{ t("subGroups.sortedByWeight") || "Sorted by weight ↓" }}
+        {{ t("subGroups.sortedByPriorityThenWeight") || "Sorted by priority, then weight" }}
       </span>
     </div>
 

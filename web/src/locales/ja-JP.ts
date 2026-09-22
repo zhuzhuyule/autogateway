@@ -525,6 +525,7 @@ export default {
     subGroup: "サブグループ",
     totalSubGroups: "合計 {total} サブグループ",
     sortedByWeight: "重み降順でソート",
+    sortedByPriorityThenWeight: "優先度順、次に重み順",
     noSubGroups: "サブグループがありません",
     loadFailed: "サブグループの読み込みに失敗しました",
     removeSubGroup: "サブグループを削除",

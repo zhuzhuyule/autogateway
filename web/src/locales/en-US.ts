@@ -526,6 +526,7 @@ export default {
     subGroup: "Sub Group",
     totalSubGroups: "Total {total} sub groups",
     sortedByWeight: "Sorted by weight descending",
+    sortedByPriorityThenWeight: "Sorted by priority, then weight",
     noSubGroups: "No sub groups",
     loadFailed: "Failed to load sub groups",
     removeSubGroup: "Remove Sub Group",
