@@ -7,6 +7,7 @@ import (
 	app_errors "autogateway/internal/errors"
 	"autogateway/internal/keypool"
 	"autogateway/internal/models"
+	"autogateway/internal/utils"
 	"io"
 	"regexp"
 	"strings"
@@ -124,7 +125,7 @@ func (s *KeyService) processAndCreateKeys(
 
 		encryptedKey, err := s.EncryptionSvc.Encrypt(trimmedKey)
 		if err != nil {
-			logrus.WithError(err).WithField("key", trimmedKey).Error("Failed to encrypt key, skipping")
+			logrus.WithError(err).WithField("key", utils.MaskAPIKey(trimmedKey)).Error("Failed to encrypt key, skipping")
 			continue
 		}
 

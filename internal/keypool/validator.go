@@ -179,9 +179,28 @@ func (s *KeyValidator) TestModelConnectivity(group *models.Group, modelName, mod
 	}
 }
 
+// resolveProbeModel maps the model name a caller asked about to the name the
+// upstream actually serves, following the same redirect rules the proxy
+// applies. Without it, groups that expose aliases or run in strict redirect
+// mode probe a name the upstream never heard of and report a false failure.
+func resolveProbeModel(group *models.Group, modelName string) (string, error) {
+	if target, ok := group.ModelRedirectMap[modelName]; ok && target != "" {
+		return target, nil
+	}
+	if group.ModelRedirectStrict && len(group.ModelRedirectMap) > 0 {
+		return "", fmt.Errorf("model '%s' is not configured in the redirect rules of group %s", modelName, group.Name)
+	}
+	return modelName, nil
+}
+
 // testChatConnectivity 是原文本 chat 探活: 选 key + 用 modelName 替代 group.TestModel
 // 重建 channel + 跑 ValidateKey。
 func (s *KeyValidator) testChatConnectivity(group *models.Group, modelName string) (*ModelTestResult, error) {
+	probeModel, err := resolveProbeModel(group, modelName)
+	if err != nil {
+		return nil, err
+	}
+
 	apiKey, err := s.keypoolProvider.SelectKey(group.ID, ratelimit.Limits{})
 	if err != nil {
 		return nil, err
@@ -193,7 +212,7 @@ func (s *KeyValidator) testChatConnectivity(group *models.Group, modelName strin
 
 	// 拷贝 group 并改写 TestModel, 不污染 GroupManager 缓存里供代理使用的对象.
 	groupCopy := *group
-	groupCopy.TestModel = modelName
+	groupCopy.TestModel = probeModel
 
 	ch, err := s.channelFactory.BuildChannel(&groupCopy)
 	if err != nil {

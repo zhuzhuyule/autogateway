@@ -14,6 +14,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	neturl "net/url"
+	"strings"
 	"time"
 
 	"autogateway/internal/channel"
@@ -56,6 +57,11 @@ func redPixelPng() []byte {
 //   - any other non-2xx -> unreachable (IsValid=false), with the parsed
 //     upstream error.
 func (s *KeyValidator) testModalityConnectivity(group *models.Group, modelName, modality string) (*ModelTestResult, error) {
+	probeModel, err := resolveProbeModel(group, modelName)
+	if err != nil {
+		return nil, err
+	}
+
 	apiKey, err := s.keypoolProvider.SelectKey(group.ID, ratelimit.Limits{})
 	if err != nil {
 		return nil, err
@@ -65,13 +71,13 @@ func (s *KeyValidator) testModalityConnectivity(group *models.Group, modelName, 
 	}
 
 	groupCopy := *group
-	groupCopy.TestModel = modelName
+	groupCopy.TestModel = probeModel
 	ch, err := s.channelFactory.BuildChannel(&groupCopy)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build channel for group %s: %w", group.Name, err)
 	}
 
-	reqPath, body, contentType, err := buildModalityRequest(modality, modelName)
+	reqPath, body, contentType, err := buildModalityRequest(modality, probeModel)
 	if err != nil {
 		return nil, err
 	}
@@ -118,9 +124,7 @@ func (s *KeyValidator) testModalityConnectivity(group *models.Group, modelName, 
 		out.IsValid = true
 	default:
 		parsed := app_errors.ParseUpstreamError(respBody)
-		// ASR 的静音测试音频常被上游判为 request_error(too short / invalid audio),
-		// 这恰恰证明端点与 key 是可达的 —— 判为可达, 只在 Error 里注明原因。
-		if modality == "asr" && app_errors.Classify(resp.StatusCode, parsed).ShouldFailFast() {
+		if modality == "asr" && asrRejectedProbeInput(resp.StatusCode, parsed) {
 			out.IsValid = true
 			out.Error = fmt.Sprintf("reachable (upstream rejected test audio: %s)", parsed)
 		} else {
@@ -130,6 +134,30 @@ func (s *KeyValidator) testModalityConnectivity(group *models.Group, modelName, 
 
 	s.recordTestLog(apiKey, &groupCopy, channel.ValidateResult{IsValid: out.IsValid, StatusCode: out.StatusCode, URL: reqURL}, out.DurationMs, out.Error)
 	return out, nil
+}
+
+// asrRejectedProbeInput reports whether a failed ASR probe still proves the
+// endpoint and key are reachable. The 0.1s silent wav is routinely refused as
+// an invalid transcription input, and that refusal is the evidence we want —
+// but only for request-shape statuses. A 404 means /v1/audio/transcriptions
+// does not exist upstream, and "model not found" means it answered for a
+// different model; both must stay failures.
+func asrRejectedProbeInput(statusCode int, parsed string) bool {
+	switch statusCode {
+	case http.StatusBadRequest, http.StatusRequestEntityTooLarge, http.StatusUnprocessableEntity:
+	default:
+		return false
+	}
+	lower := strings.ToLower(parsed)
+	for _, marker := range []string{
+		"model not found", "model_not_found", "invalid model", "no such model",
+		"unknown model", "does not exist", "not found",
+	} {
+		if strings.Contains(lower, marker) {
+			return false
+		}
+	}
+	return true
 }
 
 // buildModalityRequest 按模态返回上游端点路径、请求体、Content-Type。

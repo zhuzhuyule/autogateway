@@ -68,3 +68,30 @@ func TestBuildModalityRequestUnsupported(t *testing.T) {
 		t.Fatal("expected error for unsupported modality")
 	}
 }
+
+func TestAsrRejectedProbeInput(t *testing.T) {
+	cases := []struct {
+		name   string
+		status int
+		body   string
+		want   bool
+	}{
+		{"too-short audio proves reachability", 400, "Audio file is too short", true},
+		{"unsupported audio format", 422, "Unsupported audio format: wav", true},
+		{"payload over limit", 413, "request entity too large", true},
+		{"missing endpoint is a failure", 404, "not found", false},
+		{"bad key is a failure", 401, "Invalid API key", false},
+		{"rate limit is a failure", 429, "Too Many Requests", false},
+		{"upstream outage is a failure", 503, "service unavailable", false},
+		{"400 about an unknown model is a failure", 400, "model not found", false},
+		{"same, snake_case spelling", 400, `{"error":{"code":"model_not_found"}}`, false},
+		{"empty body on 400 still proves the route answered", 400, "", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := asrRejectedProbeInput(tc.status, tc.body); got != tc.want {
+				t.Fatalf("asrRejectedProbeInput(%d, %q) = %v, want %v", tc.status, tc.body, got, tc.want)
+			}
+		})
+	}
+}
