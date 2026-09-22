@@ -17,6 +17,9 @@ import (
 type SubGroupInput struct {
 	GroupID uint `json:"group_id"`
 	Weight  int  `json:"weight"`
+	// Priority 选路次序, 数值越小越优先。0 视为未设置(退回 100)。
+	// 不传时保持后端默认, 不影响既有调用。
+	Priority int `json:"priority,omitempty"`
 }
 
 // AggregateValidationResult captures the normalized aggregate group parameters.
@@ -112,6 +115,9 @@ func (s *AggregateGroupService) ValidateSubGroups(ctx context.Context, channelTy
 		resultSubGroups = append(resultSubGroups, models.GroupSubGroup{
 			SubGroupID: input.GroupID,
 			Weight:     input.Weight,
+			// 0 视为未设置 → 落库时写默认 100, 与读取侧的 normalizePriority 一致,
+			// 免得库里同时存在 0 和 100 两种"默认值"。
+			Priority: normalizePriority(input.Priority),
 		})
 	}
 
@@ -146,10 +152,12 @@ func (s *AggregateGroupService) GetSubGroups(ctx context.Context, groupID uint) 
 
 	subGroupIDs := make([]uint, 0, len(groupSubGroups))
 	weightMap := make(map[uint]int, len(groupSubGroups))
+	priorityMap := make(map[uint]int, len(groupSubGroups))
 
 	for _, gsg := range groupSubGroups {
 		subGroupIDs = append(subGroupIDs, gsg.SubGroupID)
 		weightMap[gsg.SubGroupID] = gsg.Weight
+		priorityMap[gsg.SubGroupID] = gsg.Priority
 	}
 
 	var subGroupModels []models.Group
@@ -172,6 +180,7 @@ func (s *AggregateGroupService) GetSubGroups(ctx context.Context, groupID uint) 
 		subGroups = append(subGroups, models.SubGroupInfo{
 			Group:       subGroup,
 			Weight:      weightMap[subGroup.ID],
+			Priority:    priorityMap[subGroup.ID],
 			TotalKeys:   stats.TotalKeys,
 			ActiveKeys:  stats.ActiveKeys,
 			InvalidKeys: stats.InvalidKeys,
@@ -253,7 +262,9 @@ func (s *AggregateGroupService) AddSubGroups(ctx context.Context, groupID uint, 
 }
 
 // UpdateSubGroupWeight updates the weight of a specific sub group
-func (s *AggregateGroupService) UpdateSubGroupWeight(ctx context.Context, groupID, subGroupID uint, weight int) error {
+// UpdateSubGroupWeight 更新子分组的 weight, 并可选更新 priority。
+// priority 传 nil 表示本次不改动它。
+func (s *AggregateGroupService) UpdateSubGroupWeight(ctx context.Context, groupID, subGroupID uint, weight int, priority *int) error {
 	var group models.Group
 	if err := s.db.WithContext(ctx).First(&group, groupID).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
@@ -283,10 +294,22 @@ func (s *AggregateGroupService) UpdateSubGroupWeight(ctx context.Context, groupI
 		return err
 	}
 
+	updates := map[string]any{"weight": weight}
+	// priority 为 nil 表示"本次不动它" —— 保持老的调用方(只改 weight)行为不变。
+	if priority != nil {
+		if *priority < 0 {
+			return NewI18nError(app_errors.ErrValidation, "validation.sub_group_priority_negative", nil)
+		}
+		if *priority > 1000 {
+			return NewI18nError(app_errors.ErrValidation, "validation.sub_group_priority_max_exceeded", nil)
+		}
+		updates["priority"] = *priority
+	}
+
 	result := s.db.WithContext(ctx).
 		Model(&models.GroupSubGroup{}).
 		Where("group_id = ? AND sub_group_id = ?", groupID, subGroupID).
-		Update("weight", weight)
+		Updates(updates)
 
 	if result.Error != nil {
 		return result.Error

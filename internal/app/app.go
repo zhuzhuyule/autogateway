@@ -169,6 +169,11 @@ func (a *App) Start() error {
 		if err := db.V2_5_30_SyncPeerIsMaster(a.db); err != nil {
 			return fmt.Errorf("V2_5_30 add sync_peers.is_master failed: %w", err)
 		}
+		// 子分组选路的 priority 维度(数值越小越优先)。显式兜底: AutoMigrate
+		// 对已存在表新增列在部分环境不生效。
+		if err := db.V2_7_1_GroupSubGroupPriority(a.db); err != nil {
+			return fmt.Errorf("V2_7_1 add group_sub_groups.priority failed: %w", err)
+		}
 		if err := db.V2_7_0_InviteTokens(a.db); err != nil {
 			return fmt.Errorf("V2_7_0 invite_tokens failed: %w", err)
 		}
@@ -245,6 +250,10 @@ func (a *App) Start() error {
 		// 本机拓扑字段(不同步), 必须每个 Slave 自己补。幂等(列已存在则跳过)。
 		if err := db.V2_5_30_SyncPeerIsMaster(a.db); err != nil {
 			return fmt.Errorf("V2_5_30 (slave) add sync_peers.is_master failed: %w", err)
+		}
+		// Slave 同样要读 group_sub_groups 选路, 所以 priority 列也得有。
+		if err := db.V2_7_1_GroupSubGroupPriority(a.db); err != nil {
+			return fmt.Errorf("V2_7_1 (slave) add group_sub_groups.priority failed: %w", err)
 		}
 		if err := db.V2_7_0_InviteTokens(a.db); err != nil {
 			return fmt.Errorf("V2_7_0 (slave) invite_tokens failed: %w", err)

@@ -74,6 +74,8 @@ var MessagesEnUS = map[string]string{
 	"validation.sub_group_validation_endpoint_mismatch":      "Sub-group endpoints are inconsistent. Aggregate groups require unified upstream request paths for successful proxying",
 	"validation.sub_group_weight_negative":                   "Sub-group weight cannot be negative",
 	"validation.sub_group_weight_max_exceeded":               "Sub-group weight cannot exceed 1000",
+	"validation.sub_group_priority_negative":                 "Sub-group priority cannot be negative",
+	"validation.sub_group_priority_max_exceeded":             "Sub-group priority cannot exceed 1000",
 	"validation.sub_group_referenced_cannot_modify":          "This group is referenced by {{.count}} aggregate group(s) as a sub-group. Cannot modify channel type or validation endpoint. Please remove this group from related aggregate groups before making changes",
 	"validation.standard_group_requires_upstreams_testmodel": "Converting to standard group requires providing upstreams and test model",
 	"validation.aggregate_no_model_redirect":                 "Aggregate groups do not support model redirect rules",

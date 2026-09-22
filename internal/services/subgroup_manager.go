@@ -13,7 +13,6 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-
 // SubGroupManager manages weighted round-robin selection for all aggregate groups
 type SubGroupManager struct {
 	store     store.Store
@@ -26,6 +25,7 @@ type subGroupItem struct {
 	name            string
 	subGroupID      uint
 	weight          int
+	priority        int // 数值越小越优先;仅作 SWRR 打平时的 tie-break
 	currentWeight   int
 	availableModels map[string]struct{} // 上游缓存的可用模型集合;空 map 视为"未知,可能含任意模型"
 	hasModelsCache  bool                // true: availableModels 是真实可信的过滤依据
@@ -73,14 +73,14 @@ func (m *SubGroupManager) SelectSubGroupForModel(group *models.Group, requestedM
 type SubGroupHealth struct {
 	Name                string    `json:"name"`
 	SubGroupID          uint      `json:"sub_group_id"`
-	Weight              int       `json:"weight"`              // 配置 raw weight
-	EffectiveWeight     int       `json:"effective_weight"`    // P5.3 latency-adjusted
-	LatencyEWMAMs       int64     `json:"latency_ewma_ms"`     // 0 = cold start
-	ConsecutiveFailures int       `json:"consecutive_failures"` // 5xx/network 累计 (P5.1)
+	Weight              int       `json:"weight"`                   // 配置 raw weight
+	EffectiveWeight     int       `json:"effective_weight"`         // P5.3 latency-adjusted
+	LatencyEWMAMs       int64     `json:"latency_ewma_ms"`          // 0 = cold start
+	ConsecutiveFailures int       `json:"consecutive_failures"`     // 5xx/network 累计 (P5.1)
 	CooldownUntil       time.Time `json:"cooldown_until,omitempty"` // zero = 不在冷却
 	InCooldown          bool      `json:"in_cooldown"`
-	HasModelsCache      bool      `json:"has_models_cache"`    // 是否有 available_models 缓存
-	ModelsCount         int       `json:"models_count"`        // 缓存模型数 (0 = 无缓存或空)
+	HasModelsCache      bool      `json:"has_models_cache"` // 是否有 available_models 缓存
+	ModelsCount         int       `json:"models_count"`     // 缓存模型数 (0 = 无缓存或空)
 }
 
 // Snapshot P6: 返回该 aggregate selector 内部状态快照. 仅 aggregate group 有数据,
@@ -281,6 +281,7 @@ func (m *SubGroupManager) createSelector(group *models.Group) *selector {
 			name:          sg.SubGroupName,
 			subGroupID:    sg.SubGroupID,
 			weight:        sg.Weight,
+			priority:      normalizePriority(sg.Priority),
 			currentWeight: 0,
 		})
 	}
@@ -385,6 +386,13 @@ func (s *selector) selectNextForModelExcluding(requestedModel string, attempted 
 
 // selectAmong 在 SWRR 之上按 predicate 过滤,跳过熔断期内的子分组,直到选到有 active keys 的子分组.
 // 若所有候选都在熔断期(graceful degrade),挑 cooldown 最早结束的那个返回.
+//
+// priority 分层: priority 数值**越小越优先**。选路先只考虑"当前可用的最优层",
+// 该层全不可用(熔断/无 key/不匹配模型)才降到下一层。这样 priority 能表达
+// "主用/备用"的层级关系, 而 weight 只负责同层内的比例分配。
+//
+// 只在配置里真的存在**不同**优先级时才启用分层 —— 默认全是 100 时完全走原
+// 路径, 既不额外查 store, 也不改变既有 SWRR 行为(存量配置零影响)。
 func (s *selector) selectAmong(pred func(*subGroupItem) bool) string {
 	now := time.Now()
 
@@ -394,6 +402,12 @@ func (s *selector) selectAmong(pred func(*subGroupItem) bool) string {
 			return it.name
 		}
 		return ""
+	}
+
+	tiered := s.hasDistinctPriorities()
+	tier := 0
+	if tiered {
+		tier = s.bestEligibleTier(pred, now)
 	}
 
 	attempted := make(map[uint]bool)
@@ -410,6 +424,12 @@ func (s *selector) selectAmong(pred func(*subGroupItem) bool) string {
 		attempted[item.subGroupID] = true
 
 		if !pred(item) {
+			continue
+		}
+
+		// 分层启用时, 只接受当前最优层。tier 为空层标记(noEligibleTier)时
+		// 这里会全部跳过, 自然落到下面的 cooldown 兜底。
+		if tiered && item.priority != tier {
 			continue
 		}
 
@@ -490,6 +510,55 @@ func (s *selector) recordResult(name string, success bool, statusCode int, parse
 	}
 }
 
+// defaultSubGroupPriority 与 model_aliases.priority 的默认保持一致。
+const defaultSubGroupPriority = 100
+
+// noEligibleTier bestEligibleTier 的"无可用层"标记。
+const noEligibleTier = -1
+
+// hasDistinctPriorities 报告该聚合的子分组是否配置了**不同**的优先级。
+// 全相同时(默认 100)选路退化为纯 SWRR, 与引入 priority 之前完全一致。
+func (s *selector) hasDistinctPriorities() bool {
+	if len(s.subGroups) < 2 {
+		return false
+	}
+	first := s.subGroups[0].priority
+	for i := range s.subGroups[1:] {
+		if s.subGroups[i+1].priority != first {
+			return true
+		}
+	}
+	return false
+}
+
+// bestEligibleTier 返回当前**可用**候选中最优先(数值最小)的那一层。
+// 可用 = 过 pred + 有 active key + 不在熔断期。
+// 没有任何可用候选时返回 noEligibleTier。
+//
+// 注意: 这一遍只跑在"确实配了不同优先级"的场景, 且每个候选只查一次 LLen。
+func (s *selector) bestEligibleTier(pred func(*subGroupItem) bool, now time.Time) int {
+	best := noEligibleTier
+	for i := range s.subGroups {
+		it := &s.subGroups[i]
+		if !pred(it) || it.inCooldown(now) || !s.hasActiveKeys(it.subGroupID) {
+			continue
+		}
+		if best == noEligibleTier || it.priority < best {
+			best = it.priority
+		}
+	}
+	return best
+}
+
+// normalizePriority 0 视为"未设置", 退回默认 100 —— 与 alias 的
+// nonZero(req.Priority, 100) 同一约定, 避免历史行/零值意外抢到最高优先级。
+func normalizePriority(p int) int {
+	if p == 0 {
+		return defaultSubGroupPriority
+	}
+	return p
+}
+
 // inCooldown 是否处于熔断冷却期(无锁,调用方应已持锁或确认无并发).
 func (it *subGroupItem) inCooldown(now time.Time) bool {
 	return !it.cooldownUntil.IsZero() && now.Before(it.cooldownUntil)
@@ -509,7 +578,10 @@ func (s *selector) selectByWeight() *subGroupItem {
 		totalWeight += w
 		item.currentWeight += w
 
-		if w > 0 && (best == nil || item.currentWeight > best.currentWeight) {
+		// 主序是有效权重; 权重打平时用 priority 做 tie-break(数值越小越优先)。
+		// 与 model_aliases 的 less() 同一语义: weight 降序, 然后 priority 升序。
+		if w > 0 && (best == nil || item.currentWeight > best.currentWeight ||
+			(item.currentWeight == best.currentWeight && item.priority < best.priority)) {
 			best = item
 		}
 	}

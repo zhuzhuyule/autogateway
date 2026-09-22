@@ -74,6 +74,8 @@ var MessagesJaJP = map[string]string{
 	"validation.sub_group_validation_endpoint_mismatch":      "サブグループのエンドポイントが一致していません。集約グループには、リクエストの転送を成功させるため統一されたアップストリームパスが必要です",
 	"validation.sub_group_weight_negative":                   "サブグループの重みは負の値にできません",
 	"validation.sub_group_weight_max_exceeded":               "サブグループの重みは1000を超えることはできません",
+	"validation.sub_group_priority_negative":                 "サブグループの優先度は負の値にできません",
+	"validation.sub_group_priority_max_exceeded":             "サブグループの優先度は1000を超えることはできません",
 	"validation.sub_group_referenced_cannot_modify":          "このグループは {{.count}} 個の集約グループでサブグループとして参照されています。チャンネルタイプまたは検証エンドポイントは変更できません。変更前に関連する集約グループからこのグループを削除してください",
 	"validation.standard_group_requires_upstreams_testmodel": "標準グループへの変換にはアップストリームサーバーとテストモデルの提供が必要です",
 	"validation.aggregate_no_model_redirect":                 "集約グループはモデルリダイレクトルールをサポートしていません",

@@ -661,6 +661,8 @@ type AddSubGroupsRequest struct {
 // UpdateSubGroupWeightRequest defines the payload for updating a sub group weight
 type UpdateSubGroupWeightRequest struct {
 	Weight int `json:"weight"`
+	// Priority 可选。不传(或传 null)表示只改 weight, 不动 priority。
+	Priority *int `json:"priority,omitempty"`
 }
 
 // GetSubGroups handles getting sub groups of an aggregate group
@@ -720,7 +722,7 @@ func (s *Server) UpdateSubGroupWeight(c *gin.Context) {
 		return
 	}
 
-	if err := s.AggregateGroupService.UpdateSubGroupWeight(c.Request.Context(), uint(id), uint(subGroupID), req.Weight); s.handleGroupError(c, err) {
+	if err := s.AggregateGroupService.UpdateSubGroupWeight(c.Request.Context(), uint(id), uint(subGroupID), req.Weight, req.Priority); s.handleGroupError(c, err) {
 		return
 	}
 

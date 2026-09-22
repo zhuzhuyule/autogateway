@@ -61,13 +61,24 @@ type HeaderRule struct {
 
 // GroupSubGroup 聚合分组和子分组的关联表
 type GroupSubGroup struct {
-	ID         uint           `gorm:"primaryKey;autoIncrement" json:"id"`
-	GroupID    uint           `gorm:"not null;uniqueIndex:idx_group_sub" json:"group_id"`
-	SubGroupID uint           `gorm:"not null;uniqueIndex:idx_group_sub" json:"sub_group_id"`
-	Weight     int            `gorm:"default:0" json:"weight"`
-	CreatedAt  time.Time      `json:"created_at"`
-	UpdatedAt  time.Time      `json:"updated_at"`
-	DeletedAt  gorm.DeletedAt `gorm:"index" json:"deleted_at,omitempty"`
+	ID         uint `gorm:"primaryKey;autoIncrement" json:"id"`
+	GroupID    uint `gorm:"not null;uniqueIndex:idx_group_sub" json:"group_id"`
+	SubGroupID uint `gorm:"not null;uniqueIndex:idx_group_sub" json:"sub_group_id"`
+	Weight     int  `gorm:"default:0" json:"weight"`
+	// Priority 选路的**层级**。数值越小越优先: 选路先只考虑当前可用的最优层,
+	// 该层全不可用(熔断 / 无 active key / 不匹配模型)才降到下一层;
+	// weight 只负责**同一层内**的比例分配(SWRR + 延迟自适应权重)。
+	//
+	// 默认 100。所有子分组同优先级时退化为纯 SWRR, 与引入本字段前完全一致,
+	// 所以存量配置零影响。
+	//
+	// 注意与 model_aliases.priority 的区别: 那边 priority 只是 weight 打平时
+	// 的 tie-break(见 router_engine/selector.go 的 less), 不分层。两者语义不同
+	// 是因为 alias 解决"模型名映射", 子分组解决"流量分层"。
+	Priority  int            `gorm:"not null;default:100" json:"priority"`
+	CreatedAt time.Time      `json:"created_at"`
+	UpdatedAt time.Time      `json:"updated_at"`
+	DeletedAt gorm.DeletedAt `gorm:"index" json:"deleted_at,omitempty"`
 
 	// Lightweight association - only store necessary info for performance
 	SubGroupName string `gorm:"-" json:"sub_group_name,omitempty"`
@@ -75,8 +86,10 @@ type GroupSubGroup struct {
 
 // SubGroupInfo 用于API响应的子分组信息
 type SubGroupInfo struct {
-	Group       Group `json:"group"`
-	Weight      int   `json:"weight"`
+	Group  Group `json:"group"`
+	Weight int   `json:"weight"`
+	// Priority 选路次序, 数值越小越优先(仅作 SWRR 打平时的 tie-break)。
+	Priority    int   `json:"priority"`
 	TotalKeys   int64 `json:"total_keys"`
 	ActiveKeys  int64 `json:"active_keys"`
 	InvalidKeys int64 `json:"invalid_keys"`
