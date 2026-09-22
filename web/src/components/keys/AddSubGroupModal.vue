@@ -2,7 +2,7 @@
 import { keysApi } from "@/api/keys";
 import type { Group, SubGroupInfo } from "@/types/models";
 import { getGroupDisplayName } from "@/utils/display";
-import { AddOutline, CloseOutline } from "@vicons/ionicons5";
+import { AddOutline, CloseOutline, InformationCircleOutline } from "@vicons/ionicons5";
 import {
   NButton,
   NCard,
@@ -11,6 +11,7 @@ import {
   NInputNumber,
   NModal,
   NSelect,
+  NTooltip,
   useMessage,
 } from "naive-ui";
 import { computed, reactive, ref, watch } from "vue";
@@ -31,6 +32,8 @@ interface Emits {
 interface SubGroupItem {
   group_id: number | null;
   weight: number;
+  // 选路层级: 数值越小越优先, 默认 100。同层内按 weight 分配。
+  priority: number;
 }
 
 const props = defineProps<Props>();
@@ -44,7 +47,7 @@ const formRef = ref();
 const formData = reactive<{
   sub_groups: SubGroupItem[];
 }>({
-  sub_groups: [{ group_id: null, weight: 1 }],
+  sub_groups: [{ group_id: null, weight: 1, priority: 100 }],
 });
 
 // 跨协议转译:聚合分组允许挂载"协议不同但可互转"的子分组,网关会在转发时
@@ -130,11 +133,11 @@ watch(
 );
 
 function resetForm() {
-  formData.sub_groups = [{ group_id: null, weight: 1 }];
+  formData.sub_groups = [{ group_id: null, weight: 1, priority: 100 }];
 }
 
 function addSubGroupItem() {
-  formData.sub_groups.push({ group_id: null, weight: 1 });
+  formData.sub_groups.push({ group_id: null, weight: 1, priority: 100 });
 }
 
 function removeSubGroupItem(index: number) {
@@ -165,7 +168,7 @@ async function handleSubmit() {
 
     await keysApi.addSubGroups(
       props.aggregateGroup.id,
-      validSubGroups as { group_id: number; weight: number }[]
+      validSubGroups as { group_id: number; weight: number; priority: number }[]
     );
 
     emit("success");
@@ -250,6 +253,28 @@ const crossProtocolHint = computed(() => {
                   :max="1000"
                   :placeholder="t('keys.enterWeight')"
                 />
+              </n-form-item>
+
+              <n-form-item
+                class="v3-sub-group-priority"
+                :path="`sub_groups[${index}].priority`"
+                :show-feedback="false"
+              >
+                <n-input-number
+                  v-model:value="item.priority"
+                  :min="1"
+                  :max="1000"
+                  :placeholder="t('keys.enterPriority')"
+                >
+                  <template #prefix>
+                    <n-tooltip trigger="hover" style="max-width: 260px">
+                      <template #trigger>
+                        <n-icon :component="InformationCircleOutline" />
+                      </template>
+                      {{ t("keys.priorityHint") }}
+                    </n-tooltip>
+                  </template>
+                </n-input-number>
               </n-form-item>
 
               <n-button
@@ -402,6 +427,12 @@ const crossProtocolHint = computed(() => {
   margin: 0;
 }
 
+.v3-sub-group-priority {
+  width: 110px;
+  flex-shrink: 0;
+  margin: 0;
+}
+
 .v3-sub-group-delete {
   flex-shrink: 0;
   opacity: 0.6;
@@ -456,7 +487,8 @@ const crossProtocolHint = computed(() => {
     align-self: flex-start;
   }
 
-  .v3-sub-group-weight {
+  .v3-sub-group-weight,
+  .v3-sub-group-priority {
     width: 100%;
   }
 }

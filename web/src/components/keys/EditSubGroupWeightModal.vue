@@ -38,8 +38,10 @@ const formRef = ref();
 
 const formData = reactive<{
   weight: number;
+  priority: number;
 }>({
   weight: 0,
+  priority: 100,
 });
 
 const previewPercentage = computed(() => {
@@ -75,6 +77,23 @@ const rules: FormRules = {
       trigger: ["blur", "input"],
     },
   ],
+  priority: [
+    {
+      validator: (_rule, value) => {
+        if (value === null || value === undefined || value === "") {
+          return new Error(t("keys.enterPriority"));
+        }
+        if (value < 1) {
+          return new Error(t("keys.priorityCannotBeNegative"));
+        }
+        if (value > 1000) {
+          return new Error(t("keys.priorityMaxExceeded"));
+        }
+        return true;
+      },
+      trigger: ["blur", "input"],
+    },
+  ],
 };
 
 watch(
@@ -82,6 +101,7 @@ watch(
   ([show, subGroup]) => {
     if (show && subGroup) {
       formData.weight = subGroup.weight;
+      formData.priority = subGroup.priority ?? 100;
     }
   },
   { immediate: true }
@@ -112,7 +132,12 @@ async function handleSubmit() {
       return;
     }
 
-    await keysApi.updateSubGroupWeight(props.aggregateGroup.id, subGroupId, formData.weight);
+    await keysApi.updateSubGroupWeight(
+      props.aggregateGroup.id,
+      subGroupId,
+      formData.weight,
+      formData.priority
+    );
 
     emit("success");
     handleClose();
@@ -131,7 +156,7 @@ function adjustWeight(delta: number) {
   <n-modal :show="show" @update:show="handleClose" class="v3-modal">
     <n-card
       class="v3-modal-card"
-      :title="t('keys.editWeight')"
+      :title="t('keys.editWeightAndPriority')"
       :bordered="false"
       size="huge"
       role="dialog"
@@ -160,6 +185,10 @@ function adjustWeight(delta: number) {
             <span class="v3-meta-item">
               {{ t("keys.currentWeight") }}:
               <strong>{{ subGroup?.weight }}</strong>
+            </span>
+            <span class="v3-meta-item">
+              {{ t("keys.priority") }}:
+              <strong>{{ subGroup?.priority ?? 100 }}</strong>
             </span>
           </div>
         </div>
@@ -216,6 +245,17 @@ function adjustWeight(delta: number) {
                 </n-button>
               </div>
             </div>
+          </n-form-item>
+
+          <n-form-item :label="t('keys.newPriority')" path="priority" class="v3-weight-form-item">
+            <n-input-number
+              v-model:value="formData.priority"
+              :min="1"
+              :max="1000"
+              :precision="0"
+              :placeholder="t('keys.enterPriority')"
+              class="v3-weight-input"
+            />
           </n-form-item>
         </n-form>
 

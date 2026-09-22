@@ -5,7 +5,7 @@ import EditSubGroupWeightModal from "@/components/keys/EditSubGroupWeightModal.v
 import type { Group, SubGroupInfo } from "@/types/models";
 import { getGroupDisplayName } from "@/utils/display";
 import { AddOutline, CreateOutline, EyeOutline, SearchOutline, Trash } from "@vicons/ionicons5";
-import { NIcon, NSpin, useDialog } from "naive-ui";
+import { NIcon, NSpin, NTooltip, useDialog } from "naive-ui";
 import { computed, ref } from "vue";
 import { useI18n } from "vue-i18n";
 
@@ -266,6 +266,17 @@ function viewSubGroup(id?: number) {
                   >
                     w {{ row.weight }}
                   </span>
+                  <n-tooltip trigger="hover" style="max-width: 240px">
+                    <template #trigger>
+                      <span
+                        class="mono tnum v3-priority-chip"
+                        :class="{ 'v3-priority-chip--default': row.priority === 100 }"
+                      >
+                        p {{ row.priority ?? 100 }}
+                      </span>
+                    </template>
+                    {{ t("keys.priorityHint") }}
+                  </n-tooltip>
                   <span class="v3-weight-bar">
                     <i
                       :class="{
@@ -401,6 +412,19 @@ function viewSubGroup(id?: number) {
 .v3-sgt {
   display: flex;
   flex-direction: column;
+}
+
+.v3-priority-chip {
+  font-size: 11px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--v3-surface-3);
+  color: var(--v3-ink-2);
+  flex-shrink: 0;
+}
+
+.v3-priority-chip--default {
+  opacity: 0.55;
 }
 
 .v3-weight-bar {

@@ -49,6 +49,8 @@ export interface SubGroupConfig {
 export interface SubGroupInfo {
   group: Group;
   weight: number;
+  // 选路层级: 数值越小越优先, 默认 100。同层内按 weight 分配。
+  priority: number;
   total_keys: number;
   active_keys: number;
   invalid_keys: number;

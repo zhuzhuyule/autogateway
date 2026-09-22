@@ -355,23 +355,26 @@ export const keysApi = {
   },
 
   // 为聚合分组添加子分组
+  // priority: 选路层级, 数值越小越优先(默认 100)。同层内按 weight 分配。
   async addSubGroups(
     aggregateGroupId: number,
-    subGroups: { group_id: number; weight: number }[]
+    subGroups: { group_id: number; weight: number; priority?: number }[]
   ): Promise<void> {
     await http.post(`/groups/${aggregateGroupId}/sub-groups`, {
       sub_groups: subGroups,
     });
   },
 
-  // 更新子分组权重
+  // 更新子分组权重 / 优先级。priority 不传表示只改 weight。
   async updateSubGroupWeight(
     aggregateGroupId: number,
     subGroupId: number,
-    weight: number
+    weight: number,
+    priority?: number
   ): Promise<void> {
     await http.put(`/groups/${aggregateGroupId}/sub-groups/${subGroupId}/weight`, {
       weight,
+      ...(priority === undefined ? {} : { priority }),
     });
   },
 
