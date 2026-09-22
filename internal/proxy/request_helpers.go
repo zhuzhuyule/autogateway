@@ -3,6 +3,8 @@ package proxy
 import (
 	app_errors "autogateway/internal/errors"
 	"autogateway/internal/models"
+	"autogateway/internal/paramops"
+	"autogateway/internal/router_engine"
 	"bytes"
 	"compress/gzip"
 	"encoding/json"
@@ -11,10 +13,30 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/gin-gonic/gin"
 	"github.com/sirupsen/logrus"
 )
 
-func (ps *ProxyServer) applyParamOverrides(bodyBytes []byte, group *models.Group) ([]byte, error) {
+// originalModelFor 取"客户端原始请求的模型名"。
+// router_engine 中间件在 alias 解析后会改写 body 里的 model, 并把改写前的
+// 名字留在 context 里 —— 优先用它; 中间件没跑(如直连 /proxy 且无路由规则)
+// 时回退到 body 抽出来的值。
+func originalModelFor(c *gin.Context, requestedModel string) string {
+	if om := router_engine.OriginalModelFromContext(c); om != "" {
+		return om
+	}
+	return requestedModel
+}
+
+// applyParamOverrides 三种格式, 按优先级判定:
+//  1. advanced —— 含 "operations" 键: 交给 paramops 按条件做定点改写。
+//  2. nested   —— 所有值都是对象: {"*":{...}, "model-id":{...}}, 按 model 匹配。
+//  3. flat     —— 顶层 key→value 直接覆盖(最老的格式)。
+//
+// originalModel 是**客户端原本请求**的模型名, 供 advanced 模式的 original_model
+// 内置变量使用。注意不能直接用 body 里的 model —— router_engine 中间件可能已经
+// 把它改写成 alias 对应的真名了, 那样 original_model 会和 model 重复、条件失效。
+func (ps *ProxyServer) applyParamOverrides(bodyBytes []byte, group *models.Group, originalModel string) ([]byte, error) {
 	if len(group.ParamOverrides) == 0 || len(bodyBytes) == 0 {
 		return bodyBytes, nil
 	}
@@ -23,6 +45,30 @@ func (ps *ProxyServer) applyParamOverrides(bodyBytes []byte, group *models.Group
 	if err := json.Unmarshal(bodyBytes, &requestData); err != nil {
 		logrus.Warnf("failed to unmarshal request body for param override, passing through: %v", err)
 		return bodyBytes, nil
+	}
+
+	// advanced 必须优先判定, 且**不能**退回 legacy —— legacy 的 flat 分支会把
+	// "operations" 当成普通字段塞进出站 body, 那比报错糟糕得多。
+	if _, hasOps := group.ParamOverrides["operations"]; hasOps {
+		spec, err := paramops.ParseSpec(group.ParamOverrides)
+		if err != nil {
+			// 出错一律回原 body: 就算将来有调用方忘了检查 error, 也只是
+			// 规则没生效, 而不会把空/半改的请求体发到上游。
+			return bodyBytes, fmt.Errorf("invalid param_overrides operations: %w", err)
+		}
+		vars := paramops.Vars{OriginalModel: originalModel}
+		if m, ok := requestData["model"].(string); ok {
+			// 走到这里 model 已被重写成上游真名, 两个变量同源。
+			vars.Model, vars.UpstreamModel = m, m
+			if vars.OriginalModel == "" {
+				vars.OriginalModel = m
+			}
+		}
+		out, err := paramops.Apply(bodyBytes, spec, vars)
+		if err != nil {
+			return bodyBytes, fmt.Errorf("apply param operations: %w", err)
+		}
+		return out, nil
 	}
 
 	if isNestedOverrides(group.ParamOverrides) {

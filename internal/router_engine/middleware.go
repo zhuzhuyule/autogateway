@@ -165,6 +165,12 @@ func Middleware(s *Selector, resolver AliasResolver) gin.HandlerFunc {
 			}
 		}
 
+		// 把**客户端原本请求的**模型名留下来。上面改写完 body 之后, 原始名字就
+		// 只剩这里有 —— 下游 proxy 的 param_overrides 内置变量 original_model
+		// 需要它(否则只能拿到改写后的真名, 和 model 重复, 条件就没法按"用户
+		// 请求的是哪个别名"来分流)。
+		c.Set(ctxKeyOriginalModel, model)
+
 		logrus.WithFields(logrus.Fields{
 			"requested_model": model,
 			"target_group":    groupName,
@@ -173,6 +179,24 @@ func Middleware(s *Selector, resolver AliasResolver) gin.HandlerFunc {
 			"weight":          picked.Weight,
 		}).Debug("router_engine: routed request")
 	}
+}
+
+// ctxKeyOriginalModel 客户端**原始**请求的模型名(在 alias / auto 路由改写之前)。
+// 与 "router_engine.candidate" 同一约定: 跨包通过 gin context 传值。
+const ctxKeyOriginalModel = "router_engine.original_model"
+
+// OriginalModelFromContext 读取中间件留下的原始模型名; 没有则返回 ""。
+// 供 proxy 的 param_overrides(original_model 内置变量)使用。
+func OriginalModelFromContext(c *gin.Context) string {
+	if c == nil {
+		return ""
+	}
+	if v, ok := c.Get(ctxKeyOriginalModel); ok {
+		if s, ok := v.(string); ok {
+			return s
+		}
+	}
+	return ""
 }
 
 // parseSession 提取会话标识与是否多轮。sessionKey 优先 X-Session-Id 头，

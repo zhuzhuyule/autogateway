@@ -216,7 +216,7 @@ func (ps *ProxyServer) HandleProxy(c *gin.Context) {
 		return
 	}
 
-	finalBodyBytes, err := ps.applyParamOverrides(bodyBytes, group)
+	finalBodyBytes, err := ps.applyParamOverrides(bodyBytes, group, originalModelFor(c, requestedModel))
 	if err != nil {
 		response.Error(c, app_errors.NewAPIError(app_errors.ErrInternalServer, fmt.Sprintf("Failed to apply parameter overrides: %v", err)))
 		return
@@ -250,7 +250,7 @@ func (ps *ProxyServer) handleResolvedCandidate(
 			fmt.Sprintf("Failed to get channel for group '%s': %v", chosenGroup.Name, err)))
 		return
 	}
-	finalBodyBytes, err := ps.applyParamOverrides(bodyBytes, chosenGroup)
+	finalBodyBytes, err := ps.applyParamOverrides(bodyBytes, chosenGroup, originalModelFor(c, requestedModel))
 	if err != nil {
 		response.Error(c, app_errors.NewAPIError(app_errors.ErrInternalServer,
 			fmt.Sprintf("Failed to apply parameter overrides: %v", err)))
@@ -651,7 +651,7 @@ func (ps *ProxyServer) handleAttemptFailure(ac *attemptContext, resp *http.Respo
 						"reason":          parsedError,
 					}).Info("P4 router: candidate failover")
 					ps.logRequest(c, originalGroup, group, apiKey, startTime, statusCode, errors.New(parsedError), isStream, upstreamURL, channelHandler, bodyBytes, models.RequestTypeRetry)
-					overrideBody, oerr := ps.applyParamOverrides(nextBody, nextGroup)
+					overrideBody, oerr := ps.applyParamOverrides(nextBody, nextGroup, originalModelFor(c, requestedModel))
 					if oerr != nil {
 						overrideBody = nextBody
 					}
@@ -675,7 +675,7 @@ func (ps *ProxyServer) handleAttemptFailure(ac *attemptContext, resp *http.Respo
 					// 该子分组的失败也算一次最终,但请求整体继续
 					ps.logRequest(c, originalGroup, group, apiKey, startTime, statusCode, errors.New(parsedError), isStream, upstreamURL, channelHandler, bodyBytes, models.RequestTypeRetry)
 					// 重新做 param overrides(不同子分组可能有不同 overrides)
-					nextBody, oerr := ps.applyParamOverrides(bodyBytes, nextGroup)
+					nextBody, oerr := ps.applyParamOverrides(bodyBytes, nextGroup, originalModelFor(c, requestedModel))
 					if oerr != nil {
 						nextBody = bodyBytes
 					}

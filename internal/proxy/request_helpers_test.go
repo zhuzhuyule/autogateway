@@ -28,7 +28,7 @@ func TestApplyOverridesFlatLegacyShape(t *testing.T) {
 	body := []byte(`{"model":"gpt-4o","temperature":0.9}`)
 	g := &models.Group{ParamOverrides: mustJSONMap(t, `{"temperature":0.3,"top_p":0.5}`)}
 
-	out, err := ps.applyParamOverrides(body, g)
+	out, err := ps.applyParamOverrides(body, g, "gpt-4o")
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -54,7 +54,7 @@ func TestApplyOverridesNestedShapeStarPlusModel(t *testing.T) {
 		}`),
 	}
 
-	out, err := ps.applyParamOverrides(body, g)
+	out, err := ps.applyParamOverrides(body, g, "gpt-4o")
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -77,7 +77,7 @@ func TestApplyOverridesNestedModelOverridesStar(t *testing.T) {
 			"gpt-5": {"temperature": 0.9}
 		}`),
 	}
-	out, _ := ps.applyParamOverrides(body, g)
+	out, _ := ps.applyParamOverrides(body, g, "gpt-4o")
 	var got map[string]any
 	_ = json.Unmarshal(out, &got)
 	if got["temperature"] != 0.9 {
@@ -94,7 +94,7 @@ func TestApplyOverridesNestedNoMatchUsesStarOnly(t *testing.T) {
 			"gpt-5": {"reasoning_effort": "high"}
 		}`),
 	}
-	out, _ := ps.applyParamOverrides(body, g)
+	out, _ := ps.applyParamOverrides(body, g, "gpt-4o")
 	var got map[string]any
 	_ = json.Unmarshal(out, &got)
 	if got["temperature"] != 0.2 {
@@ -108,9 +108,99 @@ func TestApplyOverridesNestedNoMatchUsesStarOnly(t *testing.T) {
 func TestApplyOverridesEmptyBody(t *testing.T) {
 	ps := &ProxyServer{}
 	g := &models.Group{ParamOverrides: mustJSONMap(t, `{"temperature":0.3}`)}
-	out, err := ps.applyParamOverrides([]byte(""), g)
+	out, err := ps.applyParamOverrides([]byte(""), g, "")
 	if err != nil || !reflect.DeepEqual(out, []byte("")) {
 		t.Errorf("empty body should pass through unchanged: %v %v", out, err)
+	}
+}
+
+// ---------- advanced 模式 (paramops) ----------
+
+func TestApplyOverridesAdvancedOperations(t *testing.T) {
+	ps := &ProxyServer{}
+	body := []byte(`{"model":"Qwen3-8B","messages":[{"role":"user","content":"hi"}],"max_tokens":2000}`)
+	g := &models.Group{
+		ParamOverrides: mustJSONMap(t, `{"operations":[
+			{"mode":"prepend","path":"messages","value":{"role":"system","content":"中文回答"}},
+			{"mode":"set","path":"temperature","value":0.3}
+		]}`),
+	}
+	out, err := ps.applyParamOverrides(body, g, "claude-sonnet-4-5")
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	msgs, _ := got["messages"].([]any)
+	if len(msgs) != 2 {
+		t.Fatalf("system message should be prepended, got %d messages", len(msgs))
+	}
+	if got["temperature"] != 0.3 {
+		t.Errorf("temperature = %v, want 0.3", got["temperature"])
+	}
+}
+
+// advanced 规则里的内置变量要能拿到"客户端原始模型名"
+func TestApplyOverridesAdvancedUsesOriginalModelVar(t *testing.T) {
+	ps := &ProxyServer{}
+	body := []byte(`{"model":"Qwen3-8B","messages":[]}`)
+	g := &models.Group{
+		ParamOverrides: mustJSONMap(t, `{"operations":[
+			{"mode":"set","path":"top_k","value":10,
+			 "conditions":[{"path":"original_model","mode":"prefix","value":"claude"}]}
+		]}`),
+	}
+
+	// 原始模型是 claude-* → 命中
+	out, err := ps.applyParamOverrides(body, g, "claude-sonnet-4-5")
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if !strings.Contains(string(out), `"top_k":10`) {
+		t.Errorf("condition on original_model should hit: %s", out)
+	}
+
+	// 原始模型不是 claude-* → 不命中
+	out, err = ps.applyParamOverrides(body, g, "gpt-4o")
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if strings.Contains(string(out), "top_k") {
+		t.Errorf("condition on original_model should miss: %s", out)
+	}
+}
+
+// 关键安全点: 含 operations 键时绝不能退回 legacy flat 分支 ——
+// 那会把 operations 数组当普通字段塞进出站 body。
+func TestApplyOverridesAdvancedNeverFallsBackToLegacy(t *testing.T) {
+	ps := &ProxyServer{}
+	body := []byte(`{"model":"m"}`)
+	g := &models.Group{ParamOverrides: mustJSONMap(t, `{"operations":[{"mode":"nope"}]}`)}
+
+	out, err := ps.applyParamOverrides(body, g, "m")
+	if err == nil {
+		t.Fatalf("malformed operations must error, not silently degrade; got %s", out)
+	}
+	if strings.Contains(string(out), "operations") {
+		t.Errorf("operations must never be injected into the outbound body: %s", out)
+	}
+}
+
+// 规则本身合法但运行时失败(路径不存在) → 报错且 body 保持原样
+func TestApplyOverridesAdvancedRuntimeErrorKeepsBody(t *testing.T) {
+	ps := &ProxyServer{}
+	body := []byte(`{"model":"m"}`)
+	g := &models.Group{
+		ParamOverrides: mustJSONMap(t, `{"operations":[{"mode":"append","path":"missing","value":"x"}]}`),
+	}
+	out, err := ps.applyParamOverrides(body, g, "m")
+	if err == nil {
+		t.Fatal("expected an error for a missing path")
+	}
+	if string(out) != `{"model":"m"}` {
+		t.Errorf("on error the body must be returned unchanged, got %s", out)
 	}
 }
 
