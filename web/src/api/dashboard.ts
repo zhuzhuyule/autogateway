@@ -97,6 +97,10 @@ export interface ModelTiming {
   /** 窗口内该模型累计 token 与按挂牌价折算成本 (免费源/未知模型 → 0)。 */
   tokens: number;
   cost_usd: number;
+  /** 窗口内失败请求数(与 top-models 同口径)。 */
+  errors: number;
+  /** 错误率, 百分数 0..100 —— 与 top-models 一致, 前端直接跟一个 % 显示。 */
+  error_rate: number;
 }
 
 /**

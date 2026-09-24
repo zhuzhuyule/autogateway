@@ -109,6 +109,18 @@ export const aliasesApi = {
    */
   rename: (from: string, to: string) =>
     http.put<{ renamed: number }>("/aliases/rename", { from, to }),
+  /**
+   * 就地公开某个候选所在分组的模型 —— 「未公开此模型」的状态修复, 不再跳页。
+   *
+   * status 三种都是成功: added(已补进暴露列表) / already_ok(本来就公开) /
+   * not_needed(分组是 passthrough, 无需操作)。后端注册的 POST, 不是 PUT。
+   */
+  exposeModel: (alias: string, groupId: number, realModel: string) =>
+    http.post<{ status: "added" | "already_ok" | "not_needed" }>(
+      "/aliases/expose",
+      { alias, group_id: groupId, real_model: realModel },
+      { hideMessage: true }
+    ),
   suggestions: () => http.get<AliasSuggestion[]>("/aliases/suggestions"),
   // P4.2 registry-driven 建议: 给定 aggregate group id, 返回该聚合下
   // 跨 sub-group 共享同一 family 但还没建 alias 的候选清单.
