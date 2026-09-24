@@ -174,6 +174,11 @@ func (a *App) Start() error {
 		if err := db.V2_7_1_GroupSubGroupPriority(a.db); err != nil {
 			return fmt.Errorf("V2_7_1 add group_sub_groups.priority failed: %w", err)
 		}
+		// request_logs 的用量/成本/错误归因列。同 V2_7_1: 只靠 AutoMigrate 的话
+		// Slave 永远拿不到, 而缺列会让**每次写请求日志都失败**(静默丢日志)。
+		if err := db.V2_8_2_RequestLogUsageColumns(a.db); err != nil {
+			return fmt.Errorf("V2_8_2 add request_logs usage columns failed: %w", err)
+		}
 		if err := db.V2_7_0_InviteTokens(a.db); err != nil {
 			return fmt.Errorf("V2_7_0 invite_tokens failed: %w", err)
 		}
@@ -254,6 +259,10 @@ func (a *App) Start() error {
 		// Slave 同样要读 group_sub_groups 选路, 所以 priority 列也得有。
 		if err := db.V2_7_1_GroupSubGroupPriority(a.db); err != nil {
 			return fmt.Errorf("V2_7_1 (slave) add group_sub_groups.priority failed: %w", err)
+		}
+		// Slave 自己也要写请求日志 —— 缺这几列会让每次 INSERT 都失败, 所以必须自己补。
+		if err := db.V2_8_2_RequestLogUsageColumns(a.db); err != nil {
+			return fmt.Errorf("V2_8_2 (slave) add request_logs usage columns failed: %w", err)
 		}
 		if err := db.V2_7_0_InviteTokens(a.db); err != nil {
 			return fmt.Errorf("V2_7_0 (slave) invite_tokens failed: %w", err)
