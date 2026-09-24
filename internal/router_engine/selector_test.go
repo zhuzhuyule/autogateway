@@ -6,7 +6,11 @@ import (
 	"time"
 
 	"autogateway/internal/failover"
+	"autogateway/internal/models"
 	"autogateway/internal/store"
+
+	"gorm.io/datatypes"
+	"gorm.io/gorm"
 )
 
 // TestSWRRDistribution verifies that smooth weighted round-robin honors
@@ -261,5 +265,67 @@ func TestMarkResponseRecordsStat(t *testing.T) {
 	s.MarkResponse(c, 500, "err", 0, 0)
 	if s.stats["1:m"].fail != 1 {
 		t.Fatal("MarkResponse(500) should record fail")
+	}
+}
+
+// seedTierPair 建一个分组 + 一个可用密钥, 并在 simple / complex 两个保留档位上
+// 各挂一条候选。返回创建好的 selector。
+func seedTierPair(t *testing.T, db *gorm.DB) *Selector {
+	t.Helper()
+	g := models.Group{
+		Name: "tiers", ChannelType: "openai", ModelRoutingMode: "passthrough",
+		Upstreams: datatypes.JSON([]byte(`[]`)),
+	}
+	if err := db.Create(&g).Error; err != nil {
+		t.Fatalf("seed group: %v", err)
+	}
+	if err := db.Create(&models.APIKey{
+		GroupID: g.ID, KeyValue: "sk-test", Status: models.KeyStatusActive,
+	}).Error; err != nil {
+		t.Fatalf("seed key: %v", err)
+	}
+	for alias, model := range map[string]string{"simple": "small-model", "complex": "big-model"} {
+		if err := db.Create(&models.ModelAlias{
+			Alias: alias, GroupID: g.ID, RealModel: model, Weight: 1, Priority: 100, Enabled: true,
+		}).Error; err != nil {
+			t.Fatalf("seed %s: %v", alias, err)
+		}
+	}
+	return NewSelector(db, store.NewMemoryStore(), nil)
+}
+
+// 关闭智能路由 ≠ 报错, 也 ≠ 透传: model="auto" 固定走 simple 档。
+// 之前 Settings.Enabled 存了也读了, 但选路从不查它 —— 关掉之后照样按阈值分档,
+// 界面那个开关是假的。
+func TestPickForAuto_DisabledFallsBackToSimpleTier(t *testing.T) {
+	s := seedTierPair(t, newIntegrationDB(t))
+	ctx := context.Background()
+
+	s.UpdateSettings(Settings{Enabled: true, SimpleThreshold: 2000, ComplexThreshold: 8000})
+	// 估算 100_000 tokens → 阈值本该判成 complex。
+	on, err := s.PickForAuto(ctx, 100_000)
+	if err != nil {
+		t.Fatalf("PickForAuto(enabled): %v", err)
+	}
+	if on.RealModel != "big-model" {
+		t.Fatalf("enabled pick = %q, want big-model", on.RealModel)
+	}
+
+	s.UpdateSettings(Settings{Enabled: false, SimpleThreshold: 2000, ComplexThreshold: 8000})
+	off, err := s.PickForAuto(ctx, 100_000)
+	if err != nil {
+		t.Fatalf("PickForAuto(disabled): %v", err)
+	}
+	if off.RealModel != "small-model" {
+		t.Fatalf("disabled pick = %q, want small-model (simple tier)", off.RealModel)
+	}
+}
+
+// simple 档没有候选时沿用既有「无候选」错误, 不新造错误码。
+func TestPickForAuto_DisabledWithEmptySimplePoolErrors(t *testing.T) {
+	s := NewSelector(newIntegrationDB(t), store.NewMemoryStore(), nil)
+	s.UpdateSettings(Settings{Enabled: false})
+	if _, err := s.PickForAuto(context.Background(), 10); err == nil {
+		t.Fatal("expected an error when the simple pool is empty")
 	}
 }

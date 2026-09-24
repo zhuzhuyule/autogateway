@@ -401,12 +401,19 @@ func (s *Selector) PickByExactName(ctx context.Context, model string) (*Candidat
 }
 
 // PickForAuto resolves the smart-routing pool by token estimate.
+//
+// 关闭智能路由时不是"报错"也不是"透传": model="auto" 固定走 simple 档。
+// 界面那个开关必须真的影响选路, 否则它只是一个存在 system_settings 里的
+// 布尔值。simple 池为空时沿用 PickByAlias 的「无候选」错误。
 func (s *Selector) PickForAuto(ctx context.Context, estimatedTokens int) (*Candidate, error) {
 	cfg := s.GetSettings()
 	tier := TierMedium
-	if estimatedTokens < cfg.SimpleThreshold {
+	switch {
+	case !cfg.Enabled:
 		tier = TierSimple
-	} else if estimatedTokens >= cfg.ComplexThreshold {
+	case estimatedTokens < cfg.SimpleThreshold:
+		tier = TierSimple
+	case estimatedTokens >= cfg.ComplexThreshold:
 		tier = TierComplex
 	}
 	return s.PickByAlias(ctx, ReservedAlias(tier))

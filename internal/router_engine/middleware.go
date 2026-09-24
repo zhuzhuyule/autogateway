@@ -74,9 +74,12 @@ func Middleware(s *Selector, resolver AliasResolver) gin.HandlerFunc {
 		}
 
 		sessionKey, isMultiTurn := parseSession(bodyBytes, c.Request.Header)
+		// 关闭智能路由后 model="auto" 固定走 simple 档, 没有"选档"结果需要粘住;
+		// 留着 sticky 反而会把会话锁在一个管理员已经从档位里摘掉的候选上。
+		stickyRouting := model != "auto" || s.GetSettings().Enabled
 		var stickyKey string
 		var picked *Candidate
-		if isMultiTurn && sessionKey != "" {
+		if isMultiTurn && sessionKey != "" && stickyRouting {
 			stickyKey = stickyStoreKey(sessionKey, model)
 			if cand := s.GetSticky(stickyKey); cand != nil && s.IsCandidateAlive(c.Request.Context(), cand) {
 				picked = cand
