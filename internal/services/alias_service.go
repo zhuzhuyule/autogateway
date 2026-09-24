@@ -2,12 +2,15 @@ package services
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 
 	app_errors "autogateway/internal/errors"
 	"autogateway/internal/models"
 
+	"gorm.io/datatypes"
 	"gorm.io/gorm"
 )
 
@@ -35,6 +38,15 @@ var legacyReservedRenameMap = map[string]string{
 // 维度上 priority 只作 SWRR 累加值打平时的 tie-break (见 router_engine.swrr),
 // 所以缺省值统一取 100 —— 与模型列的 gorm default 一致。
 const defaultAliasPriority = 100
+
+// ExposeCandidate outcomes. They are part of the API contract: the frontend
+// shows a different message per value, and `not_needed` is a success, not an
+// error.
+const (
+	ExposeAdded     = "added"
+	ExposeAlreadyOk = "already_ok"
+	ExposeNotNeeded = "not_needed"
+)
 
 // AliasService manages CRUD on model_aliases plus seeding of reserved
 // aliases. Routing decisions live in internal/router_engine — this
@@ -453,6 +465,95 @@ func (s *AliasService) RenameAlias(ctx context.Context, from, to string) (int, e
 		return 0, err
 	}
 	return int(affected), nil
+}
+
+// ExposeCandidate 把候选的 real_model 补进目标分组的 exposed_models。
+//
+// 为什么需要它: 前端「未公开此模型」的处置之前是 router.push 跳到密钥页, 让
+// admin 自己找那个模型卡片上的“+加入”。一个状态修复被做成了跨页编排, 而且
+// 补 exposed 这一步在前端另一条路径里重复实现过一遍(createAliasCandidates),
+// 两处必然漂移。下沉到服务端后, 就地一次调用完成。
+//
+// 只处理 specified 模式的分组: passthrough 下模型本来可达, 返回 ExposeNotNeeded。
+// 黑名单命中的模型明确报错 —— 补白名单不会让它变可达(filterByExposed 先拒
+// blocked), 静默返回“成功”就是骗人。
+func (s *AliasService) ExposeCandidate(
+	ctx context.Context, alias string, groupID uint, realModel string,
+) (string, error) {
+	alias = strings.TrimSpace(alias)
+	realModel = strings.TrimSpace(realModel)
+	if alias == "" || realModel == "" || groupID == 0 {
+		return "", app_errors.NewAPIError(app_errors.ErrValidation,
+			"alias, group_id and real_model are required")
+	}
+
+	var row models.ModelAlias
+	if err := s.db.WithContext(ctx).
+		Where("alias = ? AND group_id = ? AND real_model = ?", alias, groupID, realModel).
+		First(&row).Error; err != nil {
+		return "", app_errors.NewAPIError(app_errors.ErrResourceNotFound,
+			"alias candidate not found")
+	}
+
+	var group models.Group
+	if err := s.db.WithContext(ctx).First(&group, groupID).Error; err != nil {
+		return "", app_errors.ParseDBError(err)
+	}
+	if group.GroupType == "aggregate" {
+		return "", app_errors.NewAPIError(app_errors.ErrValidation,
+			"aggregate groups have no exposed model list")
+	}
+	if group.ModelRoutingMode != "specified" {
+		return ExposeNotNeeded, nil
+	}
+	if jsonArrContains(group.BlockedModels, realModel) {
+		return "", app_errors.NewAPIError(app_errors.ErrValidation,
+			"model is blocked in this group")
+	}
+	if jsonArrContains(group.ExposedModels, realModel) {
+		return ExposeAlreadyOk, nil
+	}
+
+	exposed, err := jsonAppendString(group.ExposedModels, realModel)
+	if err != nil {
+		return "", err
+	}
+	if err := s.db.WithContext(ctx).Model(&models.Group{}).
+		Where("id = ?", groupID).
+		Update("exposed_models", datatypes.JSON(exposed)).Error; err != nil {
+		return "", app_errors.ParseDBError(err)
+	}
+	return ExposeAdded, nil
+}
+
+// jsonArrContains reports whether a datatypes.JSON column holding a string
+// array contains v. NULL / empty / malformed all read as "no".
+func jsonArrContains(raw datatypes.JSON, v string) bool {
+	var arr []string
+	if err := json.Unmarshal(raw, &arr); err != nil {
+		return false
+	}
+	return slices.Contains(arr, v)
+}
+
+// jsonAppendString returns raw-with-v-appended as JSON, keeping what was
+// already there. An unparseable column is an error rather than a silent
+// rewrite — losing an admin's exposed list to a stray byte is far worse than
+// a failed click.
+func jsonAppendString(raw datatypes.JSON, v string) ([]byte, error) {
+	arr := []string{}
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &arr); err != nil {
+			return nil, app_errors.NewAPIError(app_errors.ErrInternalServer,
+				"group exposed_models is not a JSON string array")
+		}
+	}
+	arr = append(arr, v)
+	out, err := json.Marshal(arr)
+	if err != nil {
+		return nil, app_errors.NewAPIError(app_errors.ErrInternalServer, err.Error())
+	}
+	return out, nil
 }
 
 // Delete removes an alias row. Reserved placeholder rows (group_id=0,
