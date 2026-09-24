@@ -7,6 +7,7 @@ import (
 	"autogateway/internal/models"
 	"autogateway/internal/response"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -349,6 +350,10 @@ type ModelTiming struct {
 	// 前端在模型卡上挂成本/用量 chip (ModelCatalog / Aliases)。
 	Tokens  int64   `json:"tokens"`
 	CostUSD float64 `json:"cost_usd"`
+	// Errors / ErrorRate 与 TopModels 同口径(窗口内 is_success=false 的行数),
+	// 但本接口没有 LIMIT —— 别名页要给每一条候选标错误率。
+	Errors    int64   `json:"errors"`
+	ErrorRate float64 `json:"error_rate"`
 }
 
 // ModelTimings returns avg request duration (ms) per model for the last 24h.
@@ -366,11 +371,13 @@ func (s *Server) ModelTimings(c *gin.Context) {
 		AvgMs   float64
 		Tokens  int64
 		CostUSD float64
+		Errors  int64
 	}
 	var rows []row
 	err := s.DB.Model(&models.RequestLog{}).
 		Select("model, COUNT(*) as calls, AVG(duration) as avg_ms, "+
-			"COALESCE(SUM(total_tokens),0) as tokens, COALESCE(SUM(cost_usd),0) as cost_usd").
+			"COALESCE(SUM(total_tokens),0) as tokens, COALESCE(SUM(cost_usd),0) as cost_usd, "+
+			"SUM(CASE WHEN is_success THEN 0 ELSE 1 END) as errors").
 		Where("timestamp >= ? AND request_type = ? AND model IS NOT NULL AND model != ''", since, models.RequestTypeFinal).
 		Group("model").
 		Scan(&rows).Error
@@ -381,12 +388,19 @@ func (s *Server) ModelTimings(c *gin.Context) {
 
 	out := make([]ModelTiming, 0, len(rows))
 	for _, r := range rows {
+		errRate := 0.0
+		if r.Calls > 0 {
+			// 保留两位: 前端直接 `${x}%` 显示, 0.3333333 这种会溢出成一行噪声。
+			errRate = math.Round(float64(r.Errors)/float64(r.Calls)*10000) / 100
+		}
 		out = append(out, ModelTiming{
-			Model:   r.Model,
-			AvgMs:   int64(r.AvgMs),
-			Calls:   r.Calls,
-			Tokens:  r.Tokens,
-			CostUSD: r.CostUSD,
+			Model:     r.Model,
+			AvgMs:     int64(r.AvgMs),
+			Calls:     r.Calls,
+			Tokens:    r.Tokens,
+			CostUSD:   r.CostUSD,
+			Errors:    r.Errors,
+			ErrorRate: errRate,
 		})
 	}
 	response.Success(c, out)

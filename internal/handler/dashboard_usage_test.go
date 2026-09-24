@@ -204,3 +204,43 @@ func TestUsageRollup_ExcludesAggregateParents(t *testing.T) {
 		t.Fatalf("cost = %v, want ~0.02", out.CostUSD)
 	}
 }
+
+// ModelTimings 的错误率与 TopModels 同口径 (窗口内 is_success=false 的行数),
+// 但不带 LIMIT —— 别名列表要给每一条候选标错误率, 长列表不能被 50 行截断。
+func TestModelTimings_ReportsErrorRate(t *testing.T) {
+	s := newUsageTestServer(t)
+	now := time.Now()
+	seedLog(t, s.DB, "a", "hermes", now.Add(-1*time.Hour), models.RequestTypeFinal, 10, 10, 20, 0, true)
+	seedLog(t, s.DB, "b", "hermes", now.Add(-2*time.Hour), models.RequestTypeFinal, 10, 10, 20, 0, true)
+	seedLog(t, s.DB, "c", "hermes", now.Add(-3*time.Hour), models.RequestTypeFinal, 10, 10, 20, 0, false)
+	seedLog(t, s.DB, "d", "other", now.Add(-1*time.Hour), models.RequestTypeFinal, 10, 10, 20, 0, true)
+
+	rec := callGET(s, "/dashboard/model-timings?window=24h", s.ModelTimings)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	var out []ModelTiming
+	decodeData(t, rec.Body.Bytes(), &out)
+
+	byModel := map[string]ModelTiming{}
+	for _, r := range out {
+		byModel[r.Model] = r
+	}
+	hermes, ok := byModel["hermes"]
+	if !ok {
+		t.Fatalf("hermes missing from %v", out)
+	}
+	if hermes.Calls != 3 {
+		t.Fatalf("hermes calls = %d, want 3", hermes.Calls)
+	}
+	if hermes.Errors != 1 {
+		t.Fatalf("hermes errors = %d, want 1", hermes.Errors)
+	}
+	// ErrorRate 与 TopModels 同口径: 百分数 0..100, 前端直接跟一个 % 显示。
+	if hermes.ErrorRate < 33.3 || hermes.ErrorRate > 33.4 {
+		t.Fatalf("hermes error_rate = %v, want ~33.33 (percent)", hermes.ErrorRate)
+	}
+	if other := byModel["other"]; other.Errors != 0 || other.ErrorRate != 0 {
+		t.Fatalf("other = %+v, want no errors", other)
+	}
+}
