@@ -134,3 +134,30 @@ func (h *AliasHandler) ReplaceCandidates(c *gin.Context) {
 	}
 	response.Success(c, rows)
 }
+
+// Expose 把一条别名候选的 real_model 补进所在分组的 exposed_models。
+//
+// 候选三元组放在 body 里而不是路径上: 同 RenameAlias —— /aliases 这一层已经有
+// :id 参数段, 再加一个不同名的段会让 gin 直接 panic。
+func (h *AliasHandler) Expose(c *gin.Context) {
+	var req struct {
+		Alias     string `json:"alias"`
+		GroupID   uint   `json:"group_id"`
+		RealModel string `json:"real_model"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.ErrorI18nFromAPIError(c, app_errors.ErrBadRequest, "validation.invalid_payload")
+		return
+	}
+	status, err := h.svc.ExposeCandidate(c.Request.Context(), req.Alias, req.GroupID, req.RealModel)
+	if err != nil {
+		// 分组 / 候选不存在、模型在黑名单里 —— 这些都要能在日志里查到原因,
+		// 否则前端只剩一句"参数不合法"。
+		logrus.WithError(err).WithFields(logrus.Fields{
+			"alias": req.Alias, "group_id": req.GroupID, "model": req.RealModel,
+		}).Warn("expose alias candidate failed")
+		response.ErrorI18nFromAPIError(c, app_errors.ErrBadRequest, "validation.invalid_payload")
+		return
+	}
+	response.Success(c, gin.H{"status": status})
+}

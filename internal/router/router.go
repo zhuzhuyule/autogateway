@@ -173,6 +173,8 @@ func registerProtectedAPIRoutes(
 		// 整体替换候选集合(编辑抽屉的"保存")。静态段 "candidates" 与参数段 ":id"
 		// 同级, gin 1.10 允许静态优先, 不会冲突。
 		aliases.PUT("/candidates", aliasHandler.ReplaceCandidates)
+		// 就地公开候选所在分组的模型 —— 状态修复不再跳页
+		aliases.POST("/expose", aliasHandler.Expose)
 		// 整体改别名名。同 /candidates: 静态段避开与 PUT /:id 的参数名冲突。
 		aliases.PUT("/rename", aliasHandler.RenameAlias)
 		aliases.PUT("/:id", aliasHandler.Update)
