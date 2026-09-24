@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { aliasesApi, type ModelAliasRow } from "@/api/aliases";
+import { createAliasCandidates } from "@/services/aliases";
 import { expandProviderAliases, lookupRegistry } from "@/api/freemodels";
 import type { Group } from "@/types/models";
 import { BanOutline, CloseOutline, HelpCircleOutline, LinkOutline } from "@vicons/ionicons5";
@@ -44,11 +45,6 @@ const loading = ref(false);
 const allAliases = ref<ModelAliasRow[]>([]);
 const allAliasesLoading = ref(false);
 const selectedAliases = ref<string[]>([]);
-
-// Defaults applied to every newly created mapping — not user-editable here.
-const DEFAULT_WEIGHT = 100;
-const DEFAULT_PRIORITY = 0;
-const DEFAULT_ENABLED = true;
 
 watch(
   () => props.show,
@@ -317,23 +313,15 @@ async function handleSave() {
       targets.push({ groupId: c.groupId, realModel: c.realModel });
     }
   }
+  // 建候选走 services 里的唯一实现: 统一的默认 weight/priority, 以及 specified
+  // 模式下补 exposed_models —— 漏了后者建出来的别名会被选路静默跳过。
   for (const alias of selectedAliases.value) {
-    for (const tgt of targets) {
-      try {
-        await aliasesApi.create({
-          alias,
-          group_id: tgt.groupId,
-          real_model: tgt.realModel,
-          weight: DEFAULT_WEIGHT,
-          priority: DEFAULT_PRIORITY,
-          enabled: DEFAULT_ENABLED,
-        });
-        ok += 1;
-      } catch (e) {
-        console.error(`create alias ${alias} for ${tgt.groupId}/${tgt.realModel} failed`, e);
-        fail += 1;
-      }
-    }
+    const res = await createAliasCandidates(
+      alias,
+      targets.map(tgt => ({ groupId: tgt.groupId, modelId: tgt.realModel }))
+    );
+    ok += res.ok;
+    fail += res.fail;
   }
   loading.value = false;
   if (ok > 0) {

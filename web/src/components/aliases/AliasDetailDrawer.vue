@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// 别名编辑抽屉 —— 替代原来"点一个候选弹一个窗改一行"的交互。
+// 别名详情抽屉 —— 一个别名的全貌 + 编辑入口。
 //
 // 三个设计决定:
 //   1. **编辑单位是整个别名, 不是一行。** 候选池的构成、顺序、占比都是相互关联的,
@@ -11,6 +11,11 @@
 //   3. **priority 从界面消失, 改为拖拽顺序。** priority 在后端只是 SWRR 累加值
 //      打平时的 tie-break(见 router_engine.swrr), 单独摆一个输入框会让人以为它
 //      能排序 —— 它不能。现在拖拽顺序落库为 priority(从 1 开始), 语义单一。
+//
+// 另外两件事在这里就地做, 不再把用户踢到别的页面:
+//   - 候选因分组未公开而失效 → 「公开」按钮直接补 exposed_models。
+//   - 页脚给出该别名窗口内的实测(请求数 / 错误率 / 平均耗时), 和配置占比并排,
+//     并注明两者为什么会偏离。
 import { computed, h, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import {
@@ -30,6 +35,9 @@ import { AddOutline, TrashOutline } from "@vicons/ionicons5";
 import { aliasesApi, type ModelAliasRow } from "@/api/aliases";
 import { copy } from "@/utils/clipboard";
 import { getGroupDisplayName } from "@/utils/display";
+import { parseStringList } from "@/services/aliases";
+import StatePill from "@/components/aliases/StatePill.vue";
+import type { AliasView, CandidateState } from "@/components/aliases/types";
 import type { Group } from "@/types/models";
 
 const props = defineProps<{
@@ -43,8 +51,12 @@ const props = defineProps<{
   groupNameById: Record<number, string>;
   /** 分组 id -> 该分组下可选的真实模型(与"模型"页口径一致)。 */
   modelsByGroup: Record<number, string[]>;
-  /** `${group_id}::${real_model}` -> 24h 实际调用数。 */
+  /** `${group_id}::${请求名}` -> 24h 实际调用数。别名路由下请求名 = 别名本身。 */
   traffic: Record<string, number>;
+  /** traffic 是否可用; false 时隐藏实测相关列 —— 一排 0 会被读成"没人用"。 */
+  showMeasured: boolean;
+  /** 本别名在窗口内的整体指标, 用于页脚摘要。 */
+  summary?: AliasView | null;
   /** auto 的三个档位按名字寻址, 不允许改名。 */
   isReserved?: boolean;
 }>();
@@ -52,6 +64,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: "update:show", v: boolean): void;
   (e: "saved"): void;
+  (e: "exposed"): void;
 }>();
 
 const { t } = useI18n();
@@ -128,9 +141,27 @@ const configuredTotal = computed(() => draft.value.reduce((s, c) => s + Math.max
 
 // === 实际分流(24h) ===
 function callsOf(c: DraftCandidate): number {
-  return props.traffic[`${c.groupId}::${c.realModel}`] || 0;
+  // 按 (分组, 别名) 归因: 日志的 model 列存的是**请求名**, 别名请求下就是别名本身,
+  // 不是 real_model —— 用 real_model 查永远命中不了(这正是之前"实测占比恒为 0"的根因)。
+  // 同一分组在本别名下有多条候选时, 日志分不开, 只能给分组级合计, 用
+  // sharedGroupNote 如实标注, 不假装是模型级数字。
+  return props.traffic[`${c.groupId}::${props.alias}`] || 0;
 }
-const actualTotal = computed(() => draft.value.reduce((s, c) => s + callsOf(c), 0));
+const sharedGroupNote = computed(() => {
+  const hits: Record<number, number> = {};
+  for (const c of draft.value) {
+    hits[c.groupId] = (hits[c.groupId] || 0) + 1;
+  }
+  return Object.values(hits).some(n => n > 1);
+});
+const actualTotal = computed(() => {
+  // 按分组去重求和: callsOf 是分组级合计, 同组两条候选各加一次会翻倍。
+  const perGroup = new Map<number, number>();
+  for (const c of draft.value) {
+    perGroup.set(c.groupId, callsOf(c));
+  }
+  return Array.from(perGroup.values()).reduce((s, n) => s + n, 0);
+});
 function actualPct(c: DraftCandidate): number {
   return actualTotal.value > 0 ? Math.round((callsOf(c) / actualTotal.value) * 100) : 0;
 }
@@ -138,6 +169,59 @@ function configuredPct(c: DraftCandidate): number {
   return configuredTotal.value > 0
     ? Math.round((Math.max(c.weight, 0) / configuredTotal.value) * 100)
     : 0;
+}
+
+// === 候选状态 + 就地修复 ===
+function stateOf(c: DraftCandidate): CandidateState {
+  // 与 services/aliases.ts 的 candidateState 同一套判定, 但作用在草稿行上
+  // (草稿可能还没入库, 没有 ModelAliasRow 可用)。
+  if (!c.enabled) {
+    return "disabled";
+  }
+  const g = props.groups.find(x => x.id === c.groupId);
+  if (!g) {
+    return "usable";
+  }
+  if (parseStringList(g.blocked_models).includes(c.realModel)) {
+    return "blocked";
+  }
+  if (
+    g.model_routing_mode === "specified" &&
+    !parseStringList(g.exposed_models).includes(c.realModel)
+  ) {
+    return "unexposed";
+  }
+  return "usable";
+}
+
+const exposing = ref<Record<string, boolean>>({});
+
+async function exposeCandidate(c: DraftCandidate): Promise<void> {
+  const key = `${c.groupId}:${c.realModel}`;
+  exposing.value = { ...exposing.value, [key]: true };
+  try {
+    const res = await aliasesApi.exposeModel(props.alias, c.groupId, c.realModel);
+    const status = (res as unknown as { data: { status: string } }).data.status;
+    message.success(
+      status === "not_needed"
+        ? t("aliases.drawer.exposeNotNeeded", { model: c.realModel })
+        : status === "already_ok"
+          ? t("aliases.drawer.exposeAlreadyOk", { model: c.realModel })
+          : t("aliases.drawer.exposeDone", { model: c.realModel })
+    );
+    // 暴露状态来自 group.exposed_models, 只有重拉分组才能刷新徽标。
+    emit("exposed");
+  } catch (e) {
+    message.error(
+      e instanceof Error && e.message.includes("blocked")
+        ? t("aliases.drawer.exposeBlocked")
+        : t("common.requestFailed")
+    );
+  } finally {
+    const next = { ...exposing.value };
+    delete next[key];
+    exposing.value = next;
+  }
 }
 
 // === 拖拽排序 ===
@@ -356,8 +440,9 @@ async function copyAliasName(): Promise<void> {
       <div class="aed">
         <div class="aed__meta">
           <span>{{ t("aliases.edit.candidateCount", { n: draft.length }) }}</span>
-          <span v-if="actualTotal > 0" class="aed__meta-sep">
+          <span v-if="showMeasured && actualTotal > 0" class="aed__meta-sep">
             · {{ t("aliases.edit.actual24h", { n: actualTotal }) }}
+            <template v-if="sharedGroupNote">· {{ t("aliases.drawer.actualGroupLevel") }}</template>
           </span>
         </div>
 
@@ -396,16 +481,28 @@ async function copyAliasName(): Promise<void> {
               <span class="aed__model">{{ c.realModel }}</span>
               <span class="aed__group">
                 {{ groupNameById[c.groupId] || c.groupId }}
-                <template v-if="callsOf(c) > 0">
+                <template v-if="showMeasured && callsOf(c) > 0">
                   · {{ t("aliases.edit.actualCalls", { n: callsOf(c) }) }}
                 </template>
+              </span>
+              <span v-if="stateOf(c) !== 'usable'" class="aed__flags">
+                <StatePill :state="stateOf(c)" />
+                <button
+                  v-if="stateOf(c) === 'unexposed'"
+                  class="aed__expose"
+                  :disabled="exposing[`${c.groupId}:${c.realModel}`]"
+                  :title="t('aliases.drawer.exposeTip')"
+                  @click.stop="exposeCandidate(c)"
+                >
+                  {{ t("aliases.drawer.expose") }}
+                </button>
               </span>
             </span>
 
             <span class="aed__share">
               <span class="aed__share-num">{{ configuredPct(c) }}%</span>
               <span
-                v-if="actualTotal > 0"
+                v-if="showMeasured && actualTotal > 0"
                 class="aed__share-actual"
                 :title="t('aliases.edit.actualShareTip')"
               >
@@ -463,6 +560,30 @@ async function copyAliasName(): Promise<void> {
             <template #icon><AddOutline /></template>
             {{ t("aliases.edit.add") }}
           </NButton>
+        </div>
+
+        <!-- 窗口实测摘要: 与上面的"配置占比"并排, 是为了让偏离可见 ——
+             不解释的话, 用户会以为配置的 70% 就该拿到 70% 流量。 -->
+        <div v-if="summary && showMeasured && summary.calls" class="aed__summary">
+          <span class="aed__summary-k">{{ t("aliases.drawer.window") }}</span>
+          <span class="aed__mono">{{ summary.calls.toLocaleString() }}</span>
+          <span class="aed__dim">·</span>
+          <span class="aed__summary-k">{{ t("aliases.drawer.errRate") }}</span>
+          <span class="aed__mono">{{ summary.errorRate.toFixed(1) }}%</span>
+          <span class="aed__dim">·</span>
+          <span class="aed__summary-k">{{ t("aliases.drawer.avgMs") }}</span>
+          <span class="aed__mono">{{ summary.avgMs }}ms</span>
+          <template v-if="summary.costUsd > 0">
+            <span class="aed__dim">·</span>
+            <span class="aed__summary-k">{{ t("aliases.drawer.cost") }}</span>
+            <span class="aed__mono">${{ summary.costUsd.toFixed(4) }}</span>
+          </template>
+          <NTooltip trigger="hover">
+            <template #trigger>
+              <span class="aed__why">ⓘ</span>
+            </template>
+            {{ t("aliases.drawer.shareDivergedTip") }}
+          </NTooltip>
         </div>
       </div>
 
@@ -607,6 +728,30 @@ async function copyAliasName(): Promise<void> {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* 失效原因徽标 + 就地修复按钮 —— 放在模型/分组下面, 不再靠压暗整行表达。 */
+.aed__flags {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 2px;
+}
+.aed__expose {
+  font: 600 9.5px var(--v3-mono);
+  border: 1px solid var(--v3-accent);
+  border-radius: 3px;
+  background: transparent;
+  color: var(--v3-accent);
+  padding: 1px 5px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.aed__expose:hover:not(:disabled) {
+  background: oklch(from var(--v3-accent) l c h / 0.12);
+}
+.aed__expose:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
 .aed__share {
   display: flex;
   flex-direction: column;
@@ -648,6 +793,39 @@ async function copyAliasName(): Promise<void> {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+}
+/* 窗口实测摘要 —— 配置占比 vs 实测占比为什么会不一样, 一句话讲清楚。 */
+.aed__summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding: 6px 8px;
+  border: 1px solid var(--v3-line);
+  border-radius: 5px;
+  background: var(--v3-surface-2);
+  font: 500 10.5px var(--v3-sans);
+  color: var(--v3-ink-2);
+}
+.aed__summary-k {
+  color: var(--v3-ink-4);
+  font: 500 9.5px var(--v3-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.aed__mono {
+  font: 600 10.5px var(--v3-mono);
+}
+.aed__dim {
+  color: var(--v3-ink-4);
+}
+.aed__why {
+  cursor: help;
+  color: var(--v3-ink-4);
+  font-size: 11px;
+}
+.aed__why:hover {
+  color: var(--v3-accent);
 }
 .aed__footer-actions {
   display: flex;
