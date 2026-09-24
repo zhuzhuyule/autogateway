@@ -170,6 +170,11 @@ func registerProtectedAPIRoutes(
 		aliases.GET("/suggestions/registry/:id", aliasSuggestionHandler.SuggestFromRegistry)
 		aliases.GET("/:alias", aliasHandler.GetByAlias)
 		aliases.POST("", aliasHandler.Create)
+		// 整体替换候选集合(编辑抽屉的"保存")。静态段 "candidates" 与参数段 ":id"
+		// 同级, gin 1.10 允许静态优先, 不会冲突。
+		aliases.PUT("/candidates", aliasHandler.ReplaceCandidates)
+		// 整体改别名名。同 /candidates: 静态段避开与 PUT /:id 的参数名冲突。
+		aliases.PUT("/rename", aliasHandler.RenameAlias)
 		aliases.PUT("/:id", aliasHandler.Update)
 		aliases.DELETE("/:id", aliasHandler.Delete)
 	}
@@ -250,6 +255,8 @@ func registerProtectedAPIRoutes(
 		dashboard.GET("/encryption-status", serverHandler.EncryptionStatus)
 		dashboard.GET("/top-models", serverHandler.TopModels)
 		dashboard.GET("/model-timings", serverHandler.ModelTimings)
+		// 按 (group_name, model) 的实际调用数 —— 别名页用它显示"配置占比 vs 实际占比"。
+		dashboard.GET("/model-traffic", serverHandler.ModelTraffic)
 		dashboard.GET("/usage-summary", serverHandler.UsageSummary)
 		dashboard.GET("/usage-rollup", serverHandler.UsageRollup)
 	}

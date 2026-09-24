@@ -392,6 +392,42 @@ func (s *Server) ModelTimings(c *gin.Context) {
 	response.Success(c, out)
 }
 
+// ModelTrafficRow 是 /api/dashboard/model-traffic 的一行: 某个分组下某个模型在
+// 窗口内的实际调用次数。
+type ModelTrafficRow struct {
+	GroupName string `json:"group_name"`
+	Model     string `json:"model"`
+	Calls     int64  `json:"calls"`
+}
+
+// ModelTraffic 返回窗口内按 (group_name, model) 分组的调用次数。
+//
+// 与 ModelTimings 的区别: ModelTimings 只按 model 聚合, 而同一个 real_model 常常
+// 同时挂在多个分组下 —— 别名页要回答"这条候选实际分到了多少流量", 必须带分组
+// 维度; 否则同名候选拿到的是同一个合计值, 反而看不出差异。
+//
+// GET /api/dashboard/model-traffic?window=24h
+//   - window: 1h | 6h | 24h | 7d (default 24h)
+func (s *Server) ModelTraffic(c *gin.Context) {
+	since := time.Now().Add(-dashboardLookback(c.DefaultQuery("window", "24h")))
+
+	var rows []ModelTrafficRow
+	err := s.DB.Model(&models.RequestLog{}).
+		Select("group_name, model, COUNT(*) as calls").
+		Where("timestamp >= ? AND request_type = ? AND model IS NOT NULL AND model != '' "+
+			"AND group_name IS NOT NULL AND group_name != ''", since, models.RequestTypeFinal).
+		Group("group_name, model").
+		Scan(&rows).Error
+	if err != nil {
+		response.ErrorI18nFromAPIError(c, app_errors.ErrDatabase, "database.cannot_get_top_models")
+		return
+	}
+	if rows == nil {
+		rows = []ModelTrafficRow{}
+	}
+	response.Success(c, rows)
+}
+
 // UsageSummaryResponse 是 /api/dashboard/usage-summary 的响应。
 type UsageSummaryResponse struct {
 	PromptTokens     int64   `json:"prompt_tokens"`

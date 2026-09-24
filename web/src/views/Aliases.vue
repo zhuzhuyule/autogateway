@@ -1,36 +1,19 @@
 <script setup lang="ts">
+// 别名页只有一个视图。
+//
+// 之前是 manage / quick 两个并列 tab —— 但它们是**同一个对象的两套心智模型**:
+// 都建别名, 却走两套不同的 API, 用户得先判断"我该去哪个 tab"。现在 quick 的
+// 家族整理收进主视图的"按家族整理"弹窗, 页面只剩一条路径。
+//
+// 兼容老链接: ?tab=quick 仍然有效 —— 落到主视图并直接打开家族弹窗。
 import { computed } from "vue";
-import { NTabs, NTabPane } from "naive-ui";
-import { useRoute, useRouter } from "vue-router";
-import { useI18n } from "vue-i18n";
+import { useRoute } from "vue-router";
 import AliasManageTab from "@/components/aliases/AliasManageTab.vue";
-import AliasQuickSetupTab from "@/components/aliases/AliasQuickSetupTab.vue";
 
-const { t } = useI18n();
 const route = useRoute();
-const router = useRouter();
-
-const VALID_TABS = ["manage", "quick"] as const;
-type TabKey = (typeof VALID_TABS)[number];
-
-const activeTab = computed<TabKey>({
-  get() {
-    const raw = (route.query.tab as string) || "manage";
-    return (VALID_TABS as readonly string[]).includes(raw) ? (raw as TabKey) : "manage";
-  },
-  set(val) {
-    router.replace({ query: { ...route.query, tab: val } });
-  },
-});
+const openFamily = computed(() => route.query.tab === "quick");
 </script>
 
 <template>
-  <NTabs v-model:value="activeTab" type="line" animated>
-    <NTabPane name="manage" :tab="t('aliases.tabManage')">
-      <AliasManageTab />
-    </NTabPane>
-    <NTabPane name="quick" :tab="t('aliases.tabQuick')">
-      <AliasQuickSetupTab />
-    </NTabPane>
-  </NTabs>
+  <AliasManageTab :initial-family-open="openFamily" />
 </template>

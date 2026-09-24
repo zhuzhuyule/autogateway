@@ -108,3 +108,23 @@ export const getModelTimings = (window: "1h" | "6h" | "24h" | "7d" = "24h") => {
     params: { window },
   });
 };
+
+/** 一条 (分组, 模型) 的实际调用数。 */
+export interface ModelTrafficRow {
+  group_name: string;
+  model: string;
+  calls: number;
+}
+
+/**
+ * 获取窗口内按 (分组, 模型) 分组的调用次数。
+ *
+ * 与 getModelTimings 的区别: 后者只按 model 聚合。同一个 real_model 常常同时挂在
+ * 多个分组下, 别名页要判断"这条候选实际分到了多少流量"必须带分组维度, 否则同名
+ * 候选拿到的是同一个合计值, 反而看不出差异。
+ */
+export const getModelTraffic = (window: "1h" | "6h" | "24h" | "7d" = "24h") => {
+  return http.get<ModelTrafficRow[]>("/dashboard/model-traffic", {
+    params: { window },
+  });
+};

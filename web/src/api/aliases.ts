@@ -24,10 +24,26 @@ export interface AliasCreatePayload {
 }
 
 export interface AliasUpdatePayload {
+  /** 改候选的目标分组 —— 后端允许了（唯一索引会挡住改成重复组合）。 */
+  group_id?: number;
   real_model?: string;
   weight?: number;
   priority?: number;
   enabled?: boolean;
+}
+
+/**
+ * 一条候选，用于整体替换。
+ *
+ * `priority` 现在**不由用户直接编辑** —— 它承载"拖拽顺序"(从 1 开始)，
+ * 顺序即 SWRR 打平时的先后偏好。
+ */
+export interface AliasCandidatePayload {
+  group_id: number;
+  real_model: string;
+  weight: number;
+  priority: number;
+  enabled: boolean;
 }
 
 export interface RoutingSettings {
@@ -79,6 +95,20 @@ export const aliasesApi = {
   update: (id: number, payload: AliasUpdatePayload) =>
     http.put<ModelAliasRow>(`/aliases/${id}`, payload),
   remove: (id: number) => http.delete(`/aliases/${id}`),
+  /**
+   * 整体替换某个别名的候选集合 —— 编辑抽屉的"保存"。
+   *
+   * 别名放在 body 里而不是路径上: `/aliases/{alias}/candidates` 会和已有的
+   * `PUT /aliases/:id` 在路由树同一层出现两个不同名的参数段, gin 直接 panic。
+   */
+  replaceCandidates: (alias: string, candidates: AliasCandidatePayload[]) =>
+    http.put<ModelAliasRow[]>("/aliases/candidates", { alias, candidates }),
+  /**
+   * 整体改别名名。后端会拒绝: 改保留别名 / 改成保留名 / 目标名已存在。
+   * 同样走 body 而不是路径(避开 gin 的参数名冲突)。
+   */
+  rename: (from: string, to: string) =>
+    http.put<{ renamed: number }>("/aliases/rename", { from, to }),
   suggestions: () => http.get<AliasSuggestion[]>("/aliases/suggestions"),
   // P4.2 registry-driven 建议: 给定 aggregate group id, 返回该聚合下
   // 跨 sub-group 共享同一 family 但还没建 alias 的候选清单.
