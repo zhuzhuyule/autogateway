@@ -870,58 +870,61 @@ export default {
     noSuggestions: "重複削除の提案がありません",
   },
   aliases: {
-    tabManage: "管理",
-    tabQuick: "クイック設定",
     // 旧「クイック設定」タブの入口。メインタブ内のモーダルに移動
     browseFamily: "ファミリーで整理",
-    // ビューモード: 同一データを 4 通りで表示
-    view_cards: "カード",
-    view_table: "テーブル",
-    view_split: "分割",
-    view_health: "ヘルス",
-    table: {
+    // auto ルーティングパネルの状態表示。オフでもルーティングが止まるわけでは
+    // なく、すべての auto リクエストが simple ティアに流れます。
+    auto: {
+      modeThreshold: "コンテキスト長でティア分割",
+      modeSimple: "オフ：すべての auto リクエストが simple ティアに移動",
+    },
+    // エイリアス一覧 — 1 行 = 1 エイリアス。候補はドロワー内。
+    list: {
+      titleMeta: "{aliases} 件のエイリアス · {candidates} 件の候補",
       search: "エイリアス / グループ / モデルを検索",
       filterAll: "すべての状態",
-      filterProblem: "問題のみ",
+      filterProblem: "問題のみ ({n})",
+      filterAuto: "スマートティアのみ",
+      filterAnyGroup: "すべてのグループ",
       showing: "{shown} / {total} 件",
       colAlias: "エイリアス",
-      colGroup: "グループ",
-      colModel: "モデル",
+      colRole: "役割",
+      colCandidates: "候補",
+      colCalls: "24h 呼数",
+      colErrorRate: "エラー率",
+      colAvg: "平均所要時間",
       colState: "状態",
-      colShare: "配分",
-      colCalls: "24h 実績",
       colActions: "操作",
-      empty: "該当する候補がありません。",
-    },
-    split: {
-      search: "検索",
+      roleTier: "スマートルーティング · {tier}",
+      crossTier: "ティア間で共有",
+      copyName: "エイリアスをコピー",
+      addCandidate: "+ 候補",
+      edit: "編集",
       empty: "該当するエイリアスがありません。",
-      pick: "左からエイリアスを選択してください。",
-      reserved: "スマートルーティング",
-      summary: "{usable}/{total} 利用可",
-      addCandidate: "+ 候補を追加",
-      fullEdit: "詳細編集",
-      actual: "実績",
-      latency: "遅延",
+      problemNoCandidates: "候補なし",
+      problemUnexposed: "{n} 件が未公開",
+      problemBlocked: "{n} 件がブロック中",
+      problemDisabled: "{n} 件が無効",
+    },
+    // 詳細ドロワー — エイリアス全体を編集。フッターにウィンドウ内実績。
+    drawer: {
+      window: "24h 呼数",
+      errRate: "エラー率",
+      avgMs: "平均所要時間",
       cost: "コスト",
+      expose: "公開",
+      exposeTip:
+        "グループは specified モードですが、このモデルは公開されていません — クリックすると exposed_models に追加します。",
+      exposeDone: "{model} をグループの公開モデルに追加しました",
+      exposeAlreadyOk: "{model} はすでに公開されています",
+      exposeNotNeeded: "{model} のグループは specified モードではないため、公開は不要です",
+      exposeBlocked: "{model} はグループのブロックリストにあります — 先に解除してください",
+      actualGroupLevel:
+        "実績は「グループ + リクエスト名」で集計するため、同一グループ内の複数候補はそれ以上に分割できません",
+      shareDivergedTip:
+        "設定上の配分は SWRR の相対重みだけ。実際の配信は可用性・クールダウン・動的優先度も通るため、24h の実績と食い違うのは正常です。",
     },
-    health: {
-      statAliases: "エイリアス",
-      statCandidates: "候補",
-      statUsable: "利用可",
-      statUnusable: "利用不可",
-      allGood: "{n} 件のエイリアスはすべて正常です。",
-      emptyTitle: "候補のないエイリアス",
-      healthyTitle: "すべて正常",
-      enable: "有効化",
-      open: "開く",
-      hint_unexposed:
-        "グループは specified モードですが、このモデルは公開されていません - ルーティングでスキップされます。",
-      hint_blocked: "このモデルはグループのブロックリストにあり、モードに関係なく拒否されます。",
-      hint_disabled: "候補は手動で無効化されており、ルーティングされません。",
-      hint_empty: "候補が 1 件もないため、呼び出すと 404 になります。",
-    },
-    // 編集ドロワー (AliasEditDrawer.vue)
+    // 編集ドロワー (AliasDetailDrawer.vue)
     edit: {
       title: "エイリアスを編集",
       candidateCount: "{n} 件の候補",
@@ -967,7 +970,6 @@ export default {
       createButton: "別名を作成: {family}",
       appendButton: "{n} 件を {alias} に追加",
       nameRequired: "別名を入力してください",
-      selectAtLeastOne: "1 件以上選択してください",
       createdN: "{n} 件追加しました",
       loadFailed: "候補モデルの読み込みに失敗",
       aliasChipPrefix: "所属",
@@ -1515,25 +1517,6 @@ export default {
     alEmpty: "別名がまだありません",
     alEmptySub:
       "別名を作成して、複数の (グループ, モデル) を 1 つの分かりやすい名前にまとめましょう",
-    testJustNow: "たった今",
-    testMinAgo: "{n} 分前",
-    testHourAgo: "{n} 時間前",
-    bulkTestBtn: "一括テスト ({n})",
-    bulkTestRunning: "テスト中…",
-    bulkTestTip: "同時実行 3, 実行中の項目はスキップ",
-    testModalityAuto: "自動判別",
-    testViaModality: "{mode} にて",
-    testModalityChat: "テキスト Chat",
-    testModalityImage: "画像生成",
-    testModalityVision: "画像入力",
-    testModalityTts: "音声合成 TTS",
-    testModalityAsr: "音声認識 ASR",
-    testModalityTip:
-      "テスト形態: 自動判別はモデル能力(画像生成/画像入力/テキスト)に応じた探活リクエストを作成、手動で一種に固定も可能",
-    bulkTestStart: "{n} 件のモデルをテスト開始",
-    bulkTestDoneOk: "{n} 件のモデルがすべて成功",
-    bulkTestDoneMixed: "{ok} 成功 · {fail} 失敗",
-    allModelsTitle: "すべてのモデル",
   },
   // ---- 機能ドメイン namespace (新規約) ----
   // v3.* / v5.* は UI バージョン更新の遺産. 新規 key はトピック単位で分ける.
