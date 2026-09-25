@@ -172,3 +172,45 @@ func TestExposeCandidate_RejectsAggregateGroup(t *testing.T) {
 		t.Fatal("expected an error for an aggregate group")
 	}
 }
+
+// ReplaceCandidates 的插入分支必须尊重 enabled=false。
+// gorm 对带 `default:true` tag 的字段会在零值时跳过该列(让 DB 默认值生效),
+// 所以"删掉候选 → 撤销写回"或"新建一条停用候选"都会把停用状态悄悄变成启用,
+// 流量立刻打到用户明确关掉的模型上。
+func TestReplaceCandidates_PreservesDisabledFlag(t *testing.T) {
+	ctx := context.Background()
+	gormDB := newTestDB(t)
+	svc := NewAliasService(gormDB)
+	g := createGroup(t, gormDB, &models.Group{Name: "openai-main"})
+	off := false
+
+	candidates := []AliasCandidateInput{
+		{GroupID: g.ID, RealModel: "gpt-4o", Weight: 10, Priority: 1, Enabled: &off},
+		{GroupID: g.ID, RealModel: "gpt-4o-mini", Weight: 5, Priority: 2},
+	}
+	rows, err := svc.ReplaceCandidates(ctx, "keep-off", candidates)
+	if err != nil {
+		t.Fatalf("replace: %v", err)
+	}
+	byModel := map[string]models.ModelAlias{}
+	for _, r := range rows {
+		byModel[r.RealModel] = r
+	}
+	if got := byModel["gpt-4o"].Enabled; got {
+		t.Fatalf("disabled candidate came back enabled=true")
+	}
+	if got := byModel["gpt-4o-mini"].Enabled; !got {
+		t.Fatalf("candidate without explicit enabled should default to true, got false")
+	}
+
+	// Create (POST /aliases) 走同一个插入路径, 一起守住。
+	created, err := svc.Create(ctx, AliasCreateRequest{
+		Alias: "keep-off", GroupID: g.ID, RealModel: "claude-sonnet-4", Enabled: &off,
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if created.Enabled {
+		t.Fatalf("Create with enabled=false produced an enabled row")
+	}
+}

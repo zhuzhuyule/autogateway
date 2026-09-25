@@ -204,12 +204,17 @@ type ModelAlias struct {
 	// 软删的墓碑行不该继续占住这个三元组, 否则"删掉候选 → 再加回同一个模型"
 	// 会一路 400(别名抽屉的撤销按钮就是这么死的)。tag 上留 uniqueIndex 的话
 	// AutoMigrate 每次启动都把非部分索引重建回来, 所以这里只留普通索引。
-	Alias      string         `gorm:"type:varchar(255);not null;index:idx_alias_enabled" json:"alias"`
-	GroupID    uint           `gorm:"not null;index" json:"group_id"`
-	RealModel  string         `gorm:"type:varchar(255);not null" json:"real_model"`
-	Weight     int            `gorm:"not null;default:1" json:"weight"`
-	Priority   int            `gorm:"not null;default:100" json:"priority"`
-	Enabled    bool           `gorm:"not null;default:true;index:idx_alias_enabled" json:"enabled"`
+	Alias     string `gorm:"type:varchar(255);not null;index:idx_alias_enabled" json:"alias"`
+	GroupID   uint   `gorm:"not null;index" json:"group_id"`
+	RealModel string `gorm:"type:varchar(255);not null" json:"real_model"`
+	Weight    int    `gorm:"not null;default:1" json:"weight"`
+	Priority  int    `gorm:"not null;default:100" json:"priority"`
+	// 没有 `default:true` 是故意的:gorm 插入时会把**零值字段**当成"未设置"、干脆不写
+	// 这一列而让 DB 默认值顶上来(见 gorm callbacks/create.go 的 HasDefaultValue 分支,
+	// Select 也救不回来)。enabled=false 是完全合法的值(用户拉黑某条候选),给它配
+	// 默认值等于让"停用"在 删除+撤销 / slave 同步 / 备份导入 三条链路上静默变成启用。
+	// 所有写入路径都显式赋值,这里无需 DB 默认值兜底。
+	Enabled    bool           `gorm:"not null;index:idx_alias_enabled" json:"enabled"`
 	IsReserved bool           `gorm:"not null;default:false" json:"is_reserved"`
 	CreatedAt  time.Time      `json:"created_at"`
 	UpdatedAt  time.Time      `json:"updated_at"`
