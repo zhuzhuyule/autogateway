@@ -921,6 +921,8 @@ export default {
       exposeBlocked: "{model} はグループのブロックリストにあります — 先に解除してください",
       actualGroupLevel:
         "実績は「グループ + リクエスト名」で集計するため、同一グループ内の複数候補はそれ以上に分割できません",
+      actualByGroup: "24h 実績 · グループ別",
+      actualNCandidates: "{n} 候補で共用",
       shareDivergedTip:
         "設定上の配分は SWRR の相対重みだけ。実際の配信は可用性・クールダウン・動的優先度も通るため、24h の実績と食い違うのは正常です。",
     },
@@ -929,9 +931,6 @@ export default {
       title: "エイリアスを編集",
       candidateCount: "{n} 件の候補",
       actual24h: "24h {n} 回",
-      actualCalls: "{n} 回",
-      actualShort: "実績 {n}%",
-      actualShareTip: "直近 24h でこの候補が実際に受けた呼び出しの割合（グループ+モデル単位）",
       dragHint: "ドラッグで並べ替え",
       moveUp: "上へ",
       moveDown: "下へ",

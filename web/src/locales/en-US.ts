@@ -925,6 +925,8 @@ export default {
       exposeBlocked: "{model} is on the group's blocklist - unblock it first",
       actualGroupLevel:
         "Actual traffic is attributed by (group, requested name), so multiple candidates in one group cannot be split further",
+      actualByGroup: "24h actual · by group",
+      actualNCandidates: "shared by {n} candidates",
       shareDivergedTip:
         "Configured share is only SWRR's relative weight; real traffic also passes availability, cooldown and dynamic priority, so divergence from the 24h actual is normal.",
     },
@@ -933,10 +935,6 @@ export default {
       title: "Edit alias",
       candidateCount: "{n} candidates",
       actual24h: "{n} calls in 24h",
-      actualCalls: "{n} calls",
-      actualShort: "{n}% actual",
-      actualShareTip:
-        "Share of calls this candidate actually received in the last 24h (counted per group + model)",
       dragHint: "Drag to reorder",
       moveUp: "Move up",
       moveDown: "Move down",

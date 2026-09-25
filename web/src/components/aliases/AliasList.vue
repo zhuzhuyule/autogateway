@@ -252,9 +252,17 @@ function fmtMs(ms: number): string {
             </td>
             <td v-if="showMeasured" class="alz__num alz__mono">{{ fmtMs(a.avgMs) }}</td>
             <td>
-              <StatePill v-if="a.problem" :state="STATE_PILL_FOR[a.problem]" />
-              <span v-else class="alz__ok">●</span>
-              <div v-if="problemLabel(a)" class="alz__problem">{{ problemLabel(a) }}</div>
+              <!-- 一个圆点 + 一句具体原因。之前是 StatePill(带"已停用/未暴露"字样)
+                   再叠一行问题文案, 两行说的是同一件事, 而且"已停用"会让人以为
+                   别名被关了 —— 其实它是"一个候选都没有"。 -->
+              <div class="alz__state">
+                <StatePill
+                  variant="dot"
+                  :state="a.problem ? STATE_PILL_FOR[a.problem] : 'usable'"
+                />
+                <span v-if="problemLabel(a)" class="alz__problem">{{ problemLabel(a) }}</span>
+                <span v-else class="alz__dim">{{ t("v3.aliasStateUsable") }}</span>
+              </div>
               <div v-if="a.crossTier" class="alz__dim alz__tiny">
                 {{ t("aliases.list.crossTier") }}
               </div>
@@ -389,9 +397,11 @@ function fmtMs(ms: number): string {
 .alz__bad {
   color: var(--v3-danger);
 }
-.alz__ok {
-  color: var(--v3-ok);
-  font-size: 9px;
+.alz__state {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
 }
 .alz__tier {
   font: 600 9.5px var(--v3-mono);
@@ -418,7 +428,6 @@ function fmtMs(ms: number): string {
 .alz__problem {
   font: 400 9.5px var(--v3-sans);
   color: oklch(0.5 0.12 65);
-  margin-top: 2px;
   white-space: nowrap;
 }
 .alz__acts {

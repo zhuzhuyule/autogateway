@@ -140,35 +140,37 @@ const dirty = computed(
 const configuredTotal = computed(() => draft.value.reduce((s, c) => s + Math.max(c.weight, 0), 0));
 
 // === 实际分流(24h) ===
-function callsOf(c: DraftCandidate): number {
-  // 按 (分组, 别名) 归因: 日志的 model 列存的是**请求名**, 别名请求下就是别名本身,
-  // 不是 real_model —— 用 real_model 查永远命中不了(这正是之前"实测占比恒为 0"的根因)。
-  // 同一分组在本别名下有多条候选时, 日志分不开, 只能给分组级合计, 用
-  // sharedGroupNote 如实标注, 不假装是模型级数字。
-  return props.traffic[`${c.groupId}::${props.alias}`] || 0;
-}
-const sharedGroupNote = computed(() => {
-  const hits: Record<number, number> = {};
-  for (const c of draft.value) {
-    hits[c.groupId] = (hits[c.groupId] || 0) + 1;
-  }
-  return Object.values(hits).some(n => n > 1);
-});
-const actualTotal = computed(() => {
-  // 按分组去重求和: callsOf 是分组级合计, 同组两条候选各加一次会翻倍。
+const actualTotal = computed(() => actualByGroup.value.reduce((s, g) => s + g.calls, 0));
+/**
+ * 24h 实测按**分组**展开, 一条候选都不单列。归因键是 (分组, 请求名): 日志的 model
+ * 列存的是**请求名**, 别名请求下就是别名本身而不是 real_model —— 用 real_model 查
+ * 永远命中不了, 这正是之前"实测占比恒为 0"的根因。而同一分组下的多条候选分不开,
+ * 所以宁可只说到分组: 之前每行挂一个「实际 50%」, 四行一模一样, 等于把分组级
+ * 数字冒充成了候选级。
+ */
+const actualByGroup = computed(() => {
   const perGroup = new Map<number, number>();
   for (const c of draft.value) {
-    perGroup.set(c.groupId, callsOf(c));
+    perGroup.set(c.groupId, props.traffic[`${c.groupId}::${props.alias}`] || 0);
   }
-  return Array.from(perGroup.values()).reduce((s, n) => s + n, 0);
+  const rows = Array.from(perGroup.entries())
+    .filter(([, n]) => n > 0)
+    .map(([gid, n]) => ({
+      groupId: gid,
+      name: props.groupNameById[gid] || String(gid),
+      calls: n,
+      candidates: draft.value.filter(c => c.groupId === gid).length,
+    }));
+  const total = rows.reduce((s, r) => s + r.calls, 0);
+  return rows.map(r => ({ ...r, pct: total > 0 ? Math.round((r.calls / total) * 100) : 0 }));
 });
-function actualPct(c: DraftCandidate): number {
-  return actualTotal.value > 0 ? Math.round((callsOf(c) / actualTotal.value) * 100) : 0;
-}
 function configuredPct(c: DraftCandidate): number {
   return configuredTotal.value > 0
     ? Math.round((Math.max(c.weight, 0) / configuredTotal.value) * 100)
     : 0;
+}
+function fmtMs(ms: number): string {
+  return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${Math.round(ms)}ms`;
 }
 
 // === 候选状态 + 就地修复 ===
@@ -442,7 +444,6 @@ async function copyAliasName(): Promise<void> {
           <span>{{ t("aliases.edit.candidateCount", { n: draft.length }) }}</span>
           <span v-if="showMeasured && actualTotal > 0" class="aed__meta-sep">
             · {{ t("aliases.edit.actual24h", { n: actualTotal }) }}
-            <template v-if="sharedGroupNote">· {{ t("aliases.drawer.actualGroupLevel") }}</template>
           </span>
         </div>
 
@@ -479,12 +480,7 @@ async function copyAliasName(): Promise<void> {
             </span>
             <span class="aed__text">
               <span class="aed__model">{{ c.realModel }}</span>
-              <span class="aed__group">
-                {{ groupNameById[c.groupId] || c.groupId }}
-                <template v-if="showMeasured && callsOf(c) > 0">
-                  · {{ t("aliases.edit.actualCalls", { n: callsOf(c) }) }}
-                </template>
-              </span>
+              <span class="aed__group">{{ groupNameById[c.groupId] || c.groupId }}</span>
               <span v-if="stateOf(c) !== 'usable'" class="aed__flags">
                 <StatePill :state="stateOf(c)" />
                 <button
@@ -501,13 +497,6 @@ async function copyAliasName(): Promise<void> {
 
             <span class="aed__share">
               <span class="aed__share-num">{{ configuredPct(c) }}%</span>
-              <span
-                v-if="showMeasured && actualTotal > 0"
-                class="aed__share-actual"
-                :title="t('aliases.edit.actualShareTip')"
-              >
-                {{ t("aliases.edit.actualShort", { n: actualPct(c) }) }}
-              </span>
             </span>
 
             <NInputNumber
@@ -562,6 +551,21 @@ async function copyAliasName(): Promise<void> {
           </NButton>
         </div>
 
+        <!-- 实测分流按分组说话: 日志的归因粒度就是 (分组, 请求名), 同分组内的
+             多条候选分不开 —— 宁可少说一层, 也不给每行编一个一模一样的"50%"。 -->
+        <div v-if="showMeasured && actualByGroup.length" class="aed__actual">
+          <div class="aed__actual-k">{{ t("aliases.drawer.actualByGroup") }}</div>
+          <div v-for="g in actualByGroup" :key="g.groupId" class="aed__actual-row">
+            <span class="aed__actual-name">{{ g.name }}</span>
+            <span class="aed__mono">{{ g.calls }}</span>
+            <span class="aed__mono aed__dim">{{ g.pct }}%</span>
+            <span v-if="g.candidates > 1" class="aed__dim">
+              {{ t("aliases.drawer.actualNCandidates", { n: g.candidates }) }}
+            </span>
+          </div>
+          <div class="aed__dim aed__actual-note">{{ t("aliases.drawer.actualGroupLevel") }}</div>
+        </div>
+
         <!-- 窗口实测摘要: 与上面的"配置占比"并排, 是为了让偏离可见 ——
              不解释的话, 用户会以为配置的 70% 就该拿到 70% 流量。 -->
         <div v-if="summary && showMeasured && summary.calls" class="aed__summary">
@@ -572,7 +576,7 @@ async function copyAliasName(): Promise<void> {
           <span class="aed__mono">{{ summary.errorRate.toFixed(1) }}%</span>
           <span class="aed__dim">·</span>
           <span class="aed__summary-k">{{ t("aliases.drawer.avgMs") }}</span>
-          <span class="aed__mono">{{ summary.avgMs }}ms</span>
+          <span class="aed__mono">{{ fmtMs(summary.avgMs) }}</span>
           <template v-if="summary.costUsd > 0">
             <span class="aed__dim">·</span>
             <span class="aed__summary-k">{{ t("aliases.drawer.cost") }}</span>
@@ -762,10 +766,38 @@ async function copyAliasName(): Promise<void> {
   font: 600 11px var(--v3-mono);
   color: var(--v3-ink-2);
 }
-.aed__share-actual {
-  font: 400 9.5px var(--v3-mono);
-  color: var(--v3-ink-4);
+.aed__actual {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 8px;
+  border: 1px solid var(--v3-line);
+  border-radius: 6px;
+  background: var(--v3-surface-2);
+}
+.aed__actual-k {
+  font: 600 9.5px var(--v3-mono);
+  color: var(--v3-ink-3);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.aed__actual-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font: 400 10.5px var(--v3-mono);
+}
+.aed__actual-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
+  color: var(--v3-ink-2);
+}
+.aed__actual-note {
+  font: 400 9.5px var(--v3-sans);
+  margin-top: 2px;
 }
 .aed__weight {
   width: 72px;

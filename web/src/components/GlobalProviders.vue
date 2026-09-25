@@ -8,6 +8,7 @@ import {
   NDialogProvider,
   NLoadingBarProvider,
   NMessageProvider,
+  NNotificationProvider,
   useLoadingBar,
   useMessage,
   type GlobalTheme,
@@ -366,9 +367,14 @@ const Message = defineComponent({
     <n-loading-bar-provider>
       <n-message-provider placement="top-right">
         <n-dialog-provider>
-          <slot />
-          <loading-bar />
-          <message />
+          <!-- 别名抽屉的"删除后可撤销"用的是 notification(带 action 按钮),
+               少了这一层 provider 的话 useNotification() 在 setup 里就抛错,
+               整页白屏。 -->
+          <n-notification-provider placement="bottom-right">
+            <slot />
+            <loading-bar />
+            <message />
+          </n-notification-provider>
         </n-dialog-provider>
       </n-message-provider>
     </n-loading-bar-provider>

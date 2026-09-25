@@ -900,6 +900,8 @@ export default {
       exposeNotNeeded: "{model} 所在分组不是 specified 模式, 无需公开",
       exposeBlocked: "{model} 在分组黑名单中, 请先解除拉黑",
       actualGroupLevel: "实测按「分组 + 请求名」统计, 同分组多条候选时无法再细分",
+      actualByGroup: "24h 实测 · 按分组",
+      actualNCandidates: "{n} 条候选共用这一格",
       shareDivergedTip:
         "配置占比只是 SWRR 的相对权重; 实际分流还要过可用性、冷却和动态优先, 与 24h 实测不一致是正常的。",
     },
@@ -908,9 +910,6 @@ export default {
       title: "编辑别名",
       candidateCount: "{n} 个候选",
       actual24h: "24h {n} 次调用",
-      actualCalls: "{n} 次",
-      actualShort: "实际 {n}%",
-      actualShareTip: "最近 24h 该候选实际分到的调用占比(按 分组+模型 统计)",
       dragHint: "拖拽调整顺序",
       moveUp: "上移",
       moveDown: "下移",
