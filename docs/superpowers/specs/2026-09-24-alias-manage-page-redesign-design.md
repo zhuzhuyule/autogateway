@@ -171,3 +171,41 @@ AliasManageTab.vue          容器: 数据加载 + 布局 + 抽屉开合   目�
 - `npm run type-check` 通过；改动文件 eslint 错误数不高于改前基线
 - 真实数据 CDP 冒烟（1280×900）：列表行数 = 别名数、抽屉双口径非 0、点「公开」后状态翻转且 `group.exposed_models` 落库、auto 开关关闭后 `model="auto"` 请求打到 simple 池（看日志）
 - 主观：不再需要理解「暴露 / group_id / 档位」才能完成「给 hermes 加一个候选」
+
+## 11. 实施时修订
+
+实现过程中与本文档不一致的地方，以本节为准（都是「设计时假设与代码现实不符」，不是随手改动）。
+
+### 11.1 数据口径
+
+> 实施时修订（§3.2 的 `p50 1.9s`）：`/api/dashboard/model-timings` 只有 `AVG(latency_ms)`，没有分位数。24h 摘要行显示的是**平均**耗时，文案写「平均」而不是「p50」。要真分位数得换查询口径，本期不做。
+
+> 实施时修订（§5.4）：`ModelTiming.error_rate` 是**百分数 0..100**（与 `TopModels` 同口径），不是 0..1 的比例。前端 `fmtRate` 直接拼 `%`，不再 `*100`。
+
+> 实施时修订（§3.2 的「24h 实测占比」列 / §8 的「同分组多候选 tooltip 标注按分组归因」）：归因键 `(group_id, 请求名)` 里请求名就是别名本身（`RequestLog.Model` 存的是**请求名**，别名请求下不是 `real_model`），所以同一分组的多条候选在日志里**天然分不开**。抽屉不再给每条候选挂一个「实际 x%」（四行一模一样 = 拿分组级数字冒充候选级），而是单列一块「24h 实际分流（按分组）」：每行一个分组 + 调用数 + 组内候选数。§5.2 里那条「后续加 `ResolvedModel` 列」才是把这一列做到候选级的唯一出路。
+
+### 11.2 组件拆分
+
+> 实施时修订（§6 的「`StatePill / MetricCell / AliasCandidateList` 复用」）：`MetricCell` 与 `AliasCandidateList` 实际被删掉了 —— 前者只剩一个 `NTag` 的厚度，后者与抽屉里的候选行是同一段 DOM 的两种口味，留着就是两套要各自维护的候选编辑 UI。`StatePill` 保留。
+
+> 实施时修订（§6 的 `ModelAliasModal.vue`）：入口保留，但内部不直接挂 `AliasDetailDrawer` —— 抽屉是自绘 overlay、依赖容器宽度，塞进 NModal 里宽度/滚动都会打架。改成复用抽屉的**数据层 + 保存逻辑**（`services/aliases.ts`），弹窗只留「分组 / 模型 / 权重」三个字段。
+
+> 实施时修订（§8 的「抽屉头部给『从本档位移除』」）：没做这个按钮。跨档位候选的移除入口就是抽屉里该行的删除（⌫）——「从本档位移除」和「从本别名移除」在数据上是同一个动作，多一个按钮只是多一个词要解释。列表行的「跨档位」标记保留。
+
+### 11.3 筛选器
+
+> 实施时修订（§3.1 的 provider 筛选）：筛选项做的是**分组**而不是 provider。`Group.ChannelType` 只有 openai/gemini/anthropic 三类，61 条别名下按它筛选等于把三分之一的行归到「openai」这个笼统标签里，不如直接按分组名筛（分组名本来就是用户自己起的、可辨识）。provider 标签仍按 §4.6 显示在行上。
+
+### 11.4 前端两个静默失效
+
+> 实施时修订：抽屉挂载即白屏。`useNotification()` 需要 `NNotificationProvider` 祖先，而 `GlobalProviders.vue` 里没有 —— 缺失时 naive-ui 直接抛错、整棵树不渲染。已补进 `GlobalProviders.vue`。**这个坑在 HEAD 上就存在**，任何首次使用通知的组件都会踩到，属于全站问题而非别名页问题。
+
+> 实施时修订（§4.1 的就地处置反馈）：`web/src/utils/http.ts:41-43` 的全局响应拦截器会给**每个非 GET 请求**补一句「操作成功」。别名页所有写操作自己弹更具体的文案，于是一串 toast 叠在一起。做法是 `web/src/api/aliases.ts` 里统一带 `hideMessage: true`（该模块常量 `SILENT`），而不是在每个调用点散着传。后续给别的模块加写接口时，默认按这条约定走。
+
+> 实施时修订（§3.1 的 auto 开关）：`NSwitch` 把新值作为回调第一个参数，`@update:value="saveSettings"` 会把它当成 `saveSettings` 的第二个形参（这里恰好是 `notify`）—— 于是开关打开弹「操作成功」、关闭静默。改成显式 `onToggle(next)` 自己赋值再保存。
+
+### 11.5 后端两个数据正确性缺陷（重构过程中实测撞出来）
+
+> 实施时修订：软删墓碑会占住 `(alias, group_id, real_model)` 的唯一位。`ModelAlias` 是 `gorm.DeletedAt` 软删 + schema 级 UNIQUE，所以「删掉一条候选 → 抽屉里撤销 / 再加同一个模型」会 `Create` 撞唯一约束、整个请求 400（撤销按钮就是这么死的）。按 `V2_5_17_PartialUniqueGroupName` 的先例处理：tag 上不再留 `uniqueIndex`，唯一性由新 migration `V2_8_3_PartialUniqueAliasCandidate` 建 `WHERE deleted_at IS NULL` 的部分唯一索引 `idx_alias_group_model_active` 持有（sqlite/postgres 建索引，mysql 只能 warn + 掉索引）。**tag 上留 `uniqueIndex` 会让 AutoMigrate 每次启动把非部分索引重建回来**，所以必须两边一起改。同时 `applySnapshotAliases` 的墓碑查找加 `ORDER BY deleted_at IS NULL DESC` —— 否则 `First` 的隐式 `ORDER BY id ASC` 会挑中最老那块墓碑去复活，产生活行两行、SWRR 权重翻倍。
+
+> 实施时修订：`ModelAlias.Enabled` 上的 `default:true` 已删除。gorm 在 `Create` 时把「零值 + 带 `default:` tag」的字段当成未设置 —— 干脆不写这一列，让 DB 默认值顶上来，`Select(...)` 也拦不住（见 `callbacks/create.go` 的 `HasDefaultValue` 分支）。`enabled=false` 是合法值，于是 删除→撤销、slave 快照同步、备份导入 三条链路都会把用户拉黑的候选悄悄变成启用，流量打到明确关掉的模型上。修法是去掉 tag（所有 Create 路径本来就显式赋值，DB 默认值在这里没有兜底价值），不是在各写入点后面补一次 `Updates`。
