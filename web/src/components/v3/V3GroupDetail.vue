@@ -571,7 +571,7 @@ function mergeWithRegistry(localList: string[]): string[] {
 }
 
 // 子分组对聚合的真实贡献:
-//   - exposed_models 非空 → 视为白名单 (无视 mode), 与 GroupInfoCard 行为一致
+//   - exposed_models 非空 → 视为白名单 (无视 mode)
 //   - 否则用 available_models
 //   - 都减 blocked_models
 function effectiveModelsFor(g: Group): string[] {

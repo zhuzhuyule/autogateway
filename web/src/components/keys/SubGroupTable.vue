@@ -423,7 +423,7 @@ function formatNumber(num: number): string {
 </template>
 
 <style scoped>
-/* 直接复用KeyTable的所有样式 */
+/* 表格容器/单元格的通用样式 (与密钥表格同一套视觉) */
 .key-table-container {
   background: var(--card-bg-solid);
   border-radius: 8px;
