@@ -1,5 +1,9 @@
 import http from "@/utils/http";
 
+// 全局响应拦截器会给每个非 GET 请求补一句「操作成功」(utils/http.ts)。别名页的写
+// 操作都由调用方自己弹更具体的文案, 所以统一带 hideMessage 关掉默认 toast。
+const SILENT = { hideMessage: true };
+
 /** 一行 model_aliases 表 */
 export interface ModelAliasRow {
   id: number;
@@ -91,10 +95,14 @@ export type ReservedAlias = (typeof RESERVED_ALIASES)[number];
 export const aliasesApi = {
   list: () => http.get<ModelAliasRow[]>("/aliases"),
   byAlias: (name: string) => http.get<ModelAliasRow[]>(`/aliases/${encodeURIComponent(name)}`),
-  create: (payload: AliasCreatePayload) => http.post<ModelAliasRow>("/aliases", payload),
+  // 下面这些写操作一律 hideMessage: 全局拦截器会给每个非 GET 响应弹一句
+  // 「操作成功」, 而这些调用方(picker 批量建候选、抽屉保存/删除)本来就各自弹了
+  // 更有信息量的文案 —— 不屏蔽的话建 5 条候选就是 5 条 toast, 拖动阈值滑块更是
+  // 每 400ms 一条。失败同样静默, 由调用方的 catch 负责说话。
+  create: (payload: AliasCreatePayload) => http.post<ModelAliasRow>("/aliases", payload, SILENT),
   update: (id: number, payload: AliasUpdatePayload) =>
-    http.put<ModelAliasRow>(`/aliases/${id}`, payload),
-  remove: (id: number) => http.delete(`/aliases/${id}`),
+    http.put<ModelAliasRow>(`/aliases/${id}`, payload, SILENT),
+  remove: (id: number) => http.delete(`/aliases/${id}`, SILENT),
   /**
    * 整体替换某个别名的候选集合 —— 编辑抽屉的"保存"。
    *
@@ -102,13 +110,13 @@ export const aliasesApi = {
    * `PUT /aliases/:id` 在路由树同一层出现两个不同名的参数段, gin 直接 panic。
    */
   replaceCandidates: (alias: string, candidates: AliasCandidatePayload[]) =>
-    http.put<ModelAliasRow[]>("/aliases/candidates", { alias, candidates }),
+    http.put<ModelAliasRow[]>("/aliases/candidates", { alias, candidates }, SILENT),
   /**
    * 整体改别名名。后端会拒绝: 改保留别名 / 改成保留名 / 目标名已存在。
    * 同样走 body 而不是路径(避开 gin 的参数名冲突)。
    */
   rename: (from: string, to: string) =>
-    http.put<{ renamed: number }>("/aliases/rename", { from, to }),
+    http.put<{ renamed: number }>("/aliases/rename", { from, to }, SILENT),
   /**
    * 就地公开某个候选所在分组的模型 —— 「未公开此模型」的状态修复, 不再跳页。
    *
@@ -119,7 +127,7 @@ export const aliasesApi = {
     http.post<{ status: "added" | "already_ok" | "not_needed" }>(
       "/aliases/expose",
       { alias, group_id: groupId, real_model: realModel },
-      { hideMessage: true }
+      SILENT
     ),
   suggestions: () => http.get<AliasSuggestion[]>("/aliases/suggestions"),
   // P4.2 registry-driven 建议: 给定 aggregate group id, 返回该聚合下
@@ -132,5 +140,5 @@ export const routingSettingsApi = {
   get: () => http.get<RoutingSettings>("/routing/settings"),
   save: (
     payload: Partial<{ enabled: boolean; simple_threshold: number; complex_threshold: number }>
-  ) => http.put<RoutingSettings>("/routing/settings", payload),
+  ) => http.put<RoutingSettings>("/routing/settings", payload, SILENT),
 };

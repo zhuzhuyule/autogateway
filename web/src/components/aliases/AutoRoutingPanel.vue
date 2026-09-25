@@ -73,6 +73,14 @@ function saveSettingsThrottled(): void {
     saveTimer = null;
   }, 400);
 }
+
+// NSwitch 把新值作为第一个参数回调, 直接写 @update:value="saveSettings" 的话它会被
+// 当成 saveSettings(notify) 的 notify —— 打开弹「操作成功」、关闭静默, 而且和 v-model
+// 的写入顺序无关紧要了, 这里自己接管赋值。
+async function onToggle(next: boolean): Promise<void> {
+  settings.value.Enabled = next;
+  await saveSettings();
+}
 </script>
 
 <template>
@@ -109,7 +117,7 @@ function saveSettingsThrottled(): void {
         <span class="v3-thresh-bar__state">
           {{ settings.Enabled ? t("aliases.auto.modeThreshold") : t("aliases.auto.modeSimple") }}
         </span>
-        <NSwitch v-model:value="settings.Enabled" size="small" @update:value="saveSettings" />
+        <NSwitch :value="settings.Enabled" size="small" @update:value="onToggle" />
       </span>
     </div>
 
