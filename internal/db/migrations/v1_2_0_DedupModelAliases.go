@@ -8,8 +8,9 @@ import (
 )
 
 // V1_2_0_DedupModelAliases removes duplicate (alias, group_id, real_model)
-// rows from model_aliases so the subsequent AutoMigrate can safely add the
-// unique index idx_alias_group_model. Keeps the lowest id per triple.
+// rows from model_aliases so the unique index on that triple can be added
+// without conflicts. Keeps the lowest id per triple.
+// (The index itself is now owned by V2_8_3_PartialUniqueAliasCandidate.)
 //
 // MUST be called BEFORE AutoMigrate. No-op on fresh installs (table absent)
 // or when no duplicates are present.

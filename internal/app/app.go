@@ -126,8 +126,8 @@ func (a *App) Start() error {
 
 		// 数据库迁移
 		db.HandleLegacyIndexes(a.db)
-		// Pre-migrate dedup: must run BEFORE AutoMigrate so the new
-		// idx_alias_group_model unique index can be created without conflicts.
+		// Pre-migrate dedup: must run BEFORE AutoMigrate so the partial
+		// idx_alias_group_model_active unique index (V2_8_3) can be created without conflicts.
 		if err := db.V1_2_0_DedupModelAliases(a.db); err != nil {
 			return fmt.Errorf("pre-migrate dedup model_aliases failed: %w", err)
 		}
@@ -181,6 +181,12 @@ func (a *App) Start() error {
 		}
 		if err := db.V2_7_0_InviteTokens(a.db); err != nil {
 			return fmt.Errorf("V2_7_0 invite_tokens failed: %w", err)
+		}
+		// 别名候选的唯一索引改成部分索引(只约束活行): 软删的墓碑不该继续占住
+		// (alias, group_id, real_model), 否则"删候选 → 加回同一个模型"必然 400,
+		// 编辑抽屉的「撤销删除」就是这条路径。同 V2_5_17, 必须在 AutoMigrate 之后。
+		if err := db.V2_8_3_PartialUniqueAliasCandidate(a.db); err != nil {
+			return fmt.Errorf("V2_8_3 partial unique model_aliases triple failed: %w", err)
 		}
 		logrus.Info("Database auto-migration completed.")
 

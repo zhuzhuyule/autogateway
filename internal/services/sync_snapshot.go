@@ -233,10 +233,18 @@ func (s *SyncService) applySnapshotAliases(tx *gorm.DB, snap *SyncPayload, polic
 		}
 		in.GroupID = lgid
 		master[ak{in.Alias, in.RealModel, lgid}] = true
-		// idx_alias_group_model 是全局 UNIQUE(含墓碑) → Unscoped 匹配唯一记录(复用/复活墓碑),
-		// 活匹配找不到墓碑会 Create 撞 unique。完整键 (alias, group_id, real_model) 缺一不可。
+		// 键 (alias, group_id, real_model) 缺一不可: 缺 group_id 匹配会误判
+		// RecordNotFound → Create 撞 unique → 整个镜像事务回滚(2026-07-15 部署第二次翻车)。
+		// Unscoped 是为了能匹配到墓碑并原地复活它(syncMergeSave 会写回 deleted_at=NULL)。
+		//
+		// Order("deleted_at IS NULL DESC") 不能省: V2_8_3 之后唯一索引只约束活行,
+		// 同一个三元组可以留下墓碑 + 一条新活行(删掉候选再加回来)。First 默认按主键
+		// 升序会挑中那条**旧墓碑**, 复活它就变成两行 active —— SWRR 权重直接翻倍。
 		var existing models.ModelAlias
-		err := tx.Unscoped().Where("alias = ? AND real_model = ? AND group_id = ?", in.Alias, in.RealModel, lgid).First(&existing).Error
+		err := tx.Unscoped().
+			Where("alias = ? AND real_model = ? AND group_id = ?", in.Alias, in.RealModel, lgid).
+			Order("deleted_at IS NULL DESC").
+			First(&existing).Error
 		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 			return err
 		}

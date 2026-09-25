@@ -194,13 +194,19 @@ type Group struct {
 // 由 §13.1 路由决策树用作 smart routing 池, UI 锁定不可改名/删除.
 type ModelAlias struct {
 	ID uint `gorm:"primaryKey;autoIncrement" json:"id"`
-	// idx_alias_group_model — uniqueness on the (alias, group_id, real_model)
-	// triple. Each row is one candidate; resubmitting the same triple via the
-	// quick-setup UI must be rejected as DUPLICATE_RESOURCE, not silently
-	// duplicated (which would double the SWRR weight).
-	Alias      string         `gorm:"type:varchar(255);not null;index:idx_alias_enabled;uniqueIndex:idx_alias_group_model,priority:1" json:"alias"`
-	GroupID    uint           `gorm:"not null;index;uniqueIndex:idx_alias_group_model,priority:2" json:"group_id"`
-	RealModel  string         `gorm:"type:varchar(255);not null;uniqueIndex:idx_alias_group_model,priority:3" json:"real_model"`
+	// idx_alias_group_model_active — uniqueness on the (alias, group_id,
+	// real_model) triple. Each row is one candidate; resubmitting the same
+	// triple via the quick-setup UI must be rejected as DUPLICATE_RESOURCE,
+	// not silently duplicated (which would double the SWRR weight).
+	//
+	// 索引**不写在 tag 上**, 由 migration 建带 `WHERE deleted_at IS NULL` 的部分
+	// 唯一索引 (internal/db/migrations/v2_8_3_PartialUniqueAliasCandidate.go):
+	// 软删的墓碑行不该继续占住这个三元组, 否则"删掉候选 → 再加回同一个模型"
+	// 会一路 400(别名抽屉的撤销按钮就是这么死的)。tag 上留 uniqueIndex 的话
+	// AutoMigrate 每次启动都把非部分索引重建回来, 所以这里只留普通索引。
+	Alias      string         `gorm:"type:varchar(255);not null;index:idx_alias_enabled" json:"alias"`
+	GroupID    uint           `gorm:"not null;index" json:"group_id"`
+	RealModel  string         `gorm:"type:varchar(255);not null" json:"real_model"`
 	Weight     int            `gorm:"not null;default:1" json:"weight"`
 	Priority   int            `gorm:"not null;default:100" json:"priority"`
 	Enabled    bool           `gorm:"not null;default:true;index:idx_alias_enabled" json:"enabled"`
