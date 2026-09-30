@@ -34,7 +34,7 @@
 
 /* ===== Hero ===== */
 .v5-hero {
-  padding: 14px 18px 0;
+  padding: 14px 18px;
   border-bottom: 1px solid var(--v3-line);
 }
 .v5-hero__top {
@@ -49,6 +49,10 @@
 .v5-hero__main {
   flex: 1 1 280px;
   min-width: 0;
+  /* 概览状态条现在住在这一列里(分组名下面), 展开的明细表也就跟着缩进。 */
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
 }
 .v5-hero__title {
   font: 600 16px/1.25 var(--v3-sans);
@@ -147,15 +151,16 @@
 }
 
 /* ===== 概览状态条 =====
-   收起时只有一行: 三个时间窗的请求数 + 状态点。点开才出明细表, 因为
-   请求状态不是每时每刻都要盯, 但要看的时候不该跳去别的页面。 */
+   贴在分组名下面(和名字同一列, 不占满整张卡), 收起时只多一行:
+   三个时间窗的请求数 + 状态点。请求状态不是每时每刻都要盯, 但要看的时候
+   不该跳去别的页面, 所以点开就在原地出明细。 */
 .v5-metrics {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 14px;
   width: 100%;
-  margin: 12px 0 14px;
+  margin: 10px 0 0;
   padding: 6px 10px;
   border: 1px solid var(--v3-line);
   border-radius: var(--v3-radius-md, 8px);
@@ -173,7 +178,6 @@
 /* 展开时状态条和明细表拼成一张卡: 去掉相接的那条边和圆角 */
 .v5-metrics--open,
 .v5-metrics--open:hover {
-  margin-bottom: 0;
   border-bottom: 0;
   border-radius: var(--v3-radius-md, 8px) var(--v3-radius-md, 8px) 0 0;
   background: var(--v3-surface);
@@ -216,7 +220,7 @@
 
 /* 明细: 周期 × 请求 / 成功 / 失败 / 错误率, 行高比列表行松一档 */
 .v5-mtable {
-  margin: 0 0 14px;
+  margin: 0;
   border: 1px solid var(--v3-line);
   border-top: 0;
   border-radius: 0 0 var(--v3-radius-md, 8px) var(--v3-radius-md, 8px);

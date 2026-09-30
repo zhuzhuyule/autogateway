@@ -1896,6 +1896,67 @@ const filterCounts = computed(() => ({
               <n-icon :component="CopyOutline" :size="11" />
             </button>
           </div>
+
+          <!-- 概览收成一行状态条, 点开才出明细; 不写「概览」标题, 数字自己就是概览。 -->
+          <button
+            class="v5-metrics"
+            :class="{ 'v5-metrics--open': showMetrics }"
+            type="button"
+            :aria-expanded="showMetrics"
+            @click="showMetrics = !showMetrics"
+          >
+            <span
+              v-for="tile in statTiles"
+              :key="tile.key"
+              class="v5-metrics__item"
+              :class="{ 'v5-metrics__item--bad': tile.failed > 0 }"
+            >
+              <span
+                class="v5-metrics__dot"
+                :class="{ 'v5-metrics__dot--bad': tile.failed > 0 }"
+                aria-hidden="true"
+              />
+              {{ tile.label }}
+              <b>{{ tile.total.toLocaleString() }}</b>
+              <template v-if="tile.failed > 0">
+                · {{ t("v3.failures") }} {{ tile.failed.toLocaleString() }}
+              </template>
+            </span>
+            <span class="v5-metrics__cta" aria-hidden="true">
+              <n-icon
+                :component="ChevronDownOutline"
+                :size="13"
+                :style="{ transform: showMetrics ? 'rotate(180deg)' : undefined }"
+              />
+            </span>
+          </button>
+
+          <div v-if="showMetrics" class="v5-mtable">
+            <div class="v5-mtable__row v5-mtable__row--head">
+              <span>{{ t("v5.metricsPeriod") }}</span>
+              <span class="tnum">{{ t("v5.metricsRequests") }}</span>
+              <span class="tnum">{{ t("common.success") }}</span>
+              <span class="tnum">{{ t("v3.failures") }}</span>
+              <span class="tnum">{{ t("v5.errorRate") }}</span>
+            </div>
+            <div v-for="tile in statTiles" :key="tile.key" class="v5-mtable__row">
+              <span>{{ tile.short }}</span>
+              <span class="tnum">{{ tile.total.toLocaleString() }}</span>
+              <span class="tnum">{{ tile.ok.toLocaleString() }}</span>
+              <span class="tnum" :class="{ 'v5-mtable__bad': tile.failed > 0 }">
+                {{ tile.failed.toLocaleString() }}
+              </span>
+              <span class="tnum" :class="{ 'v5-mtable__bad': tile.failed > 0 }">{{ tile.rate }}</span>
+            </div>
+            <div class="v5-mtable__note">
+              {{ t("v3.keys") }}
+              <b>{{ keyTotalDisplay.toLocaleString() }}</b> · {{ t("keys.valid") }}
+              <b>{{ keyActiveDisplay.toLocaleString() }}</b> · {{ t("keys.invalid") }}
+              <b :class="{ 'v5-mtable__bad': invalidKeyCount > 0 }">
+                {{ invalidKeyCount.toLocaleString() }}
+              </b>
+            </div>
+          </div>
         </div>
 
         <!-- Actions -->
@@ -1940,66 +2001,6 @@ const filterCounts = computed(() => ({
         </div>
       </div>
 
-      <!-- 概览收成一行状态条, 点开才出明细; 不写「概览」标题, 数字自己就是概览。 -->
-      <button
-        class="v5-metrics"
-        :class="{ 'v5-metrics--open': showMetrics }"
-        type="button"
-        :aria-expanded="showMetrics"
-        @click="showMetrics = !showMetrics"
-      >
-        <span
-          v-for="tile in statTiles"
-          :key="tile.key"
-          class="v5-metrics__item"
-          :class="{ 'v5-metrics__item--bad': tile.failed > 0 }"
-        >
-          <span
-            class="v5-metrics__dot"
-            :class="{ 'v5-metrics__dot--bad': tile.failed > 0 }"
-            aria-hidden="true"
-          />
-          {{ tile.label }}
-          <b>{{ tile.total.toLocaleString() }}</b>
-          <template v-if="tile.failed > 0">
-            · {{ t("v3.failures") }} {{ tile.failed.toLocaleString() }}
-          </template>
-        </span>
-        <span class="v5-metrics__cta" aria-hidden="true">
-          <n-icon
-            :component="ChevronDownOutline"
-            :size="13"
-            :style="{ transform: showMetrics ? 'rotate(180deg)' : undefined }"
-          />
-        </span>
-      </button>
-
-      <div v-if="showMetrics" class="v5-mtable">
-        <div class="v5-mtable__row v5-mtable__row--head">
-          <span>{{ t("v5.metricsPeriod") }}</span>
-          <span class="tnum">{{ t("v5.metricsRequests") }}</span>
-          <span class="tnum">{{ t("common.success") }}</span>
-          <span class="tnum">{{ t("v3.failures") }}</span>
-          <span class="tnum">{{ t("v5.errorRate") }}</span>
-        </div>
-        <div v-for="tile in statTiles" :key="tile.key" class="v5-mtable__row">
-          <span>{{ tile.short }}</span>
-          <span class="tnum">{{ tile.total.toLocaleString() }}</span>
-          <span class="tnum">{{ tile.ok.toLocaleString() }}</span>
-          <span class="tnum" :class="{ 'v5-mtable__bad': tile.failed > 0 }">
-            {{ tile.failed.toLocaleString() }}
-          </span>
-          <span class="tnum" :class="{ 'v5-mtable__bad': tile.failed > 0 }">{{ tile.rate }}</span>
-        </div>
-        <div class="v5-mtable__note">
-          {{ t("v3.keys") }}
-          <b>{{ keyTotalDisplay.toLocaleString() }}</b> · {{ t("keys.valid") }}
-          <b>{{ keyActiveDisplay.toLocaleString() }}</b> · {{ t("keys.invalid") }}
-          <b :class="{ 'v5-mtable__bad': invalidKeyCount > 0 }">
-            {{ invalidKeyCount.toLocaleString() }}
-          </b>
-        </div>
-      </div>
     </div>
 
     <!-- ===== TABS ===== -->
