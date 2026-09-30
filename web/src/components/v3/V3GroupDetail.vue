@@ -34,7 +34,6 @@ import {
   RefreshOutline,
   RemoveCircleOutline,
   SearchOutline,
-  SettingsOutline,
   Trash,
   WarningOutline,
 } from "@vicons/ionicons5";
@@ -156,10 +155,11 @@ const showAliasModal = ref(false);
 const aliasModalModel = ref<string>("");
 // Tab 选择跨分组持久化: 用户在 group A 切到"模型",换到 group B 默认仍是"模型".
 // 存 localStorage; 非法值直接降级到 "keys".
-type GroupDetailTab = "keys" | "models" | "settings";
+// 分组配置走编辑弹窗, 所以这里只有列表类 tab; 老链接带来的 ?tab=settings 也降级到 keys.
+type GroupDetailTab = "keys" | "models";
 const TAB_STORAGE_KEY = "v3-group-detail-tab";
 function isValidTab(v: unknown): v is GroupDetailTab {
-  return v === "keys" || v === "models" || v === "settings";
+  return v === "keys" || v === "models";
 }
 // P8.10: tab 改为 URL-driven computed. URL.query.tab 是 single source of truth,
 // 切 tab → setter 写 router.replace + localStorage, URL 改变自动反向更新 tab.value
@@ -353,23 +353,6 @@ function cooldownRemain(until?: string): string {
 }
 
 const matchedProvider = computed(() => findProviderByUpstreams(props.group?.upstreams || []));
-
-const proxyUrl = computed(() => {
-  if (!props.group) {
-    return "";
-  }
-  const channel = props.group.channel_type;
-  const path =
-    channel === "anthropic"
-      ? "/anthropic/v1/messages"
-      : channel === "gemini"
-        ? `/gemini/v1beta/models/${props.group.test_model || "gemini-2.5-flash"}:generateContent`
-        : "/openai/v1/chat/completions";
-  if (props.group.is_system) {
-    return `/proxy${path}`;
-  }
-  return `/proxy/${props.group.name}${path}`;
-});
 
 // Short SDK base_url shown in the hero — drops channel-specific suffix
 // (e.g. /chat/completions). Matches v5 banner pattern.
@@ -1955,12 +1938,15 @@ const filterCounts = computed(() => ({
         </div>
       </div>
 
-      <!-- 指标条: 一行, 点开才出明细。密钥/模型总数交给下面的标签页徽章,
-           这里只留别处看不到的流量、错误率、失效密钥。 -->
+      <!-- 指标条: 不写「概览」这类标题, 数字自己就是概览; 点开才出明细。
+           密钥/模型总数交给下面的标签页徽章, 这里只留别处看不到的流量、错误率、失效密钥。 -->
       <button
         class="v5-metrics"
         :class="{ 'v5-metrics--open': showMetrics }"
         type="button"
+        :title="showMetrics ? t('v5.metricsHide') : t('v5.metricsShow')"
+        :aria-label="showMetrics ? t('v5.metricsHide') : t('v5.metricsShow')"
+        :aria-expanded="showMetrics"
         @click="showMetrics = !showMetrics"
       >
         <span class="v5-metrics__item">
@@ -1986,11 +1972,10 @@ const filterCounts = computed(() => ({
           <n-icon :component="WarningOutline" :size="11" />
           {{ invalidKeyCount }} {{ t("keys.invalid") }}
         </span>
-        <span class="v5-metrics__cta">
-          {{ showMetrics ? t("v5.metricsHide") : t("v5.metricsShow") }}
+        <span class="v5-metrics__cta" aria-hidden="true">
           <n-icon
             :component="ChevronDownOutline"
-            :size="12"
+            :size="13"
             :style="{ transform: showMetrics ? 'rotate(180deg)' : undefined }"
           />
         </span>
@@ -2035,13 +2020,6 @@ const filterCounts = computed(() => ({
         <n-icon :component="CubeOutline" :size="13" />
         {{ t("v5.tabModels") }}
         <span class="v5-tab__badge">{{ modelCount }}</span>
-      </button>
-      <button
-        :class="['v5-tab', tab === 'settings' ? 'v5-tab--active' : '']"
-        @click="tab = 'settings'"
-      >
-        <n-icon :component="SettingsOutline" :size="13" />
-        {{ t("v5.tabSettings") }}
       </button>
       <div class="v5-tabs__spacer" />
       <div class="v5-tabs__actions">
@@ -2957,155 +2935,6 @@ const filterCounts = computed(() => ({
             </button>
           </div>
         </template>
-      </div>
-
-      <!-- ===== SETTINGS TAB ===== -->
-      <div v-else>
-        <div class="v5-toolbar">
-          <div class="v5-toolbar__hint">{{ t("v5.settingsHint") }}</div>
-          <div class="v5-toolbar__spacer">
-            <button v-if="!group.is_system" class="v3-btn v3-btn--sm" @click="showEditGroup = true">
-              <n-icon :component="PencilOutline" :size="11" />
-              {{ t("common.edit") }}
-            </button>
-          </div>
-        </div>
-
-        <div class="v5-settings">
-          <div class="v5-settings__row">
-            <div class="v5-settings__lbl">
-              {{ t("v5.setChannel") }}
-              <n-tooltip>
-                <template #trigger>
-                  <span class="v5-helpicon">
-                    <n-icon :component="HelpCircleOutline" :size="11" />
-                  </span>
-                </template>
-                {{ t("v5.setChannelSub") }}
-              </n-tooltip>
-            </div>
-            <div class="v5-settings__val">{{ group.channel_type }}</div>
-          </div>
-          <div v-if="!isAggregate" class="v5-settings__row">
-            <div class="v5-settings__lbl">
-              {{ t("v5.setUpstream") }}
-              <n-tooltip>
-                <template #trigger>
-                  <span class="v5-helpicon">
-                    <n-icon :component="HelpCircleOutline" :size="11" />
-                  </span>
-                </template>
-                {{ t("v5.setUpstreamSub") }}
-              </n-tooltip>
-            </div>
-            <div class="v5-settings__val">
-              <template v-if="group.upstreams?.length">
-                {{ group.upstreams[0].url }}
-                <span v-if="group.upstreams.length > 1" style="color: var(--v3-ink-4)">
-                  + {{ group.upstreams.length - 1 }}
-                </span>
-              </template>
-              <template v-else>—</template>
-            </div>
-          </div>
-          <div class="v5-settings__row">
-            <div class="v5-settings__lbl">
-              {{ t("v5.setProxyPath") }}
-              <n-tooltip>
-                <template #trigger>
-                  <span class="v5-helpicon">
-                    <n-icon :component="HelpCircleOutline" :size="11" />
-                  </span>
-                </template>
-                {{ t("v5.setProxyPathSub") }}
-              </n-tooltip>
-            </div>
-            <div class="v5-settings__val">{{ proxyUrl }}</div>
-          </div>
-          <div v-if="isAggregate" class="v5-settings__row">
-            <div class="v5-settings__lbl">
-              {{ t("v5.setMembers") }}
-              <n-tooltip>
-                <template #trigger>
-                  <span class="v5-helpicon">
-                    <n-icon :component="HelpCircleOutline" :size="11" />
-                  </span>
-                </template>
-                {{ t("v5.setMembersSub") }}
-              </n-tooltip>
-            </div>
-            <div class="v5-settings__val">{{ subGroups.length }} {{ t("v5.setMembersUnit") }}</div>
-          </div>
-          <div v-if="!isAggregate" class="v5-settings__row">
-            <div class="v5-settings__lbl">
-              {{ t("v5.setTestModel") }}
-              <n-tooltip>
-                <template #trigger>
-                  <span class="v5-helpicon">
-                    <n-icon :component="HelpCircleOutline" :size="11" />
-                  </span>
-                </template>
-                {{ t("v5.setTestModelSub") }}
-              </n-tooltip>
-            </div>
-            <div class="v5-settings__val">{{ group.test_model || "—" }}</div>
-          </div>
-          <div v-if="!isAggregate" class="v5-settings__row">
-            <div class="v5-settings__lbl">
-              {{ t("v5.setValidation") }}
-              <n-tooltip>
-                <template #trigger>
-                  <span class="v5-helpicon">
-                    <n-icon :component="HelpCircleOutline" :size="11" />
-                  </span>
-                </template>
-                {{ t("v5.setValidationSub") }}
-              </n-tooltip>
-            </div>
-            <div class="v5-settings__val">
-              {{ group.validation_endpoint || t("v5.setValidationDefault") }}
-            </div>
-          </div>
-          <div class="v5-settings__row">
-            <div>
-              <div class="v5-settings__lbl">{{ t("v5.setProxyPath") }}</div>
-              <div class="v5-settings__sub">{{ t("v5.setProxyPathSub") }}</div>
-            </div>
-            <div class="v5-settings__val">{{ proxyUrl }}</div>
-          </div>
-          <div class="v5-settings__row">
-            <div>
-              <div class="v5-settings__lbl">{{ t("v5.setTestModel") }}</div>
-              <div class="v5-settings__sub">{{ t("v5.setTestModelSub") }}</div>
-            </div>
-            <div class="v5-settings__val">{{ group.test_model || "—" }}</div>
-          </div>
-          <div class="v5-settings__row">
-            <div>
-              <div class="v5-settings__lbl">{{ t("v5.setValidation") }}</div>
-              <div class="v5-settings__sub">{{ t("v5.setValidationSub") }}</div>
-            </div>
-            <div class="v5-settings__val">
-              {{ group.validation_endpoint || t("v5.setValidationDefault") }}
-            </div>
-          </div>
-          <div class="v5-settings__row">
-            <div class="v5-settings__lbl">
-              {{ t("v5.setSystem") }}
-              <n-tooltip>
-                <template #trigger>
-                  <span class="v5-helpicon">
-                    <n-icon :component="HelpCircleOutline" :size="11" />
-                  </span>
-                </template>
-                {{ t("v5.setSystemSub") }}
-              </n-tooltip>
-            </div>
-            <div class="v5-settings__val">
-              {{ group.is_system ? t("v5.setSystemYes") : t("v5.setSystemNo") }}
-            </div>
-          </div>
-        </div>
       </div>
     </div>
 

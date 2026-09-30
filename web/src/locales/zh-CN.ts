@@ -1356,7 +1356,6 @@ export default {
     // Tabs
     tabKeys: "密钥",
     tabModels: "模型",
-    tabSettings: "设置",
     // Stats
     requests7d: "7d 请求",
     errorRate: "错误率",
@@ -1378,23 +1377,6 @@ export default {
     // Models tab
     refreshedAt: "更新于",
     cardSelectHint: "点击卡片可多选,用于批量测试 / 暴露 / 拉黑",
-    // Settings tab
-    settingsHint: "这个分组的核心配置 — 修改请通过编辑窗口。",
-    setChannel: "兼容协议",
-    setChannelSub: "用哪种 SDK 风格调用",
-    setUpstream: "上游地址",
-    setUpstreamSub: "请求实际转发到的目标",
-    setProxyPath: "网关入口",
-    setProxyPathSub: "你应填到 SDK 里的 base_url + path",
-    setTestModel: "测试模型",
-    setTestModelSub: "用来验证 key 有效性的模型 ID",
-    setValidation: "校验端点",
-    setValidationSub: "key 测试时调用的路径",
-    setValidationDefault: "（使用渠道默认）",
-    setSystem: "系统分组",
-    setSystemSub: "系统分组不可删除，仅能编辑名称",
-    setSystemYes: "是",
-    setSystemNo: "否",
     // Dashboard quickstart
     qsTitle: "一个 <em>密钥</em>，所有 Provider。",
     qsSubClosed: "把它粘到任意 OpenAI / Anthropic / Gemini SDK，搞定。",
@@ -1427,9 +1409,6 @@ export default {
     tabSubGroups: "子分组",
     servedBy: "由 {providers} 提供",
     costChipTip: "折算成本 · 24h(免费源显示用量 token)",
-    setMembers: "成员数",
-    setMembersSub: "聚合下挂载的子分组",
-    setMembersUnit: "个",
     sidebarSysSect: "系统聚合",
     sidebarCustomSect: "我的分组",
     copyUrl: "复制 URL",
