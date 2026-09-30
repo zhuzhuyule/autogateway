@@ -1845,13 +1845,13 @@ const filterCounts = computed(() => ({
         <!-- 统一走 ProviderLogo 三层 fallback (lobehub 品牌 SVG → host apex favicon
              → 首字母), 与 V3GroupSidebar 一致; 旧的 FAVICON_DOMAIN_MAP 硬编码表覆盖不到
              agnes 等 → 这些 provider 详情头部之前没 icon. 传 host 让 favicon 生效. -->
-        <div class="v5-hero__avatar v5-picon" style="width: 52px; height: 52px">
+        <div class="v5-hero__avatar v5-picon" style="width: 40px; height: 40px">
           <ProviderLogo
             :hint="providerHint"
             :host="group.upstreams?.[0]?.url"
             :fallback-initial="getGroupDisplayName(group)"
-            :size="44"
-            style="border-radius: 8px"
+            :size="34"
+            style="border-radius: 7px"
           />
         </div>
 

@@ -34,13 +34,13 @@
 
 /* ===== Hero ===== */
 .v5-hero {
-  padding: 22px 24px 0;
+  padding: 14px 18px 0;
   border-bottom: 1px solid var(--v3-line);
 }
 .v5-hero__top {
   display: flex;
   align-items: flex-start;
-  gap: 14px;
+  gap: 10px;
   flex-wrap: wrap;
 }
 .v5-hero__avatar {
@@ -51,7 +51,7 @@
   min-width: 0;
 }
 .v5-hero__title {
-  font: 600 19px/1.25 var(--v3-sans);
+  font: 600 16px/1.25 var(--v3-sans);
   letter-spacing: -0.02em;
   display: flex;
   align-items: center;
@@ -63,16 +63,16 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-top: 8px;
+  margin-top: 5px;
   flex-wrap: wrap;
   min-width: 0;
 }
 .v5-hero__path code {
   background: var(--v3-surface-2);
   border: 1px solid var(--v3-line);
-  padding: 5px 10px;
-  border-radius: 6px;
-  font: 500 12px/1 var(--v3-mono);
+  padding: 3px 8px;
+  border-radius: 5px;
+  font: 500 11.5px/1 var(--v3-mono);
   color: var(--v3-ink-2);
   max-width: 100%;
   overflow: hidden;
@@ -84,7 +84,7 @@
   border: 1px solid var(--v3-line);
   color: var(--v3-ink-3);
   cursor: pointer;
-  padding: 5px 9px;
+  padding: 4px 8px;
   border-radius: 5px;
   display: inline-flex;
   align-items: center;
@@ -115,12 +115,12 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 7px 13px;
+  padding: 5px 10px;
   border-radius: 6px;
   border: 1px solid var(--v3-line);
   background: var(--v3-surface);
   color: var(--v3-ink);
-  font: 500 12.5px/1 var(--v3-sans);
+  font: 500 12px/1 var(--v3-sans);
   cursor: pointer;
   text-decoration: none;
   transition: all 120ms;
@@ -147,47 +147,47 @@
   border-color: var(--v3-danger);
 }
 .v5-hero__btn--icon {
-  padding: 7px;
+  padding: 5px;
 }
 
 .v5-hero__stats {
   display: flex;
   flex-wrap: wrap;
-  gap: 12px;
-  padding: 18px 0 20px;
+  gap: 8px;
+  padding: 12px 0 14px;
 }
 /* 统计做成紧凑左聚拢的 stat 卡, 不再 4 等分铺满宽屏 */
 .v5-hero__stats > * {
   flex: 0 1 auto;
-  min-width: 150px;
-  padding: 11px 15px;
+  min-width: 124px;
+  padding: 8px 12px;
   border: 1px solid var(--v3-line);
   border-radius: var(--v3-radius-md, 8px);
   background: var(--v3-surface);
 }
 .v5-hero__stat-l {
-  font: 500 10.5px/1 var(--v3-sans);
+  font: 500 10px/1 var(--v3-sans);
   color: var(--v3-ink-3);
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 .v5-hero__stat-v {
-  font: 600 22px/1 var(--v3-sans);
-  margin-top: 7px;
+  font: 600 18px/1 var(--v3-sans);
+  margin-top: 5px;
   color: var(--v3-ink);
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.02em;
 }
 .v5-hero__stat-v small {
-  font: 500 14px/1 var(--v3-mono);
+  font: 500 12px/1 var(--v3-mono);
   color: var(--v3-ink-3);
   margin-left: 3px;
   letter-spacing: 0;
 }
 .v5-hero__stat-s {
-  font: 400 11.5px/1.4 var(--v3-sans);
+  font: 400 11px/1.35 var(--v3-sans);
   color: var(--v3-ink-3);
-  margin-top: 6px;
+  margin-top: 3px;
 }
 
 /* ===== Tabs strip ===== */
@@ -195,7 +195,7 @@
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 8px 14px;
+  padding: 6px 12px;
   border-bottom: 1px solid var(--v3-line);
   background: var(--v3-surface-2);
   flex-wrap: wrap;
@@ -204,9 +204,9 @@
   background: transparent;
   border: 0;
   cursor: pointer;
-  padding: 8px 12px;
+  padding: 5px 10px;
   border-radius: 6px;
-  font: 500 12.5px/1 var(--v3-sans);
+  font: 500 12px/1 var(--v3-sans);
   color: var(--v3-ink-2);
   display: inline-flex;
   align-items: center;
@@ -247,7 +247,7 @@
 .v5-content {
   flex: 1 1 auto;
   min-height: 0;
-  padding: 18px;
+  padding: 12px 14px;
 }
 
 /* ===== Toolbar ===== */
@@ -255,7 +255,7 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  margin-bottom: 14px;
+  margin-bottom: 10px;
   flex-wrap: wrap;
 }
 .v5-toolbar__hint {

@@ -465,10 +465,10 @@ function viewSubGroup(id?: number) {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 10px 16px;
+  padding: 7px 12px;
   border-top: 1px solid var(--v3-line);
   background: var(--v3-surface-2);
-  font: 400 11.5px/1.3 var(--v3-mono);
+  font: 400 11px/1.3 var(--v3-mono);
   color: var(--v3-ink-3);
 }
 </style>

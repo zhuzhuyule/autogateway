@@ -248,7 +248,7 @@ function onDragEnd() {
           :class="{ 'v3-gl__row--active': selectedGroup?.id === g.id }"
           @click="emit('select', g)"
         >
-          <span class="v5-picon" style="width: 38px; height: 38px">
+          <span class="v5-picon" style="width: 30px; height: 30px">
             <!-- P11.34: 统一走 ProviderLogo 自带三层 fallback (lobehub → apex favicon
                  → 首字母色块). 不再用 sidebar 自己那套带 FAVICON_DOMAIN_MAP 的旧版,
                  后者对 agnes / sensenova 等不在白名单的 provider 会拉到 Google globe
@@ -257,7 +257,7 @@ function onDragEnd() {
               :hint="providerHint(g)"
               :host="g.upstreams?.[0]?.url"
               :fallback-initial="getGroupDisplayName(g)"
-              :size="28"
+              :size="22"
             />
           </span>
           <div style="min-width: 0">
@@ -300,12 +300,12 @@ function onDragEnd() {
         @drop="onDrop($event, g)"
         @dragend="onDragEnd"
       >
-        <span class="v5-picon" style="width: 38px; height: 38px">
+        <span class="v5-picon" style="width: 30px; height: 30px">
           <ProviderLogo
             :hint="providerHint(g)"
             :host="g.upstreams?.[0]?.url"
             :fallback-initial="getGroupDisplayName(g)"
-            :size="28"
+            :size="22"
           />
         </span>
         <div style="min-width: 0">
