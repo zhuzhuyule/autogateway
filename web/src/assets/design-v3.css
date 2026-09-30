@@ -109,7 +109,7 @@ body.dark,
    ============================================ */
 .v3-app {
   display: grid;
-  grid-template-rows: 48px 1fr;
+  grid-template-rows: 42px 1fr;
   height: 100vh;
 }
 .v3-body {
@@ -130,6 +130,9 @@ body.dark,
   display: flex;
   align-items: center;
   justify-content: space-between;
+  /* 固定 42px: 顶部这条带子只放品牌 + 端点 + 工具, 高度不该由内容撑出来。
+     可用区纵向太金贵 —— 原来的 48px 是 logout 按钮撑的。 */
+  height: 42px;
   padding: 0 14px;
   gap: 18px;
   font-size: 12.5px;
@@ -307,7 +310,7 @@ body.dark,
   display: flex;
   align-items: baseline;
   gap: 14px;
-  margin-bottom: 4px;
+  margin-bottom: 2px;
   flex-wrap: wrap;
 }
 .v3-viewhead h1 {
@@ -335,9 +338,9 @@ body.dark,
   flex-wrap: wrap;
 }
 .v3-viewtitle {
-  font: 600 22px/1.2 var(--v3-sans);
+  font: 600 18px/1.2 var(--v3-sans);
   letter-spacing: -0.02em;
-  margin: 0 0 12px;
+  margin: 0 0 6px;
   color: var(--v3-ink);
 }
 .v3-viewtitle__meta {
@@ -865,11 +868,21 @@ body.dark,
   min-height: 0;
 }
 .v3-gl__sect {
-  padding: 12px 8px 6px;
-  font: 500 10px/1 var(--v3-mono);
-  letter-spacing: 0.12em;
+  /* 分区标题行同时是该分区的动作入口(添加 Provider / 添加聚合 Provider 挂在右侧),
+     所以做成一条带强调色的标题带, 而不是原来那行只有文字的浅灰标签。 */
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 5px 6px 5px 8px;
+  margin: 6px 0 3px;
+  border-radius: 6px;
+  border-left: 2px solid var(--v3-accent);
+  background: var(--v3-surface-2);
+  font: 600 10px/1 var(--v3-mono);
+  letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: var(--v3-ink-3);
+  color: var(--v3-ink-2);
 }
 .v3-gl__row {
   display: grid;
@@ -923,10 +936,6 @@ body.dark,
   border-radius: 999px;
   min-width: 22px;
   text-align: center;
-}
-.v3-gl__foot {
-  padding: 10px;
-  border-top: 1px solid var(--v3-line);
 }
 
 /* Group detail */
@@ -1994,7 +2003,7 @@ body.dark,
   flex: 1;
   display: flex;
   flex-direction: column;
-  padding: 18px 22px 0;
+  padding: 12px 22px 0;
 }
 .v3-main-content > * {
   flex: 1;
@@ -2003,5 +2012,5 @@ body.dark,
 }
 .v3-main > .app-footer {
   flex-shrink: 0;
-  margin-top: 24px;
+  margin-top: 12px;
 }

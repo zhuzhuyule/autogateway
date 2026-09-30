@@ -113,7 +113,7 @@ onMounted(() => {
             v-if="statusConfig[versionInfo.status].icon"
             :component="statusConfig[versionInfo.status].icon"
             :color="statusConfig[versionInfo.status].color"
-            :size="14"
+            :size="12"
             class="version-icon"
           />
           <span class="version-text">
@@ -140,7 +140,7 @@ onMounted(() => {
                 rel="noopener noreferrer"
                 class="footer-link"
               >
-                <n-icon :component="DocumentTextOutline" :size="14" class="link-icon" />
+                <n-icon :component="DocumentTextOutline" :size="12" class="link-icon" />
                 <span>{{ t("footer.docs") }}</span>
               </a>
             </template>
@@ -155,7 +155,7 @@ onMounted(() => {
                 rel="noopener noreferrer"
                 class="footer-link"
               >
-                <n-icon :component="LogoGithub" :size="14" class="link-icon" />
+                <n-icon :component="LogoGithub" :size="12" class="link-icon" />
                 <span>GitHub</span>
               </a>
             </template>
@@ -170,7 +170,7 @@ onMounted(() => {
                 rel="noopener noreferrer"
                 class="footer-link"
               >
-                <n-icon :component="BugOutline" :size="14" class="link-icon" />
+                <n-icon :component="BugOutline" :size="12" class="link-icon" />
                 <span>{{ t("footer.feedback") }}</span>
               </a>
             </template>
@@ -185,7 +185,7 @@ onMounted(() => {
                 rel="noopener noreferrer"
                 class="footer-link"
               >
-                <n-icon :component="PeopleOutline" :size="14" class="link-icon" />
+                <n-icon :component="PeopleOutline" :size="12" class="link-icon" />
                 <span>{{ t("footer.contributors") }}</span>
               </a>
             </template>
@@ -200,7 +200,7 @@ onMounted(() => {
                 rel="noopener noreferrer"
                 class="footer-link"
               >
-                <n-icon :component="ChatbubbleOutline" :size="14" class="link-icon" />
+                <n-icon :component="ChatbubbleOutline" :size="12" class="link-icon" />
                 <span>Telegram</span>
               </a>
             </template>
@@ -235,9 +235,9 @@ onMounted(() => {
   background: var(--footer-bg);
   backdrop-filter: blur(20px);
   border-top: 1px solid var(--border-color-light);
-  padding: 12px 24px;
-  font-size: 14px;
-  min-height: 52px;
+  /* 这行只是版本 + 外链的落脚处, 不该吃掉一屏 76px 的可用高度。 */
+  padding: 5px 24px;
+  font-size: 12px;
 }
 
 .footer-container {
@@ -249,8 +249,13 @@ onMounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 16px;
-  line-height: 1.4;
+  gap: 12px;
+  line-height: 1.3;
+}
+
+.footer-main :deep(.n-divider--vertical) {
+  height: 14px;
+  margin: 0;
 }
 
 .project-info {
@@ -273,7 +278,7 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 8px;
+  padding: 2px 6px;
   border-radius: 6px;
   transition: all 0.2s ease;
 }
@@ -285,7 +290,7 @@ onMounted(() => {
 
 .version-text {
   font-weight: 500;
-  font-size: 13px;
+  font-size: 11.5px;
   color: var(--text-secondary);
   white-space: nowrap;
 }
@@ -307,7 +312,7 @@ onMounted(() => {
 .links-container {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
 }
 
 .footer-link {
@@ -316,10 +321,10 @@ onMounted(() => {
   gap: 4px;
   color: var(--text-secondary);
   text-decoration: none;
-  padding: 4px 6px;
+  padding: 2px 5px;
   border-radius: 4px;
   transition: all 0.2s ease;
-  font-size: 13px;
+  font-size: 11.5px;
   white-space: nowrap;
 }
 
@@ -343,12 +348,12 @@ onMounted(() => {
 
 .copyright-text {
   color: var(--text-tertiary);
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .license-text {
   color: var(--text-tertiary);
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .author-link {
@@ -364,7 +369,7 @@ onMounted(() => {
 /* 响应式设计 */
 @media (max-width: 768px) {
   .app-footer {
-    padding: 10px 16px;
+    padding: 5px 12px;
     height: auto;
   }
 

@@ -83,11 +83,7 @@ function extractHost(url?: string): string | null {
 // providerHint 把 group 解析成 ProviderLogo 能识别的字符串(system_role 优先,
 // 否则回退到 name + 第一个 upstream host)。
 function providerHint(g: Group): string {
-  return [
-    g.system_role || "",
-    g.name || "",
-    extractHost(g.upstreams?.[0]?.url) || "",
-  ]
+  return [g.system_role || "", g.name || "", extractHost(g.upstreams?.[0]?.url) || ""]
     .filter(Boolean)
     .join(" ");
 }
@@ -234,8 +230,17 @@ function onDragEnd() {
     </div>
 
     <div class="v3-gl__body scroll">
+      <!-- 两个「添加」入口挂在各自分区的标题行右侧: 底部那两个通栏按钮占 81px,
+           而这个抽屉纵向从来不够用。分区标题行原本只是一行浅灰标签, 现在做成
+           带强调色的标题带, 顺便当动作条。 -->
+      <div class="v3-gl__sect">
+        <span>{{ t("v5.sidebarSysSect") }}</span>
+        <button class="v3-btn v3-btn--sm v3-gl__sect-btn" @click="showAggregate = true">
+          <n-icon :component="LinkOutline" :size="11" />
+          {{ t("keys.createAggregateGroup") }}
+        </button>
+      </div>
       <template v-if="sysGroups.length">
-        <div class="v3-gl__sect">{{ t("v5.sidebarSysSect") }}</div>
         <div
           v-for="g in sysGroups"
           :key="g.id"
@@ -268,7 +273,13 @@ function onDragEnd() {
         </div>
       </template>
 
-      <div class="v3-gl__sect">{{ t("v5.sidebarCustomSect") }}</div>
+      <div class="v3-gl__sect">
+        <span>{{ t("v5.sidebarCustomSect") }}</span>
+        <button class="v3-btn v3-btn--sm v3-btn--accent" @click="showCreate = true">
+          <n-icon :component="AddOutline" :size="11" />
+          {{ t("keys.createGroup") }}
+        </button>
+      </div>
       <div
         v-for="g in userGroups"
         :key="g.id"
@@ -318,17 +329,6 @@ function onDragEnd() {
       </div>
     </div>
 
-    <div class="v3-gl__foot" style="display: flex; flex-direction: column; gap: 8px">
-      <button class="v3-btn v3-btn--accent" style="width: 100%" @click="showCreate = true">
-        <n-icon :component="AddOutline" :size="12" />
-        {{ t("keys.createGroup") || "New group" }}
-      </button>
-      <button class="v3-btn" style="width: 100%" @click="showAggregate = true">
-        <n-icon :component="LinkOutline" :size="12" />
-        {{ t("keys.createAggregateGroup") || "New aggregate" }}
-      </button>
-    </div>
-
     <v3-new-group-flow
       v-model:show="showCreate"
       :existing-group-names="groups.map(g => g.name)"
@@ -339,6 +339,17 @@ function onDragEnd() {
 </template>
 
 <style scoped>
+.v3-gl__sect > span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.v3-gl__sect-btn {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
 .v3-gl__row {
   position: relative;
   cursor: pointer;
