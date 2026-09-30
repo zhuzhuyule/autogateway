@@ -1358,11 +1358,7 @@ export default {
     tabModels: "模型",
     // Stats
     requests7d: "7d 请求",
-    errorRate: "错误率",
-    metricsShow: "数据明细",
-    metricsHide: "收起明细",
-    metricsPeriod: "周期",
-    metricsRequests: "请求",
+    requests30d: "30d 请求",
     // Card actions
     test: "测试",
     copy: "复制",

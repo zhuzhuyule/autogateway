@@ -150,109 +150,61 @@
   padding: 5px;
 }
 
-.v5-metrics {
+/* ===== 概览卡 =====
+   三张并排的数字卡, 不配小节标题。高度压到一行标签 + 一个数字 + 一行状态,
+   比原来那排 190px 的大卡矮一半以上。 */
+.v5-stats {
   display: flex;
-  align-items: center;
+  align-items: stretch;
   flex-wrap: wrap;
-  gap: 14px;
-  width: 100%;
-  margin: 12px 0 0;
-  padding: 6px 10px;
+  gap: 8px;
+  margin: 12px 0 14px;
+}
+.v5-stat {
+  flex: 1 1 140px;
+  min-width: 0;
+  padding: 7px 12px 8px;
   border: 1px solid var(--v3-line);
   border-radius: var(--v3-radius-md, 8px);
-  background: var(--v3-surface-2);
-  cursor: pointer;
-  text-align: left;
-  font: 500 11.5px/1 var(--v3-sans);
-  color: var(--v3-ink-3);
-  transition: all 120ms;
-}
-.v5-metrics:hover {
-  border-color: var(--v3-line-strong);
-  background: var(--v3-surface-3);
-}
-/* 展开时标题条和明细表拼成一张卡: 去掉相接的那条边和圆角 */
-.v5-metrics--open,
-.v5-metrics--open:hover {
-  border-bottom: 0;
-  border-radius: var(--v3-radius-md, 8px) var(--v3-radius-md, 8px) 0 0;
   background: var(--v3-surface);
 }
-.v5-metrics__item {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  white-space: nowrap;
-}
-.v5-metrics__item b {
-  font: 600 13px/1 var(--v3-sans);
-  color: var(--v3-ink);
-  letter-spacing: -0.01em;
-}
-.v5-metrics__item--bad,
-.v5-metrics__item--bad b {
-  color: var(--v3-danger);
-}
-.v5-metrics__cta {
-  margin-left: auto;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
+.v5-stat__lbl {
   font: 500 11px/1 var(--v3-sans);
   color: var(--v3-ink-3);
   white-space: nowrap;
-}
-.v5-metrics__cta .n-icon {
-  transition: transform 120ms;
-}
-
-/* 指标条展开后的明细: 周期 × 请求 / 失败 / 错误率 */
-.v5-mtable {
-  margin: 0 0 12px;
-  border: 1px solid var(--v3-line);
-  border-top: 0;
-  border-radius: 0 0 var(--v3-radius-md, 8px) var(--v3-radius-md, 8px);
   overflow: hidden;
-  background: var(--v3-surface);
+  text-overflow: ellipsis;
 }
-.v5-mtable__row {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 8px;
-  padding: 5px 12px;
-  font: 400 11.5px/1.4 var(--v3-sans);
-  color: var(--v3-ink-2);
-  border-bottom: 1px solid var(--v3-line);
-}
-.v5-mtable__row:last-child {
-  border-bottom: 0;
-}
-.v5-mtable__row--head {
-  background: var(--v3-surface-2);
-  font: 600 10px/1.4 var(--v3-mono);
-  letter-spacing: 0.08em;
-  color: var(--v3-ink-3);
-}
-.v5-mtable__row .tnum {
-  text-align: right;
-  font-weight: 600;
-  color: var(--v3-ink);
-}
-.v5-mtable__row--head .tnum {
-  color: var(--v3-ink-3);
-}
-.v5-mtable__bad {
-  color: var(--v3-danger) !important;
-}
-.v5-mtable__note {
-  padding: 5px 12px;
-  background: var(--v3-surface-2);
-  font: 400 11px/1.4 var(--v3-sans);
-  color: var(--v3-ink-3);
-}
-.v5-mtable__note b {
+.v5-stat__val {
+  margin-top: 5px;
+  font: 600 19px/1 var(--v3-sans);
+  letter-spacing: -0.02em;
   color: var(--v3-ink);
   font-variant-numeric: tabular-nums;
+}
+.v5-stat__sub {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 5px;
+  font: 400 10.5px/1 var(--v3-sans);
+  color: var(--v3-ink-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.v5-stat__dot {
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--v3-ok);
+}
+.v5-stat__dot--bad {
+  background: var(--v3-danger);
+}
+.v5-stat__dot--bad + span {
+  color: var(--v3-danger);
 }
 
 /* ===== Tabs strip ===== */
@@ -298,6 +250,13 @@
 .v5-tab--active .v5-tab__badge {
   background: var(--v3-info-soft);
   color: var(--v3-info);
+}
+/* 失效密钥不占概览卡(密钥页的筛选片已经写了), 但切到模型页也要看得见告警。
+   重复 .v5-tab--active 那条的权重, 否则选中态会把红色盖掉。 */
+.v5-tab__badge--bad,
+.v5-tab--active .v5-tab__badge--bad {
+  background: var(--v3-danger-soft);
+  color: var(--v3-danger);
 }
 .v5-tabs__spacer {
   flex: 1;

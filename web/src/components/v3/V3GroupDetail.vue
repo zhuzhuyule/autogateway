@@ -19,7 +19,6 @@ import {
   Checkmark,
   CheckmarkCircle,
   CloseOutline,
-  ChevronDownOutline,
   CopyOutline,
   CubeOutline,
   DownloadOutline,
@@ -35,7 +34,6 @@ import {
   RemoveCircleOutline,
   SearchOutline,
   Trash,
-  WarningOutline,
 } from "@vicons/ionicons5";
 import { NIcon, NPagination, NSpin, NTooltip, useDialog, useMessage } from "naive-ui";
 import FreeBadge from "@/components/common/FreeBadge.vue";
@@ -732,34 +730,22 @@ function costChipFor(modelId: string): string {
 }
 
 // Aggregate-only stats
-const aggKeyTotal = computed(() =>
-  subGroups.value.reduce((s: number, sg: SubGroupInfo) => s + (sg.active_keys || 0), 0)
-);
 const aggKeyInvalid = computed(() =>
   subGroups.value.reduce((s: number, sg: SubGroupInfo) => s + (sg.invalid_keys || 0), 0)
 );
 
-// 指标条只讲「下面没有的」: 流量、错误率、失效密钥。密钥总数和模型总数已经是
-// 标签页上的徽章, 再摆四张大卡就是同一屏读两遍。明细折叠, 点标题条才展开。
-const showMetrics = ref(false);
+// 概览卡只讲「别处看不到的」: 三个时间窗的流量和错误率。密钥数、模型数已经是
+// 标签页上的徽章, 失效数已经是密钥页的筛选片, 再摆一遍就是同一屏读两遍。
 const invalidKeyCount = computed(() =>
   isAggregate.value ? aggKeyInvalid.value : (stats.value?.key_stats.invalid_keys ?? 0)
 );
-const keyActiveDisplay = computed(() =>
-  isAggregate.value ? aggKeyTotal.value : (stats.value?.key_stats.active_keys ?? 0)
-);
-const keyTotalDisplay = computed(() => {
-  // 聚合分组没有汇总的 total_keys, 只能 有效+失效 相加;
-  // 标准分组直接读后端总数, 免得 disabled/未探活的密钥被这次求和吞掉。
-  if (isAggregate.value) return keyActiveDisplay.value + invalidKeyCount.value;
-  return stats.value?.key_stats.total_keys ?? 0;
-});
-const metricRows = computed(() =>
+const statTiles = computed(() =>
   [
-    { label: "24h", s: stats.value?.stats_24_hour },
-    { label: "7d", s: stats.value?.stats_7_day },
-    { label: "30d", s: stats.value?.stats_30_day },
+    { key: "24h", label: t("v3.req24h"), s: stats.value?.stats_24_hour },
+    { key: "7d", label: t("v5.requests7d"), s: stats.value?.stats_7_day },
+    { key: "30d", label: t("v5.requests30d"), s: stats.value?.stats_30_day },
   ].map(row => ({
+    key: row.key,
     label: row.label,
     total: row.s?.total_requests ?? 0,
     failed: row.s?.failed_requests ?? 0,
@@ -1938,71 +1924,19 @@ const filterCounts = computed(() => ({
         </div>
       </div>
 
-      <!-- 指标条: 不写「概览」这类标题, 数字自己就是概览; 点开才出明细。
-           密钥/模型总数交给下面的标签页徽章, 这里只留别处看不到的流量、错误率、失效密钥。 -->
-      <button
-        class="v5-metrics"
-        :class="{ 'v5-metrics--open': showMetrics }"
-        type="button"
-        :title="showMetrics ? t('v5.metricsHide') : t('v5.metricsShow')"
-        :aria-label="showMetrics ? t('v5.metricsHide') : t('v5.metricsShow')"
-        :aria-expanded="showMetrics"
-        @click="showMetrics = !showMetrics"
-      >
-        <span class="v5-metrics__item">
-          {{ t("v3.req24h") }}
-          <b class="tnum">{{ (stats?.stats_24_hour.total_requests ?? 0).toLocaleString() }}</b>
-        </span>
-        <span class="v5-metrics__item">
-          {{ t("v5.requests7d") }}
-          <b class="tnum">{{ (stats?.stats_7_day.total_requests ?? 0).toLocaleString() }}</b>
-        </span>
-        <span
-          class="v5-metrics__item"
-          :class="{ 'v5-metrics__item--bad': (stats?.stats_24_hour.failed_requests ?? 0) > 0 }"
-        >
-          {{ t("v5.errorRate") }}
-          <b class="tnum">
-            {{
-              fmtFailRate(stats?.stats_24_hour.failed_requests, stats?.stats_24_hour.total_requests)
-            }}
-          </b>
-        </span>
-        <span v-if="invalidKeyCount" class="v5-metrics__item v5-metrics__item--bad">
-          <n-icon :component="WarningOutline" :size="11" />
-          {{ invalidKeyCount }} {{ t("keys.invalid") }}
-        </span>
-        <span class="v5-metrics__cta" aria-hidden="true">
-          <n-icon
-            :component="ChevronDownOutline"
-            :size="13"
-            :style="{ transform: showMetrics ? 'rotate(180deg)' : undefined }"
-          />
-        </span>
-      </button>
-
-      <div v-if="showMetrics" class="v5-mtable">
-        <div class="v5-mtable__row v5-mtable__row--head">
-          <span>{{ t("v5.metricsPeriod") }}</span>
-          <span class="tnum">{{ t("v5.metricsRequests") }}</span>
-          <span class="tnum">{{ t("v3.failures") }}</span>
-          <span class="tnum">{{ t("v5.errorRate") }}</span>
-        </div>
-        <div v-for="row in metricRows" :key="row.label" class="v5-mtable__row">
-          <span>{{ row.label }}</span>
-          <span class="tnum">{{ row.total.toLocaleString() }}</span>
-          <span class="tnum" :class="{ 'v5-mtable__bad': row.failed > 0 }">
-            {{ row.failed.toLocaleString() }}
-          </span>
-          <span class="tnum" :class="{ 'v5-mtable__bad': row.failed > 0 }">{{ row.rate }}</span>
-        </div>
-        <div class="v5-mtable__note">
-          {{ t("v3.keys") }}
-          <b>{{ keyTotalDisplay.toLocaleString() }}</b> · {{ t("keys.valid") }}
-          <b>{{ keyActiveDisplay.toLocaleString() }}</b> · {{ t("keys.invalid") }}
-          <b :class="{ 'v5-mtable__bad': invalidKeyCount > 0 }">
-            {{ invalidKeyCount.toLocaleString() }}
-          </b>
+      <!-- 概览: 不写「概览」这类标题, 三张数字卡自己就是概览。 -->
+      <div class="v5-stats">
+        <div v-for="tile in statTiles" :key="tile.key" class="v5-stat">
+          <div class="v5-stat__lbl">{{ tile.label }}</div>
+          <div class="v5-stat__val">{{ tile.total.toLocaleString() }}</div>
+          <div class="v5-stat__sub" :title="`${t('v3.failures')} ${tile.failed} · ${tile.rate}`">
+            <span
+              class="v5-stat__dot"
+              :class="{ 'v5-stat__dot--bad': tile.failed > 0 }"
+              aria-hidden="true"
+            />
+            <span>{{ t("v3.failures") }} {{ tile.failed }} · {{ tile.rate }}</span>
+          </div>
         </div>
       </div>
     </div>
@@ -2012,7 +1946,15 @@ const filterCounts = computed(() => ({
       <button :class="['v5-tab', tab === 'keys' ? 'v5-tab--active' : '']" @click="tab = 'keys'">
         <n-icon :component="isAggregate ? LinkOutline : KeyOutline" :size="13" />
         {{ isAggregate ? t("v5.tabSubGroups") : t("v5.tabKeys") }}
-        <span class="v5-tab__badge">
+        <span
+          class="v5-tab__badge"
+          :class="{ 'v5-tab__badge--bad': !isAggregate && invalidKeyCount > 0 }"
+          :title="
+            !isAggregate && invalidKeyCount > 0
+              ? `${t('keys.invalid')} ${invalidKeyCount}`
+              : undefined
+          "
+        >
           {{ isAggregate ? subGroups.length : (stats?.key_stats.total_keys ?? 0) }}
         </span>
       </button>
