@@ -1358,10 +1358,12 @@ export default {
     tabModels: "模型",
     tabSettings: "设置",
     // Stats
-    models: "模型",
-    modelsAvailable: "上游已声明",
-    requests7d: "请求 · 7d",
+    requests7d: "7d 请求",
     errorRate: "错误率",
+    metricsShow: "数据明细",
+    metricsHide: "收起明细",
+    metricsPeriod: "周期",
+    metricsRequests: "请求",
     // Card actions
     test: "测试",
     copy: "复制",
@@ -1374,7 +1376,6 @@ export default {
     noModelsSub: "添加一个有效的密钥后，上游会自动声明可用模型。",
     openGroupSettings: "打开分组设置",
     // Models tab
-    modelsHint: "这个分组目前可以路由到的模型 · 来自上游声明",
     refreshedAt: "更新于",
     cardSelectHint: "点击卡片可多选,用于批量测试 / 暴露 / 拉黑",
     // Settings tab
@@ -1424,12 +1425,8 @@ export default {
     aggregateChip: "聚合",
     hintAggregate: "这是聚合分组 — 请求会按权重路由到下面的子分组。",
     tabSubGroups: "子分组",
-    aggSubGroups: "子分组",
     servedBy: "由 {providers} 提供",
     costChipTip: "折算成本 · 24h(免费源显示用量 token)",
-    aggSubGroupsSub: "按权重轮询",
-    aggActiveKeys: "可用密钥",
-    aggActiveKeysSub: "所有子分组合计",
     setMembers: "成员数",
     setMembersSub: "聚合下挂载的子分组",
     setMembersUnit: "个",

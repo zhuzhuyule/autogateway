@@ -42,22 +42,25 @@ function shortFor(modality: ProbeModality): string {
 <template>
   <n-tooltip trigger="hover" placement="top">
     <template #trigger>
-      <n-dropdown
-        trigger="click"
-        size="small"
-        :options="options"
-        @select="key => emit('select', key as ProbeModality | '')"
-      >
-        <button
-          type="button"
-          class="v5-probechip"
-          :class="{ 'v5-probechip--manual': props.probe.manual }"
-          @click.stop
+      <!-- n-dropdown 的根不是元素(Vue 会警告指令挂不到节点上), 包一层 span 让 tooltip 挂得住 -->
+      <span class="v5-probechip__wrap">
+        <n-dropdown
+          trigger="click"
+          size="small"
+          :options="options"
+          @select="key => emit('select', key as ProbeModality | '')"
         >
-          <span>{{ shortFor(props.probe.modality) }}</span>
-          <n-icon :component="ChevronDownOutline" :size="9" />
-        </button>
-      </n-dropdown>
+          <button
+            type="button"
+            class="v5-probechip"
+            :class="{ 'v5-probechip--manual': props.probe.manual }"
+            @click.stop
+          >
+            <span>{{ shortFor(props.probe.modality) }}</span>
+            <n-icon :component="ChevronDownOutline" :size="9" />
+          </button>
+        </n-dropdown>
+      </span>
     </template>
     {{
       props.probe.manual
@@ -68,6 +71,10 @@ function shortFor(modality: ProbeModality): string {
 </template>
 
 <style scoped>
+.v5-probechip__wrap {
+  flex-shrink: 0;
+  display: inline-flex;
+}
 .v5-probechip {
   flex-shrink: 0;
   display: inline-flex;

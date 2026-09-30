@@ -19,6 +19,7 @@ import {
   Checkmark,
   CheckmarkCircle,
   CloseOutline,
+  ChevronDownOutline,
   CopyOutline,
   CubeOutline,
   DownloadOutline,
@@ -35,6 +36,7 @@ import {
   SearchOutline,
   SettingsOutline,
   Trash,
+  WarningOutline,
 } from "@vicons/ionicons5";
 import { NIcon, NPagination, NSpin, NTooltip, useDialog, useMessage } from "naive-ui";
 import FreeBadge from "@/components/common/FreeBadge.vue";
@@ -752,6 +754,34 @@ const aggKeyTotal = computed(() =>
 );
 const aggKeyInvalid = computed(() =>
   subGroups.value.reduce((s: number, sg: SubGroupInfo) => s + (sg.invalid_keys || 0), 0)
+);
+
+// 指标条只讲「下面没有的」: 流量、错误率、失效密钥。密钥总数和模型总数已经是
+// 标签页上的徽章, 再摆四张大卡就是同一屏读两遍。明细折叠, 点标题条才展开。
+const showMetrics = ref(false);
+const invalidKeyCount = computed(() =>
+  isAggregate.value ? aggKeyInvalid.value : (stats.value?.key_stats.invalid_keys ?? 0)
+);
+const keyActiveDisplay = computed(() =>
+  isAggregate.value ? aggKeyTotal.value : (stats.value?.key_stats.active_keys ?? 0)
+);
+const keyTotalDisplay = computed(() => {
+  // 聚合分组没有汇总的 total_keys, 只能 有效+失效 相加;
+  // 标准分组直接读后端总数, 免得 disabled/未探活的密钥被这次求和吞掉。
+  if (isAggregate.value) return keyActiveDisplay.value + invalidKeyCount.value;
+  return stats.value?.key_stats.total_keys ?? 0;
+});
+const metricRows = computed(() =>
+  [
+    { label: "24h", s: stats.value?.stats_24_hour },
+    { label: "7d", s: stats.value?.stats_7_day },
+    { label: "30d", s: stats.value?.stats_30_day },
+  ].map(row => ({
+    label: row.label,
+    total: row.s?.total_requests ?? 0,
+    failed: row.s?.failed_requests ?? 0,
+    rate: fmtFailRate(row.s?.failed_requests, row.s?.total_requests),
+  }))
 );
 
 // Notification when sub-group operations succeed inside V3SubGroupTable
@@ -1925,73 +1955,69 @@ const filterCounts = computed(() => ({
         </div>
       </div>
 
-      <!-- Big stats row -->
-      <div class="v5-hero__stats">
-        <!-- Aggregate: Sub-groups / Active keys (sum) / 24h / 7d -->
-        <template v-if="isAggregate">
-          <div>
-            <div class="v5-hero__stat-l">{{ t("v5.aggSubGroups") }}</div>
-            <div class="v5-hero__stat-v">{{ subGroups.length }}</div>
-            <div class="v5-hero__stat-s">{{ t("v5.aggSubGroupsSub") }}</div>
-          </div>
-          <div>
-            <div class="v5-hero__stat-l">{{ t("v5.aggActiveKeys") }}</div>
-            <div class="v5-hero__stat-v">{{ aggKeyTotal.toLocaleString() }}</div>
-            <div class="v5-hero__stat-s">
-              <template v-if="aggKeyInvalid">
-                {{ aggKeyInvalid }} {{ t("keys.invalid") || "invalid" }}
-              </template>
-              <template v-else>
-                {{ t("v5.aggActiveKeysSub") }}
-              </template>
-            </div>
-          </div>
-        </template>
-        <!-- Standard: Keys / Models -->
-        <template v-else>
-          <div>
-            <div class="v5-hero__stat-l">{{ t("v3.keys") || "Keys" }}</div>
-            <div class="v5-hero__stat-v">
-              {{ (stats?.key_stats.total_keys ?? 0).toLocaleString() }}
-            </div>
-            <div class="v5-hero__stat-s">
-              {{ stats?.key_stats.active_keys ?? 0 }} {{ t("keys.valid") || "valid" }} ·
-              {{ stats?.key_stats.invalid_keys ?? 0 }} {{ t("keys.invalid") || "invalid" }}
-            </div>
-          </div>
-          <div>
-            <div class="v5-hero__stat-l">{{ t("v5.models") }}</div>
-            <div class="v5-hero__stat-v">{{ modelCount }}</div>
-            <div class="v5-hero__stat-s">{{ t("v5.modelsAvailable") }}</div>
-          </div>
-        </template>
-
-        <!-- Common: 24h + 7d -->
-        <div>
-          <div class="v5-hero__stat-l">{{ t("v3.req24h") }}</div>
-          <div class="v5-hero__stat-v">
-            {{ (stats?.stats_24_hour.total_requests ?? 0).toLocaleString() }}
-          </div>
-          <div
-            class="v5-hero__stat-s"
-            :style="{
-              color: stats?.stats_24_hour.failed_requests ? 'var(--v3-danger)' : undefined,
-            }"
-          >
+      <!-- 指标条: 一行, 点开才出明细。密钥/模型总数交给下面的标签页徽章,
+           这里只留别处看不到的流量、错误率、失效密钥。 -->
+      <button
+        class="v5-metrics"
+        :class="{ 'v5-metrics--open': showMetrics }"
+        type="button"
+        @click="showMetrics = !showMetrics"
+      >
+        <span class="v5-metrics__item">
+          {{ t("v3.req24h") }}
+          <b class="tnum">{{ (stats?.stats_24_hour.total_requests ?? 0).toLocaleString() }}</b>
+        </span>
+        <span class="v5-metrics__item">
+          {{ t("v5.requests7d") }}
+          <b class="tnum">{{ (stats?.stats_7_day.total_requests ?? 0).toLocaleString() }}</b>
+        </span>
+        <span
+          class="v5-metrics__item"
+          :class="{ 'v5-metrics__item--bad': (stats?.stats_24_hour.failed_requests ?? 0) > 0 }"
+        >
+          {{ t("v5.errorRate") }}
+          <b class="tnum">
             {{
               fmtFailRate(stats?.stats_24_hour.failed_requests, stats?.stats_24_hour.total_requests)
             }}
-            {{ t("v5.errorRate") }}
-          </div>
+          </b>
+        </span>
+        <span v-if="invalidKeyCount" class="v5-metrics__item v5-metrics__item--bad">
+          <n-icon :component="WarningOutline" :size="11" />
+          {{ invalidKeyCount }} {{ t("keys.invalid") }}
+        </span>
+        <span class="v5-metrics__cta">
+          {{ showMetrics ? t("v5.metricsHide") : t("v5.metricsShow") }}
+          <n-icon
+            :component="ChevronDownOutline"
+            :size="12"
+            :style="{ transform: showMetrics ? 'rotate(180deg)' : undefined }"
+          />
+        </span>
+      </button>
+
+      <div v-if="showMetrics" class="v5-mtable">
+        <div class="v5-mtable__row v5-mtable__row--head">
+          <span>{{ t("v5.metricsPeriod") }}</span>
+          <span class="tnum">{{ t("v5.metricsRequests") }}</span>
+          <span class="tnum">{{ t("v3.failures") }}</span>
+          <span class="tnum">{{ t("v5.errorRate") }}</span>
         </div>
-        <div>
-          <div class="v5-hero__stat-l">{{ t("v5.requests7d") }}</div>
-          <div class="v5-hero__stat-v">
-            {{ (stats?.stats_7_day.total_requests ?? 0).toLocaleString() }}
-          </div>
-          <div class="v5-hero__stat-s">
-            {{ stats?.stats_7_day.failed_requests ?? 0 }} {{ t("v3.failures") || "failures" }}
-          </div>
+        <div v-for="row in metricRows" :key="row.label" class="v5-mtable__row">
+          <span>{{ row.label }}</span>
+          <span class="tnum">{{ row.total.toLocaleString() }}</span>
+          <span class="tnum" :class="{ 'v5-mtable__bad': row.failed > 0 }">
+            {{ row.failed.toLocaleString() }}
+          </span>
+          <span class="tnum" :class="{ 'v5-mtable__bad': row.failed > 0 }">{{ row.rate }}</span>
+        </div>
+        <div class="v5-mtable__note">
+          {{ t("v3.keys") }}
+          <b>{{ keyTotalDisplay.toLocaleString() }}</b> · {{ t("keys.valid") }}
+          <b>{{ keyActiveDisplay.toLocaleString() }}</b> · {{ t("keys.invalid") }}
+          <b :class="{ 'v5-mtable__bad': invalidKeyCount > 0 }">
+            {{ invalidKeyCount.toLocaleString() }}
+          </b>
         </div>
       </div>
     </div>
@@ -2019,11 +2045,29 @@ const filterCounts = computed(() => ({
       </button>
       <div class="v5-tabs__spacer" />
       <div class="v5-tabs__actions">
-        <button class="v3-btn v3-btn--sm" @click="refreshAll">
+        <!-- 动作跟着标签页走: 模型页要的是「刷新模型」, 通用刷新只刷密钥和统计。 -->
+        <button
+          v-if="tab === 'models' && !isAggregate"
+          class="v3-btn v3-btn--sm"
+          :disabled="modelsRefreshing"
+          @click="refreshGroupModels"
+        >
+          <n-icon
+            :component="RefreshOutline"
+            :size="11"
+            :class="modelsRefreshing ? 'v5-keycard__pill-spin' : ''"
+          />
+          {{ modelsRefreshing ? t("common.loading") : t("keys.refreshModelsBtn") }}
+        </button>
+        <button v-else-if="tab !== 'models'" class="v3-btn v3-btn--sm" @click="refreshAll">
           <n-icon :component="RefreshOutline" :size="11" />
           {{ t("common.refresh") || "Refresh" }}
         </button>
-        <button v-if="!isAggregate" class="v3-btn v3-btn--sm" @click="exportKeys('all')">
+        <button
+          v-if="tab === 'keys' && !isAggregate"
+          class="v3-btn v3-btn--sm"
+          @click="exportKeys('all')"
+        >
           <n-icon :component="DownloadOutline" :size="11" />
           {{ t("v3.exportAll") || "Export" }}
         </button>
@@ -2346,49 +2390,32 @@ const filterCounts = computed(() => ({
 
       <!-- ===== MODELS TAB ===== -->
       <div v-else-if="tab === 'models'">
-        <!-- Toolbar — two layers so users read config first, then browse -->
-        <!-- Config layer: routing mode toggle + refresh models (what this group exposes) -->
-        <div class="v5-toolbar v5-toolbar--config">
-          <div class="v5-toolbar__hint">
-            {{ t("v5.modelsHint") }}
-            <span v-if="modelsRefreshedAtDisplay" style="margin-left: 8px; color: var(--v3-ink-4)">
-              · {{ t("v5.refreshedAt") }} {{ modelsRefreshedAtDisplay }}
-            </span>
-          </div>
-          <div class="v5-toolbar__spacer" style="gap: 10px">
-            <div v-if="!isAggregate" class="v5-modemode">
-              <button
-                class="v3-btn v3-btn--sm"
-                :class="{ 'v3-btn--accent': routingMode === 'passthrough' }"
-                :disabled="savingMode"
-                @click="setRoutingMode('passthrough')"
-              >{{ t("v3.modePassthrough") || "透传" }}</button>
-              <button
-                class="v3-btn v3-btn--sm"
-                :class="{ 'v3-btn--accent': routingMode === 'specified' }"
-                :disabled="savingMode"
-                @click="setRoutingMode('specified')"
-              >{{ t("v3.modeSpecified") || "指定" }}</button>
-            </div>
+        <!-- 一行: 路由模式开关 + 搜索 + 筛选 + 缓存时间。
+             原来分两层(配置层/浏览层), 中间那行说明文字交给开关旁的 ? 讲。 -->
+        <div class="v5-toolbar">
+          <div v-if="!isAggregate" class="v5-modemode">
             <button
-              v-if="!isAggregate"
               class="v3-btn v3-btn--sm"
-              :disabled="modelsRefreshing"
-              @click="refreshGroupModels"
-            >
-              <n-icon :component="RefreshOutline" :size="11" :class="modelsRefreshing ? 'v5-keycard__pill-spin' : ''" />
-              {{ modelsRefreshing ? t("common.loading") : t("keys.refreshModelsBtn") }}
-            </button>
+              :class="{ 'v3-btn--accent': routingMode === 'passthrough' }"
+              :disabled="savingMode"
+              @click="setRoutingMode('passthrough')"
+            >{{ t("v3.modePassthrough") || "透传" }}</button>
+            <button
+              class="v3-btn v3-btn--sm"
+              :class="{ 'v3-btn--accent': routingMode === 'specified' }"
+              :disabled="savingMode"
+              @click="setRoutingMode('specified')"
+            >{{ t("v3.modeSpecified") || "指定" }}</button>
+            <!-- 模式后果说明: 原来自己占一行, 现在收进开关旁的 ? -->
+            <n-tooltip trigger="hover" :style="{ maxWidth: '300px' }">
+              <template #trigger>
+                <span class="v5-modemode__help" tabindex="0">
+                  <n-icon :component="HelpCircleOutline" :size="13" />
+                </span>
+              </template>
+              {{ routingMode === "specified" ? t("v3.modeSpecifiedHint") : t("v3.modePassthroughHint") }}
+            </n-tooltip>
           </div>
-        </div>
-        <!-- Mode consequence hint: spells out what the toggle above decides -->
-        <div v-if="!isAggregate" class="v5-modehint">
-          <n-icon :component="HelpCircleOutline" :size="12" />
-          <span>{{ routingMode === "specified" ? (t("v3.modeSpecifiedHint") || "指定 = 白名单:仅「已暴露」段的模型对外可调,下方「上游全部」是候选池") : (t("v3.modePassthroughHint") || "透传 = 放行:上游声明的模型全部对外可调,不做白名单筛选") }}</span>
-        </div>
-
-        <!-- Browse layer: search + filters (narrow the list you see) -->
-        <div class="v5-toolbar v5-toolbar--browse">
           <div class="v5-search" style="width: 220px">
             <n-icon :component="SearchOutline" :size="12" />
             <input v-model="modelSearch" :placeholder="t('v3.filterModels') || 'Filter models…'" />
@@ -2457,6 +2484,9 @@ const filterCounts = computed(() => ({
             {{ t("v5.bulkClear") || "取消选择" }}
           </button>
           </div>
+          <span v-if="modelsRefreshedAtDisplay" class="v5-toolbar__hint v5-toolbar__stamp">
+            {{ t("v5.refreshedAt") }} {{ modelsRefreshedAtDisplay }}
+          </span>
         </div>
 
         <!-- =============================================== -->
