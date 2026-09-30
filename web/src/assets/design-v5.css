@@ -55,45 +55,41 @@
   letter-spacing: -0.02em;
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
+  row-gap: 4px;
   color: var(--v3-ink);
   margin: 0;
 }
+/* URL 挂在分组名后面, 整条就是复制按钮: 长到放不下才折行, 不单独占一行。 */
 .v5-hero__path {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 8px;
-  margin-top: 5px;
-  flex-wrap: wrap;
+  gap: 6px;
   min-width: 0;
+  max-width: 100%;
+  padding: 3px 7px;
+  border: 1px solid var(--v3-line);
+  border-radius: 5px;
+  background: var(--v3-surface-2);
+  color: var(--v3-ink-3);
+  cursor: pointer;
+  transition: all 120ms;
+}
+.v5-hero__path:hover {
+  border-color: var(--v3-line-strong);
+  background: var(--v3-surface-3);
+  color: var(--v3-ink);
 }
 .v5-hero__path code {
-  background: var(--v3-surface-2);
-  border: 1px solid var(--v3-line);
-  padding: 3px 8px;
-  border-radius: 5px;
   font: 500 11.5px/1 var(--v3-mono);
   color: var(--v3-ink-2);
-  max-width: 100%;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.v5-hero__copy {
-  background: transparent;
-  border: 1px solid var(--v3-line);
-  color: var(--v3-ink-3);
-  cursor: pointer;
-  padding: 4px 8px;
-  border-radius: 5px;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font: 500 11px/1 var(--v3-sans);
-  transition: all 120ms;
-}
-.v5-hero__copy:hover {
-  background: var(--v3-surface-2);
+.v5-hero__path:hover code {
   color: var(--v3-ink);
 }
 .v5-hero__chip {
@@ -150,61 +146,123 @@
   padding: 5px;
 }
 
-/* ===== 概览卡 =====
-   三张并排的数字卡, 不配小节标题。高度压到一行标签 + 一个数字 + 一行状态,
-   比原来那排 190px 的大卡矮一半以上。 */
-.v5-stats {
-  display: flex;
-  align-items: stretch;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin: 12px 0 14px;
-}
-.v5-stat {
-  flex: 1 1 140px;
-  min-width: 0;
-  padding: 7px 12px 8px;
-  border: 1px solid var(--v3-line);
-  border-radius: var(--v3-radius-md, 8px);
-  background: var(--v3-surface);
-}
-.v5-stat__lbl {
-  font: 500 11px/1 var(--v3-sans);
-  color: var(--v3-ink-3);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.v5-stat__val {
-  margin-top: 5px;
-  font: 600 19px/1 var(--v3-sans);
-  letter-spacing: -0.02em;
-  color: var(--v3-ink);
-  font-variant-numeric: tabular-nums;
-}
-.v5-stat__sub {
+/* ===== 概览状态条 =====
+   收起时只有一行: 三个时间窗的请求数 + 状态点。点开才出明细表, 因为
+   请求状态不是每时每刻都要盯, 但要看的时候不该跳去别的页面。 */
+.v5-metrics {
   display: flex;
   align-items: center;
-  gap: 5px;
-  margin-top: 5px;
-  font: 400 10.5px/1 var(--v3-sans);
+  flex-wrap: wrap;
+  gap: 14px;
+  width: 100%;
+  margin: 12px 0 14px;
+  padding: 6px 10px;
+  border: 1px solid var(--v3-line);
+  border-radius: var(--v3-radius-md, 8px);
+  background: var(--v3-surface-2);
+  cursor: pointer;
+  text-align: left;
+  font: 500 11.5px/1 var(--v3-sans);
   color: var(--v3-ink-3);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  transition: all 120ms;
 }
-.v5-stat__dot {
+.v5-metrics:hover {
+  border-color: var(--v3-line-strong);
+  background: var(--v3-surface-3);
+}
+/* 展开时状态条和明细表拼成一张卡: 去掉相接的那条边和圆角 */
+.v5-metrics--open,
+.v5-metrics--open:hover {
+  margin-bottom: 0;
+  border-bottom: 0;
+  border-radius: var(--v3-radius-md, 8px) var(--v3-radius-md, 8px) 0 0;
+  background: var(--v3-surface);
+}
+.v5-metrics__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+.v5-metrics__item b {
+  font: 600 13px/1 var(--v3-sans);
+  color: var(--v3-ink);
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+}
+.v5-metrics__dot {
   flex-shrink: 0;
   width: 6px;
   height: 6px;
   border-radius: 50%;
   background: var(--v3-ok);
 }
-.v5-stat__dot--bad {
+.v5-metrics__dot--bad {
   background: var(--v3-danger);
 }
-.v5-stat__dot--bad + span {
+.v5-metrics__item--bad,
+.v5-metrics__item--bad b {
   color: var(--v3-danger);
+}
+.v5-metrics__cta {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  color: var(--v3-ink-3);
+}
+.v5-metrics__cta .n-icon {
+  transition: transform 120ms;
+}
+
+/* 明细: 周期 × 请求 / 成功 / 失败 / 错误率, 行高比列表行松一档 */
+.v5-mtable {
+  margin: 0 0 14px;
+  border: 1px solid var(--v3-line);
+  border-top: 0;
+  border-radius: 0 0 var(--v3-radius-md, 8px) var(--v3-radius-md, 8px);
+  overflow: hidden;
+  background: var(--v3-surface);
+}
+.v5-mtable__row {
+  display: grid;
+  grid-template-columns: 1.2fr repeat(4, 1fr);
+  gap: 8px;
+  padding: 8px 14px;
+  font: 400 12.5px/1.4 var(--v3-sans);
+  color: var(--v3-ink-2);
+  border-bottom: 1px solid var(--v3-line);
+}
+.v5-mtable__row:last-child {
+  border-bottom: 0;
+}
+.v5-mtable__row--head {
+  background: var(--v3-surface-2);
+  font: 600 10.5px/1.4 var(--v3-mono);
+  letter-spacing: 0.08em;
+  color: var(--v3-ink-3);
+}
+.v5-mtable__row .tnum {
+  text-align: right;
+  font-weight: 600;
+  color: var(--v3-ink);
+  font-variant-numeric: tabular-nums;
+}
+.v5-mtable__row--head .tnum {
+  color: var(--v3-ink-3);
+  font-weight: 600;
+}
+.v5-mtable__bad {
+  color: var(--v3-danger) !important;
+}
+.v5-mtable__note {
+  padding: 7px 14px;
+  background: var(--v3-surface-2);
+  font: 400 11.5px/1.4 var(--v3-sans);
+  color: var(--v3-ink-3);
+}
+.v5-mtable__note b {
+  color: var(--v3-ink);
+  font-variant-numeric: tabular-nums;
 }
 
 /* ===== Tabs strip ===== */

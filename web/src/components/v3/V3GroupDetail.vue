@@ -19,6 +19,7 @@ import {
   Checkmark,
   CheckmarkCircle,
   CloseOutline,
+  ChevronDownOutline,
   CopyOutline,
   CubeOutline,
   DownloadOutline,
@@ -730,15 +731,28 @@ function costChipFor(modelId: string): string {
 }
 
 // Aggregate-only stats
+const aggKeyActive = computed(() =>
+  subGroups.value.reduce((s: number, sg: SubGroupInfo) => s + (sg.active_keys || 0), 0)
+);
 const aggKeyInvalid = computed(() =>
   subGroups.value.reduce((s: number, sg: SubGroupInfo) => s + (sg.invalid_keys || 0), 0)
 );
 
-// 概览卡只讲「别处看不到的」: 三个时间窗的流量和错误率。密钥数、模型数已经是
-// 标签页上的徽章, 失效数已经是密钥页的筛选片, 再摆一遍就是同一屏读两遍。
+// 概览收成一行: 三个时间窗的请求数和状态点, 点开才出明细 —— 不是每时每刻都要盯流量。
+// 密钥数、模型数已经是标签页上的徽章, 卡片里不重复摆; 失效密钥改成徽章标红。
+const showMetrics = ref(false);
 const invalidKeyCount = computed(() =>
   isAggregate.value ? aggKeyInvalid.value : (stats.value?.key_stats.invalid_keys ?? 0)
 );
+const keyActiveDisplay = computed(() =>
+  isAggregate.value ? aggKeyActive.value : (stats.value?.key_stats.active_keys ?? 0)
+);
+const keyTotalDisplay = computed(() => {
+  // 聚合分组没有汇总的 total_keys, 只能 有效+失效 相加;
+  // 标准分组直接读后端总数, 免得 disabled/未探活的密钥被这次求和吞掉。
+  if (isAggregate.value) return keyActiveDisplay.value + invalidKeyCount.value;
+  return stats.value?.key_stats.total_keys ?? 0;
+});
 const statTiles = computed(() =>
   [
     { key: "24h", label: t("v3.req24h"), s: stats.value?.stats_24_hour },
@@ -747,8 +761,10 @@ const statTiles = computed(() =>
   ].map(row => ({
     key: row.key,
     label: row.label,
+    short: row.key,
     total: row.s?.total_requests ?? 0,
     failed: row.s?.failed_requests ?? 0,
+    ok: (row.s?.total_requests ?? 0) - (row.s?.failed_requests ?? 0),
     rate: fmtFailRate(row.s?.failed_requests, row.s?.total_requests),
   }))
 );
@@ -1869,15 +1885,15 @@ const filterCounts = computed(() => ({
               </template>
               {{ friendlyHint }}
             </n-tooltip>
-          </div>
-          <div class="v5-hero__path">
-            <code>{{ sdkBaseUrl }}</code>
+            <!-- URL 直接跟在分组名后面, 整条就是复制按钮 —— 单占一行太浪费。 -->
             <button
-              class="v5-hero__copy"
+              class="v5-hero__path"
+              type="button"
+              :title="t('v5.copyUrl')"
               @click="copyText(sdkBaseUrl, t('keys.endpointCopied') || 'Endpoint copied')"
             >
+              <code>{{ sdkBaseUrl }}</code>
               <n-icon :component="CopyOutline" :size="11" />
-              {{ t("v5.copyUrl") }}
             </button>
           </div>
         </div>
@@ -1924,19 +1940,64 @@ const filterCounts = computed(() => ({
         </div>
       </div>
 
-      <!-- 概览: 不写「概览」这类标题, 三张数字卡自己就是概览。 -->
-      <div class="v5-stats">
-        <div v-for="tile in statTiles" :key="tile.key" class="v5-stat">
-          <div class="v5-stat__lbl">{{ tile.label }}</div>
-          <div class="v5-stat__val">{{ tile.total.toLocaleString() }}</div>
-          <div class="v5-stat__sub" :title="`${t('v3.failures')} ${tile.failed} · ${tile.rate}`">
-            <span
-              class="v5-stat__dot"
-              :class="{ 'v5-stat__dot--bad': tile.failed > 0 }"
-              aria-hidden="true"
-            />
-            <span>{{ t("v3.failures") }} {{ tile.failed }} · {{ tile.rate }}</span>
-          </div>
+      <!-- 概览收成一行状态条, 点开才出明细; 不写「概览」标题, 数字自己就是概览。 -->
+      <button
+        class="v5-metrics"
+        :class="{ 'v5-metrics--open': showMetrics }"
+        type="button"
+        :aria-expanded="showMetrics"
+        @click="showMetrics = !showMetrics"
+      >
+        <span
+          v-for="tile in statTiles"
+          :key="tile.key"
+          class="v5-metrics__item"
+          :class="{ 'v5-metrics__item--bad': tile.failed > 0 }"
+        >
+          <span
+            class="v5-metrics__dot"
+            :class="{ 'v5-metrics__dot--bad': tile.failed > 0 }"
+            aria-hidden="true"
+          />
+          {{ tile.label }}
+          <b>{{ tile.total.toLocaleString() }}</b>
+          <template v-if="tile.failed > 0">
+            · {{ t("v3.failures") }} {{ tile.failed.toLocaleString() }}
+          </template>
+        </span>
+        <span class="v5-metrics__cta" aria-hidden="true">
+          <n-icon
+            :component="ChevronDownOutline"
+            :size="13"
+            :style="{ transform: showMetrics ? 'rotate(180deg)' : undefined }"
+          />
+        </span>
+      </button>
+
+      <div v-if="showMetrics" class="v5-mtable">
+        <div class="v5-mtable__row v5-mtable__row--head">
+          <span>{{ t("v5.metricsPeriod") }}</span>
+          <span class="tnum">{{ t("v5.metricsRequests") }}</span>
+          <span class="tnum">{{ t("common.success") }}</span>
+          <span class="tnum">{{ t("v3.failures") }}</span>
+          <span class="tnum">{{ t("v5.errorRate") }}</span>
+        </div>
+        <div v-for="tile in statTiles" :key="tile.key" class="v5-mtable__row">
+          <span>{{ tile.short }}</span>
+          <span class="tnum">{{ tile.total.toLocaleString() }}</span>
+          <span class="tnum">{{ tile.ok.toLocaleString() }}</span>
+          <span class="tnum" :class="{ 'v5-mtable__bad': tile.failed > 0 }">
+            {{ tile.failed.toLocaleString() }}
+          </span>
+          <span class="tnum" :class="{ 'v5-mtable__bad': tile.failed > 0 }">{{ tile.rate }}</span>
+        </div>
+        <div class="v5-mtable__note">
+          {{ t("v3.keys") }}
+          <b>{{ keyTotalDisplay.toLocaleString() }}</b> · {{ t("keys.valid") }}
+          <b>{{ keyActiveDisplay.toLocaleString() }}</b> · {{ t("keys.invalid") }}
+          <b :class="{ 'v5-mtable__bad': invalidKeyCount > 0 }">
+            {{ invalidKeyCount.toLocaleString() }}
+          </b>
         </div>
       </div>
     </div>
