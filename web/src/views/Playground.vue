@@ -7,15 +7,19 @@ import {
   ChatbubbleEllipsesOutline,
   ChevronDownOutline,
   CloseOutline,
+  FlashOutline,
+  MusicalNotesOutline,
   GridOutline,
   ImageOutline,
   ListOutline,
+  MicOutline,
   OptionsOutline,
   SearchOutline,
   SendOutline,
+  StopOutline,
   TrashOutline,
 } from "@vicons/ionicons5";
-import { NIcon, NInputNumber, NModal, NPopconfirm, NSwitch, useMessage } from "naive-ui";
+import { NIcon, NInput, NInputNumber, NModal, NPopconfirm, NSwitch, useMessage } from "naive-ui";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import MarkdownIt from "markdown-it";
@@ -29,6 +33,7 @@ import {
   modalityOf,
   type Modality,
 } from "@/data/freeProviders";
+import { lookupRegistry } from "@/api/freemodels";
 import { createVideoTask, getVideoTasksByIds } from "@/api/videoTasks";
 import { reconcileMessage, collectPendingTaskIds, fmtElapsed } from "@/utils/videoTaskReconcile";
 import { putImage, getImages, deleteImages } from "@/utils/imageStore";
@@ -74,9 +79,10 @@ const videoQueueOpen = ref(false);
 
 interface Attachment {
   // "image" also carries OpenAI multimodal chat input; generated images and
-  // videos reuse this as persistent storage (IndexedDB by id).
+  // videos reuse this as persistent storage (IndexedDB by id). "audio" carries
+  // TTS output / ASR input, same IndexedDB persistence.
   id: string; // persistence key; dataUrl lives in IndexedDB, localStorage keeps metadata only
-  kind: "image" | "video";
+  kind: "image" | "video" | "audio";
   name: string;
   mime: string;
   dataUrl: string; // base64 data URL, stored in IndexedDB (by id), never in localStorage
@@ -211,6 +217,24 @@ const temperature = ref(0.7);
 const maxTokens = ref(1024);
 const systemPrompt = ref("");
 
+// ---- audio (TTS / ASR) 状态 ----
+const TTS_VOICE_KEY = "playground_tts_voice_v1";
+const TTS_STREAM_KEY = "playground_tts_stream_v1";
+const ttsVoice = ref(localStorage.getItem(TTS_VOICE_KEY) || "alloy");
+const ttsStream = ref(localStorage.getItem(TTS_STREAM_KEY) === "1");
+watch(ttsVoice, v => localStorage.setItem(TTS_VOICE_KEY, v));
+watch(ttsStream, v => localStorage.setItem(TTS_STREAM_KEY, v ? "1" : "0"));
+const MAX_AUDIO_MB = 20; // whisper 系上游普遍上限 25MB, 留一点余量
+const audioFileInputRef = ref<HTMLInputElement | null>(null);
+
+// 一键可用性测试 (复用后端 /api/groups/:id/test-model 探活); 状态在 active
+// 定义之后再挂 watch 重置 (避免 TDZ).
+const audioTest = ref<{ running: boolean; ok: boolean | null; text: string }>({
+  running: false,
+  ok: null,
+  text: "",
+});
+
 // 历史模式 — 控制 send 时携带哪些历史 message
 //   all    : 全部历史 (完整上下文, 默认)
 //   none   : 仅当前 user message, 无上下文 (调试无记忆场景)
@@ -292,6 +316,14 @@ interface ModelEntry {
 interface GroupSection {
   group: GroupInfo;
   entries: ModelEntry[];
+}
+
+// Registry capabilities 补充 modalityOf — 与 V3GroupDetail 探活同一口径
+// (capabilities + tags 合并传入). registry 未命中/未加载时退化为本地启发式。
+function entryModalityFor(pid: string | undefined, name: string): Modality {
+  const reg = lookupRegistry(pid, name);
+  const caps = reg ? [...(reg.capabilities || []), ...(reg.tags || [])] : undefined;
+  return modalityOf(pid, name, caps);
 }
 
 const sections = computed<GroupSection[]>(() => {
@@ -452,7 +484,7 @@ const sections = computed<GroupSection[]>(() => {
           aliasFree = true;
         }
         // alias 模态取它指向的任一 real_model 的模态; 多 target 时第一个非 chat 优先
-        const mod = modalityOf(pid, m);
+        const mod = entryModalityFor(pid, m);
         if (mod !== "chat") {
           aliasModality = mod;
         }
@@ -477,7 +509,7 @@ const sections = computed<GroupSection[]>(() => {
         name,
         hint: info.aliases.size > 0 ? [...info.aliases].join(", ") : undefined,
         isFree: info.isFree,
-        modality: modalityOf(pid, name),
+        modality: entryModalityFor(pid, name),
       });
     }
     out.push({ group: g, entries });
@@ -544,8 +576,8 @@ function pickManual() {
   if (!g) {
     return;
   }
-  // 手动输入 model 时反查 provider 算 modality, 让用户手动加 image / video
-  // model 时 send() 也能走对路径
+  // 手动输入 model 时反查 provider 算 modality, 让用户手动加 image / video /
+  // audio 模型时 send() 也能走对路径
   const pUp = findProviderByUpstreams(g.upstreams);
   pickModel({
     groupName: g.name,
@@ -553,7 +585,7 @@ function pickManual() {
     groupHost: g.upstreams?.[0]?.url,
     kind: "model",
     name,
-    modality: modalityOf(pUp?.id, name),
+    modality: entryModalityFor(pUp?.id, name),
   });
   manualModelName.value = "";
 }
@@ -843,6 +875,55 @@ const activeModelLabel = computed(() => {
   const kindBadge = kind === "alias" ? "alias" : "model";
   return `${name}  ·  ${g?.display || groupName}  ·  ${kindBadge}`;
 });
+
+// 当前所选模型的模态 — 决定 send() 分流 + composer/设置区展示哪套控件.
+// 先从 sections entry 反查 (alias 已带指向模型的模态), entry 缺失 (新 group
+// 未刷新) 时用 provider 反查 + registry caps 现算.
+function modalityFor(groupName: string, modelName: string): Modality {
+  for (const sec of sections.value) {
+    if (sec.group.name !== groupName) continue;
+    const e = sec.entries.find(x => x.name === modelName);
+    if (e) {
+      return e.modality;
+    }
+  }
+  const g = groups.value.find(x => x.name === groupName);
+  const pid = g ? findProviderByUpstreams(g.upstreams)?.id : undefined;
+  return entryModalityFor(pid, modelName);
+}
+
+const activeModality = computed<Modality>(() => {
+  const key = active.value?.modelKey;
+  if (!key) {
+    return "chat";
+  }
+  const parts = key.split("::");
+  if (parts.length !== 3) {
+    return "chat";
+  }
+  return modalityFor(parts[0], parts[2]);
+});
+
+const isAudioModality = computed(() =>
+  activeModality.value === "tts" || activeModality.value === "asr",
+);
+
+const composePlaceholder = computed(() => {
+  if (activeModality.value === "tts") {
+    return t("playground.ttsPlaceholder");
+  }
+  if (activeModality.value === "asr") {
+    return t("playground.asrPlaceholder");
+  }
+  return t("playground.composePlaceholder");
+});
+
+watch(
+  () => active.value?.modelKey,
+  () => {
+    audioTest.value = { running: false, ok: null, text: "" };
+  },
+);
 
 function loadSessions() {
   try {
@@ -1246,6 +1327,567 @@ async function sendVideo(groupName: string, modelName: string, prompt: string) {
   }
 }
 
+// ============================================================================
+// Audio (TTS / ASR) — Playground 直连 OpenAI 兼容端点:
+//   TTS: POST /v1/audio/speech  (非流式拿完整 blob; 流式按 chunk 统计 + SSE-b64
+//        兼容 stream_format=sse 的上游; 两种模式都落地为可播放 attachment)
+//   ASR: POST /v1/audio/transcriptions (multipart, 文件来自录音或上传)
+// 探活请求形状与后端 keypool/modality_probe.go buildModalityRequest 对齐。
+// ============================================================================
+
+const AUDIO_EXT_BY_MIME: Record<string, string> = {
+  "audio/mpeg": "mp3",
+  "audio/mp3": "mp3",
+  "audio/wav": "wav",
+  "audio/x-wav": "wav",
+  "audio/webm": "webm",
+  "audio/ogg": "ogg",
+  "audio/flac": "flac",
+  "audio/mp4": "m4a",
+  "audio/aac": "aac",
+  "audio/opus": "opus",
+  "audio/pcm": "pcm",
+};
+function audioExtFor(mime: string): string {
+  const base = mime.split(";")[0].trim().toLowerCase();
+  return AUDIO_EXT_BY_MIME[base] || "audio";
+}
+function audioMimeFor(mime: string): string {
+  return mime.split(";")[0].trim().toLowerCase() || "audio/mpeg";
+}
+
+function b64ToBytes(b64: string): Uint8Array {
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) {
+    bytes[i] = bin.charCodeAt(i);
+  }
+  return bytes;
+}
+
+function dataUrlToBlob(a: Attachment): Blob {
+  const idx = a.dataUrl.indexOf(",");
+  const b64 = idx >= 0 ? a.dataUrl.slice(idx + 1) : a.dataUrl;
+  return new Blob([b64ToBytes(b64)], { type: audioMimeFor(a.mime) });
+}
+
+// 从若干常见 JSON 字段里找一个 base64 音频字符串 (SSE-b64 帧 / JSON 包裹的
+// response_format 变体). 找不到返回 ""。
+function pickB64Field(obj: unknown): string {
+  if (!obj || typeof obj !== "object") {
+    return "";
+  }
+  const o = obj as Record<string, unknown>;
+  const audio = o.audio as Record<string, unknown> | undefined;
+  for (const cand of [audio?.data, o.data, o.b64_json, o.audio_base64]) {
+    if (typeof cand === "string" && cand.length > 64) {
+      return cand;
+    }
+  }
+  return "";
+}
+
+function makeAssistantTurn(s: Session, now: number): ChatMessage {
+  s.messages.push({ role: "assistant", content: "", phase: "thinking", sentAt: now });
+  return s.messages[s.messages.length - 1];
+}
+
+async function sendTTS(groupName: string, modelName: string, text: string) {
+  const s = active.value;
+  if (!s) {
+    return;
+  }
+  if (!text) {
+    message.warning(t("playground.ttsInputRequired"));
+    return;
+  }
+  const now = Date.now();
+  s.messages.push({ role: "user", content: text, sentAt: now });
+  const asst = makeAssistantTurn(s, now);
+  input.value = "";
+  pendingAttachments.value = [];
+  sending.value = true;
+  s.updatedAt = Date.now();
+  if (s.title === t("playground.defaultTitle")) {
+    s.title = text.slice(0, 24);
+  }
+  await nextTick();
+  scrollToBottom();
+
+  try {
+    const body: Record<string, unknown> = {
+      model: modelName,
+      input: text,
+      voice: ttsVoice.value.trim() || "alloy",
+    };
+    if (ttsStream.value) {
+      body.stream = true;
+      body.stream_format = "audio";
+    }
+    const resp = await fetch(
+      `/proxy/${encodeURIComponent(groupName)}/v1/audio/speech`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${authKey.value || ""}`,
+          "X-Playground-Trial": "1",
+        },
+        body: JSON.stringify(body),
+      },
+    );
+    if (!resp.ok) {
+      const errText = await resp.text().catch(() => "");
+      asst.content = `[${resp.status} ${resp.statusText}] ${errText || t("playground.requestFailed")}`;
+      asst.error = true;
+      asst.phase = "done";
+      asst.doneAt = Date.now();
+      return;
+    }
+
+    const ctype = (resp.headers.get("Content-Type") || "").toLowerCase();
+    const parts: Uint8Array[] = [];
+    let bytes = 0;
+    let chunks = 0;
+    let sawSse = ctype.includes("text/event-stream");
+    // event-stream 之外一律按二进制收; JSON 单独走 b64 兜底解析.
+    const isJsonWrap = !sawSse && ctype.includes("application/json");
+
+    if (isJsonWrap) {
+      const raw = await resp.text();
+      try {
+        const b64 = pickB64Field(JSON.parse(raw));
+        if (!b64) {
+          throw new Error(t("playground.ttsNoAudioInJson"));
+        }
+        parts.push(b64ToBytes(b64));
+        bytes = parts[0].length;
+      } catch (e) {
+        asst.content = `[${(e as Error).message}] ${raw.slice(0, 200)}`;
+        asst.error = true;
+        asst.phase = "done";
+        asst.doneAt = Date.now();
+        return;
+      }
+    } else if (!resp.body) {
+      const blob = await resp.blob();
+      const buf = new Uint8Array(await blob.arrayBuffer());
+      parts.push(buf);
+      bytes = buf.length;
+      chunks = 1;
+    } else {
+      const reader = resp.body.getReader();
+      const dec = new TextDecoder();
+      let buf = "";
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) {
+          break;
+        }
+        if (!asst.firstByteAt) {
+          asst.firstByteAt = Date.now();
+        }
+        if (sawSse) {
+          buf += dec.decode(value, { stream: true });
+          let nl: number;
+          while ((nl = buf.indexOf("\n")) >= 0) {
+            const line = buf.slice(0, nl).trim();
+            buf = buf.slice(nl + 1);
+            if (!line.startsWith("data:")) {
+              continue;
+            }
+            const payload = line.slice(5).trim();
+            if (payload === "[DONE]") {
+              continue;
+            }
+            try {
+              const b64 = pickB64Field(JSON.parse(payload));
+              if (b64) {
+                const bin = b64ToBytes(b64);
+                parts.push(bin);
+                bytes += bin.length;
+                chunks += 1;
+              }
+            } catch {
+              // 非 JSON 帧忽略
+            }
+          }
+        } else {
+          parts.push(value);
+          bytes += value.length;
+          chunks += 1;
+        }
+        asst.phase = "streaming";
+      }
+      // 请求了流式但上游回 event-stream 而没解出任何 b64 → 报文明确指出
+      if (sawSse && bytes === 0) {
+        asst.content = t("playground.ttsEmptyStream");
+        asst.error = true;
+        asst.phase = "done";
+        asst.doneAt = Date.now();
+        return;
+      }
+    }
+
+    if (bytes === 0) {
+      asst.content = t("playground.emptyResponse");
+      asst.error = true;
+      asst.phase = "done";
+      asst.doneAt = Date.now();
+      return;
+    }
+    if (bytes > MAX_AUDIO_MB * 1024 * 1024) {
+      asst.content = t("playground.audioTooLarge", {
+        size: fmtBytes(bytes),
+        max: `${MAX_AUDIO_MB} MB`,
+      });
+      asst.error = true;
+      asst.phase = "done";
+      asst.doneAt = Date.now();
+      return;
+    }
+
+    const rawMime = sawSse || isJsonWrap ? "audio/mpeg" : ctype || "audio/mpeg";
+    const mime = audioMimeFor(rawMime);
+    const blob = new Blob(parts as BlobPart[], { type: mime });
+    const dataUrl = await readAsDataUrl(blob);
+    asst.attachments = [
+      {
+        id: uid(),
+        kind: "audio",
+        name: `tts-${Date.now()}.${audioExtFor(mime)}`,
+        mime,
+        dataUrl,
+      },
+    ];
+    const bits: string[] = [
+      ttsStream.value ? t("playground.ttsModeStream") : t("playground.ttsModeBuffered"),
+      fmtBytes(bytes),
+    ];
+    if (ttsStream.value && chunks > 1) {
+      bits.push(t("playground.ttsChunks", { n: chunks }));
+    }
+    asst.content = bits.join(" · ");
+    asst.phase = "done";
+    asst.doneAt = Date.now();
+  } catch (e) {
+    asst.content = `[network error] ${(e as Error).message}`;
+    asst.error = true;
+    asst.phase = "done";
+    asst.doneAt = Date.now();
+  } finally {
+    sending.value = false;
+    s.updatedAt = Date.now();
+  }
+}
+
+async function sendASR(groupName: string, modelName: string, text: string) {
+  const s = active.value;
+  if (!s) {
+    return;
+  }
+  const audios = pendingAttachments.value.filter(a => a.kind === "audio");
+  if (audios.length === 0) {
+    message.warning(t("playground.asrNeedAudio"));
+    return;
+  }
+  if (audios.length > 1) {
+    message.warning(t("playground.asrUseFirstAudio"));
+  }
+  const file = audios[0];
+  const now = Date.now();
+  s.messages.push({
+    role: "user",
+    content: text || t("playground.asrUserLabel", { name: file.name }),
+    attachments: [file],
+    sentAt: now,
+  });
+  const asst = makeAssistantTurn(s, now);
+  input.value = "";
+  pendingAttachments.value = pendingAttachments.value.filter(a => a.kind !== "audio");
+  sending.value = true;
+  s.updatedAt = Date.now();
+  if (s.title === t("playground.defaultTitle")) {
+    s.title = file.name.slice(0, 24);
+  }
+  await nextTick();
+  scrollToBottom();
+
+  try {
+    const fd = new FormData();
+    fd.append("model", modelName);
+    fd.append("file", dataUrlToBlob(file), file.name);
+    fd.append("response_format", "json");
+    // 文本框内容作为 whisper prompt (热词/上下文提示), 有则带
+    if (text) {
+      fd.append("prompt", text);
+    }
+    const resp = await fetch(
+      `/proxy/${encodeURIComponent(groupName)}/v1/audio/transcriptions`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${authKey.value || ""}`,
+          "X-Playground-Trial": "1",
+        },
+        body: fd,
+      },
+    );
+    if (!resp.ok) {
+      const errText = await resp.text().catch(() => "");
+      asst.content = `[${resp.status} ${resp.statusText}] ${errText || t("playground.requestFailed")}`;
+      asst.error = true;
+      asst.phase = "done";
+      asst.doneAt = Date.now();
+      return;
+    }
+    const ctype = (resp.headers.get("Content-Type") || "").toLowerCase();
+    if (ctype.includes("text/event-stream") && resp.body) {
+      // 上游若真给了流式转写 (非标准但部分网关支持), 逐帧增量渲染
+      const reader = resp.body.getReader();
+      const dec = new TextDecoder();
+      let buf = "";
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) {
+          break;
+        }
+        if (!asst.firstByteAt) {
+          asst.firstByteAt = Date.now();
+        }
+        buf += dec.decode(value, { stream: true });
+        let nl: number;
+        while ((nl = buf.indexOf("\n")) >= 0) {
+          const line = buf.slice(0, nl).trim();
+          buf = buf.slice(nl + 1);
+          if (!line.startsWith("data:")) {
+            continue;
+          }
+          const payload = line.slice(5).trim();
+          if (!payload || payload === "[DONE]") {
+            continue;
+          }
+          try {
+            const obj = JSON.parse(payload);
+            const piece =
+              (typeof obj.text === "string" && obj.text) ||
+              (typeof obj.delta === "string" && obj.delta) ||
+              "";
+            if (piece) {
+              asst.content += piece;
+              asst.phase = "streaming";
+              scrollToBottom();
+            }
+          } catch {
+            // 忽略坏帧
+          }
+        }
+      }
+      if (!asst.content) {
+        asst.content = t("playground.emptyResponse");
+        asst.error = true;
+      }
+    } else {
+      const rawText = await resp.text();
+      let json: { text?: string; language?: string; duration?: number };
+      try {
+        json = JSON.parse(rawText);
+      } catch {
+        asst.content = `[parse error] ${t("playground.invalidJsonResponse")}: ${rawText.slice(0, 200)}`;
+        asst.error = true;
+        asst.phase = "done";
+        asst.doneAt = Date.now();
+        return;
+      }
+      asst.firstByteAt = Date.now();
+      const textOut = typeof json.text === "string" ? json.text : "";
+      if (!textOut) {
+        asst.content = t("playground.emptyResponse");
+        asst.error = true;
+      } else {
+        asst.content = textOut;
+      }
+    }
+    asst.phase = "done";
+    asst.doneAt = Date.now();
+  } catch (e) {
+    asst.content = `[network error] ${(e as Error).message}`;
+    asst.error = true;
+    asst.phase = "done";
+    asst.doneAt = Date.now();
+  } finally {
+    sending.value = false;
+    s.updatedAt = Date.now();
+  }
+}
+
+// ---- 一键可用性测试 (探活) ----
+async function runAudioAvailabilityTest() {
+  const s = active.value;
+  const mod = activeModality.value;
+  if (!s?.modelKey || (mod !== "tts" && mod !== "asr")) {
+    return;
+  }
+  const gid = currentGroupId.value;
+  if (gid == null) {
+    message.warning(t("playground.pickProviderFirst"));
+    return;
+  }
+  const modelName = s.modelKey.split("::")[2];
+  audioTest.value = { running: true, ok: null, text: "" };
+  try {
+    const res = await keysApi.testGroupModel(gid, modelName, mod);
+    if (res.is_valid) {
+      audioTest.value = {
+        running: false,
+        ok: true,
+        text: t("playground.availTestOk", { ms: res.duration_ms, code: res.status_code }),
+      };
+    } else {
+      audioTest.value = {
+        running: false,
+        ok: false,
+        text: t("playground.availTestFail", {
+          msg: res.error || String(res.status_code || "unknown"),
+        }),
+      };
+    }
+  } catch (e) {
+    audioTest.value = { running: false, ok: false, text: (e as Error).message };
+  }
+}
+
+// ---- 麦克风录音 (ASR 输入) ----
+const recActive = ref(false);
+const recSeconds = ref(0);
+let mediaRecorder: MediaRecorder | null = null;
+let recStream: MediaStream | null = null;
+let recTimer: number | undefined;
+let recChunks: Blob[] = [];
+
+function pickRecorderMime(): string {
+  if (typeof MediaRecorder === "undefined") {
+    return "";
+  }
+  for (const c of ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg;codecs=opus"]) {
+    if (MediaRecorder.isTypeSupported(c)) {
+      return c;
+    }
+  }
+  return "";
+}
+
+async function toggleRecord() {
+  if (recActive.value) {
+    mediaRecorder?.stop();
+    return;
+  }
+  if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
+    message.warning(t("playground.asrRecordUnsupported"));
+    return;
+  }
+  try {
+    recStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch (e) {
+    message.error(t("playground.asrMicDenied", { msg: (e as Error).message }));
+    return;
+  }
+  recChunks = [];
+  const mime = pickRecorderMime();
+  mediaRecorder = mime ? new MediaRecorder(recStream, { mimeType: mime }) : new MediaRecorder(recStream);
+  mediaRecorder.ondataavailable = ev => {
+    if (ev.data && ev.data.size > 0) {
+      recChunks.push(ev.data);
+    }
+  };
+  mediaRecorder.onstop = () => {
+    const stopAll = () => {
+      recStream?.getTracks().forEach(tr => tr.stop());
+      recStream = null;
+      if (recTimer) {
+        window.clearInterval(recTimer);
+        recTimer = undefined;
+      }
+      recActive.value = false;
+      recSeconds.value = 0;
+    };
+    const blob = new Blob(recChunks, {
+      type: mediaRecorder?.mimeType ? mediaRecorder.mimeType : "audio/webm",
+    });
+    recChunks = [];
+    stopAll();
+    if (blob.size === 0) {
+      message.warning(t("playground.asrRecordEmpty"));
+      return;
+    }
+    if (blob.size > MAX_AUDIO_MB * 1024 * 1024) {
+      message.error(
+        t("playground.audioTooLarge", { size: fmtBytes(blob.size), max: `${MAX_AUDIO_MB} MB` }),
+      );
+      return;
+    }
+    readAsDataUrl(blob)
+      .then(dataUrl => {
+        const mime0 = audioMimeFor(blob.type);
+        pendingAttachments.value.push({
+          id: uid(),
+          kind: "audio",
+          name: `recording-${Date.now()}.${audioExtFor(mime0)}`,
+          mime: mime0,
+          dataUrl,
+        });
+      })
+      .catch(() => message.error(t("playground.asrRecordFailed")));
+  };
+  mediaRecorder.start();
+  recActive.value = true;
+  recSeconds.value = 0;
+  recTimer = window.setInterval(() => {
+    recSeconds.value += 1;
+  }, 1000);
+}
+
+function openAudioFilePicker() {
+  audioFileInputRef.value?.click();
+}
+
+async function onAudioFileChange(e: Event) {
+  const target = e.target as HTMLInputElement;
+  const files = Array.from(target.files || []);
+  for (const f of files) {
+    if (f.size > MAX_AUDIO_MB * 1024 * 1024) {
+      message.error(
+        t("playground.audioTooLarge", { size: fmtBytes(f.size), max: `${MAX_AUDIO_MB} MB` }),
+      );
+      continue;
+    }
+    try {
+      const dataUrl = await readAsDataUrl(f);
+      const mime0 = audioMimeFor(f.type || "audio/mpeg");
+      pendingAttachments.value.push({
+        id: uid(),
+        kind: "audio",
+        name: f.name || `audio-${Date.now()}.${audioExtFor(mime0)}`,
+        mime: mime0,
+        dataUrl,
+      });
+    } catch {
+      message.error(t("playground.attachmentReadFailed", { name: f.name }));
+    }
+  }
+  target.value = "";
+}
+
+onBeforeUnmount(() => {
+  if (mediaRecorder && mediaRecorder.state !== "inactive") {
+    mediaRecorder.stop();
+  }
+  recStream?.getTracks().forEach(tr => tr.stop());
+  if (recTimer) {
+    window.clearInterval(recTimer);
+  }
+});
+
 // Ctrl/Cmd+V 粘贴: 剪贴板含图片就当附件处理 (截图、复制图片场景常用),
 // 不含图片则不阻止默认 paste — 文字粘贴正常.
 async function onPaste(e: ClipboardEvent) {
@@ -1341,23 +1983,22 @@ async function send() {
   const [groupName, , modelName] = parts;
 
   // 按 modality 分流: chat → 现有 streaming 逻辑; image → sendImage();
-  // video → 提示尚未支持 (P11.23 范围). 模态从当前 sections entry 反查;
-  // 找不到 entry (新 group 未刷新) 时, 用 modalityOf 直接算.
-  let modality: Modality = "chat";
-  for (const sec of sections.value) {
-    if (sec.group.name !== groupName) continue;
-    const e = sec.entries.find(x => x.name === modelName);
-    if (e) {
-      modality = e.modality;
-      break;
-    }
-  }
+  // video → sendVideo(); tts/asr → sendTTS()/sendASR(). 模态判定见 modalityFor.
+  const modality = modalityFor(groupName, modelName);
   if (modality === "video") {
     await sendVideo(groupName, modelName, text);
     return;
   }
   if (modality === "image") {
     await sendImage(groupName, modelName, text);
+    return;
+  }
+  if (modality === "tts") {
+    await sendTTS(groupName, modelName, text);
+    return;
+  }
+  if (modality === "asr") {
+    await sendASR(groupName, modelName, text);
     return;
   }
 
@@ -1691,11 +2332,15 @@ function asstMeta(m: ChatMessage): string {
 function modalityIcon(m: Modality): string {
   if (m === "image") return "🎨";
   if (m === "video") return "🎬";
+  if (m === "tts") return "🔊";
+  if (m === "asr") return "🎙️";
   return "💬";
 }
 function modalityLabel(m: Modality): string {
   if (m === "image") return t("playground.modalityImageLabel");
   if (m === "video") return t("playground.modalityVideoLabel");
+  if (m === "tts") return t("playground.modalityTtsLabel");
+  if (m === "asr") return t("playground.modalityAsrLabel");
   return t("playground.modalityChatLabel");
 }
 </script>
@@ -1817,6 +2462,14 @@ function modalityLabel(m: Modality): string {
                   :src="a.dataUrl"
                   class="pg__att-video"
                 />
+                <audio
+                  v-else-if="a.kind === 'audio'"
+                  v-show="a.dataUrl"
+                  controls
+                  preload="metadata"
+                  :src="a.dataUrl"
+                  class="pg__att-audio"
+                />
                 <n-image
                   v-else
                   v-show="a.dataUrl"
@@ -1864,13 +2517,29 @@ function modalityLabel(m: Modality): string {
             style="display: none"
             @change="onFileChange"
           />
+          <input
+            ref="audioFileInputRef"
+            type="file"
+            accept="audio/*"
+            multiple
+            style="display: none"
+            @change="onAudioFileChange"
+          />
           <div v-if="pendingAttachments.length" class="pg__pending">
             <div
               v-for="(a, ai) in pendingAttachments"
               :key="ai"
               class="pg__pending-item"
             >
+              <audio
+                v-if="a.kind === 'audio'"
+                controls
+                preload="metadata"
+                :src="a.dataUrl"
+                class="pg__pending-audio"
+              />
               <n-image
+                v-else
                 :src="a.dataUrl"
                 :alt="a.name"
                 :width="56"
@@ -1890,7 +2559,7 @@ function modalityLabel(m: Modality): string {
             v-model="input"
             rows="3"
             class="pg__textarea"
-            :placeholder="t('playground.composePlaceholder')"
+            :placeholder="composePlaceholder"
             @keydown.enter.exact.prevent="send"
             @keydown.enter.shift.stop
             @paste="onPaste"
@@ -1935,6 +2604,11 @@ function modalityLabel(m: Modality): string {
                         <span class="pg-pick__entry-kind" :class="`pg-pick__entry-kind--${e.kind}`">
                           {{ e.kind }}
                         </span>
+                        <span
+                          v-if="e.modality === 'tts' || e.modality === 'asr'"
+                          class="pg-pick__entry-modi"
+                          :title="modalityLabel(e.modality)"
+                        >{{ modalityIcon(e.modality) }}</span>
                         <span class="pg-pick__entry-name">{{ e.name }}</span>
                         <span v-if="e.hint" class="pg-pick__entry-hint">{{ e.hint }}</span>
                       </div>
@@ -1985,6 +2659,26 @@ function modalityLabel(m: Modality): string {
               </div>
             </div>
 
+            <!-- audio 输入 (仅 ASR 模型): 上传音频 + 麦克风录音 -->
+            <template v-if="activeModality === 'asr'">
+              <button
+                class="pg__tool pg__tool--icon"
+                :title="t('playground.asrUploadAudio')"
+                @click="openAudioFilePicker"
+              >
+                <n-icon :component="MusicalNotesOutline" :size="16" />
+              </button>
+              <button
+                class="pg__tool pg__tool--icon pg__mic"
+                :class="{ 'pg__mic--rec': recActive }"
+                :title="recActive ? t('playground.asrStop') : t('playground.asrRecord')"
+                @click="toggleRecord"
+              >
+                <n-icon :component="recActive ? StopOutline : MicOutline" :size="16" />
+                <span v-if="recActive" class="pg__mic-timer">{{ recSeconds }}s</span>
+              </button>
+            </template>
+
             <!-- 参数(temperature / max_tokens) -->
             <div ref="settingsWrapRef" class="pg__picker pg__picker--up">
               <button
@@ -1996,6 +2690,41 @@ function modalityLabel(m: Modality): string {
                 <n-icon :component="OptionsOutline" :size="16" />
               </button>
               <div v-if="settingsOpen" class="pg-settings">
+                <!-- audio 模型: TTS 参数 + 一键可用性测试; chat 参数收起 -->
+                <template v-if="isAudioModality">
+                  <label v-if="activeModality === 'tts'" class="pg-settings__row">
+                    <span>{{ t("playground.ttsVoice") }}</span>
+                    <NInput
+                      v-model:value="ttsVoice"
+                      size="tiny"
+                      style="width: 120px"
+                      placeholder="alloy"
+                    />
+                  </label>
+                  <label v-if="activeModality === 'tts'" class="pg-settings__row">
+                    <span>{{ t("playground.ttsStream") }}</span>
+                    <NSwitch v-model:value="ttsStream" size="small" />
+                  </label>
+                  <div class="pg-settings__row pg-settings__row--col">
+                    <button
+                      class="pg__avail-btn"
+                      :disabled="audioTest.running"
+                      @click="runAudioAvailabilityTest"
+                    >
+                      <n-icon :component="FlashOutline" :size="12" />
+                      {{ audioTest.running ? t("playground.availTestRunning") : t("playground.availTestBtn") }}
+                    </button>
+                    <span
+                      v-if="audioTest.text"
+                      class="pg__avail-result"
+                      :class="{
+                        'pg__avail-result--ok': audioTest.ok === true,
+                        'pg__avail-result--bad': audioTest.ok === false,
+                      }"
+                    >{{ audioTest.text }}</span>
+                  </div>
+                </template>
+                <template v-else>
                 <label class="pg-settings__row">
                   <span>temperature</span>
                   <NInputNumber
@@ -2059,6 +2788,7 @@ function modalityLabel(m: Modality): string {
                     />
                   </div>
                 </div>
+                </template>
               </div>
             </div>
 
@@ -2990,6 +3720,67 @@ function modalityLabel(m: Modality): string {
   border: 1px solid rgba(255, 255, 255, 0.2);
   background: #000;
 }
+.pg__att-audio {
+  display: block;
+  width: min(420px, 100%);
+  margin: 4px 0;
+}
+.pg__pending-audio {
+  width: 220px;
+  height: 36px;
+}
+/* 麦克风录音按钮 — 录音中红底 + 计时 */
+.pg__mic {
+  position: relative;
+}
+.pg__mic--rec {
+  color: #fff;
+  background: rgba(220, 38, 38, 0.9);
+  animation: pg-mic-pulse 1.2s ease-in-out infinite;
+}
+.pg__mic-timer {
+  margin-left: 6px;
+  font: 400 11px var(--v3-mono, monospace);
+}
+@keyframes pg-mic-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.65;
+  }
+}
+.pg__avail-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--v3-line, #ddd);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--v3-ink-1, #333);
+  font: 400 12px var(--v3-mono, monospace);
+  padding: 4px 10px;
+  cursor: pointer;
+}
+.pg__avail-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.pg__avail-result {
+  font: 400 11px var(--v3-mono, monospace);
+  color: var(--v3-ink-2, #666);
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pg__avail-result--ok {
+  color: #16a34a;
+}
+.pg__avail-result--bad {
+  color: #dc2626;
+}
 .pg__empty {
   flex: 1;
   display: flex;
@@ -3259,6 +4050,11 @@ function modalityLabel(m: Modality): string {
   border-radius: 3px;
   text-transform: uppercase;
   flex-shrink: 0;
+}
+.pg-pick__entry-modi {
+  flex-shrink: 0;
+  font-size: 12px;
+  line-height: 1;
 }
 .pg-pick__entry-kind--alias {
   background: rgba(43, 92, 255, 0.1);
@@ -3744,6 +4540,14 @@ body.pg-route-active .v3-main > .app-footer {
 .pg-modal .pg-list-row__tag--video {
   color: #d97706;
   background: rgba(217, 119, 6, 0.12);
+}
+.pg-modal .pg-list-row__tag--tts {
+  color: #0ea5e9;
+  background: rgba(14, 165, 233, 0.12);
+}
+.pg-modal .pg-list-row__tag--asr {
+  color: #8b5cf6;
+  background: rgba(139, 92, 246, 0.12);
 }
 .pg-modal .pg-list-row__provider {
   display: inline-flex;

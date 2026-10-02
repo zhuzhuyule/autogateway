@@ -50,12 +50,15 @@ func (ch *OpenAIChannel) IsStreamRequest(c *gin.Context, bodyBytes []byte) bool 
 		return true
 	}
 
+	// TTS 等端点用 stream_format ("audio"/"sse") 表达流式意图, 可能不带
+	// stream 字段; 两者任一命中即按流式处理 (免超时 + 分块透传)。
 	type streamPayload struct {
-		Stream bool `json:"stream"`
+		Stream       bool   `json:"stream"`
+		StreamFormat string `json:"stream_format"`
 	}
 	var p streamPayload
 	if err := json.Unmarshal(bodyBytes, &p); err == nil {
-		return p.Stream
+		return p.Stream || p.StreamFormat != ""
 	}
 
 	return false

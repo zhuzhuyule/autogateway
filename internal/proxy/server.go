@@ -500,6 +500,11 @@ func (ps *ProxyServer) executeRequestWithRetry(
 		if tr.needed {
 			// 跨协议流式:走转换流(事件重排 + 断流兜底),字节不再原样透传。
 			out = streamTranslated(c, resp, tr, time.Duration(group.EffectiveConfig.StreamIdleTimeout)*time.Second)
+		} else if isAudioStreamContentType(resp) {
+			// TTS 流式返回的是裸音频字节 (audio/mpeg 等) 而非 SSE 帧,
+			// streamWithIntegrity 会把 Content-Type 改写成 text/event-stream 并
+			// 按帧找 data: 行 —— 二进制音频两个都不满足, 必须单独直通。
+			out = streamAudioPassthrough(c, resp, time.Duration(group.EffectiveConfig.StreamIdleTimeout)*time.Second)
 		} else {
 			isOpenAI := group.ChannelType == "openai" || group.ChannelType == "openai-response"
 			out = ps.streamWithIntegrity(c, resp, isOpenAI, time.Duration(group.EffectiveConfig.StreamIdleTimeout)*time.Second)

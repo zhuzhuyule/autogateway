@@ -1333,16 +1333,18 @@ const GLOBAL_MODEL_NAMES: Record<string, string> = (() => {
 })();
 
 // ============================================================================
-// 模态识别 — Playground 按返回值决定走 chat / image / video 哪个端点
+// 模态识别 — Playground 按返回值决定走 chat / image / video / audio 哪个端点
 // ============================================================================
 
-export type Modality = "chat" | "image" | "video";
+export type Modality = "chat" | "image" | "video" | "tts" | "asr";
 
 /**
  * 判定 model 的模态. 优先级:
- *   1. FreeModels Registry capabilities (image-generation / video-generation / chat)
+ *   1. FreeModels Registry capabilities (image-generation / video-generation /
+ *      speech-synthesis / speech-recognition / chat)
  *   2. 本地 freeProviders.ts 的 imageModels / videoModels 数组
- *   3. model id 启发式 (含 image / dalle / sd / flux / video / sora 等关键字)
+ *   3. model id 启发式 (含 image / dalle / sd / flux / video / sora / tts /
+ *      whisper 等关键字)
  *   4. 默认 "chat"
  *
  * 调用方传 capabilities 是为了让 Registry 数据未到位时 (e.g. 加载中) 也能
@@ -1362,6 +1364,12 @@ export function modalityOf(
     }
     if (capabilities.includes("video-generation")) {
       return "video";
+    }
+    if (capabilities.includes("speech-synthesis")) {
+      return "tts";
+    }
+    if (capabilities.includes("speech-recognition")) {
+      return "asr";
     }
     // 显式 chat / text-generation 优先于启发式
     if (capabilities.includes("chat") || capabilities.includes("text-generation")) {
@@ -1384,6 +1392,13 @@ export function modalityOf(
   }
   if (/(?:^|[/_-])(video|sora|svd|veo|gen-?3)(?:[/_-]|$)/.test(lower)) {
     return "video";
+  }
+  // audio 启发式与 probeModalityOf 保持同一关键词口径
+  if (/(?:^|[/_.-])tts(?:[/_.-]|$)/.test(lower)) {
+    return "tts";
+  }
+  if (/(?:^|[/_.-])(whisper|asr|transcription?)(?:[/_.-]|$)/.test(lower)) {
+    return "asr";
   }
   return "chat";
 }
