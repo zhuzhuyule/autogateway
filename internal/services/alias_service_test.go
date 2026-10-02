@@ -214,3 +214,126 @@ func TestReplaceCandidates_PreservesDisabledFlag(t *testing.T) {
 		t.Fatalf("Create with enabled=false produced an enabled row")
 	}
 }
+
+// === RenameAlias ===
+//
+// 补这组测试的直接原因: 上周的实机测试里我以为验过了"目标重名"这条守卫,
+// 其实 to=medium 先被"不能改成保留名"拦下了 —— 那条守卫当时**根本没被走到**。
+// 三条守卫都在这里固定住。
+
+// newAliasWithRows 建一个分组 + 若干候选行, 返回 service。
+func newAliasWithRows(t *testing.T, alias string, modelsToBind ...string) (*AliasService, *gorm.DB) {
+	t.Helper()
+	db := newTestDB(t)
+	g := createGroup(t, db, &models.Group{
+		Name: "grp-" + alias, GroupType: "standard", ChannelType: "openai",
+	})
+	svc := NewAliasService(db)
+	for _, m := range modelsToBind {
+		if _, err := svc.Create(context.Background(), AliasCreateRequest{
+			Alias: alias, GroupID: g.ID, RealModel: m,
+		}); err != nil {
+			t.Fatalf("seed %s/%s: %v", alias, m, err)
+		}
+	}
+	return svc, db
+}
+
+func countAlias(t *testing.T, db *gorm.DB, alias string) int64 {
+	t.Helper()
+	var n int64
+	if err := db.Model(&models.ModelAlias{}).Where("alias = ?", alias).Count(&n).Error; err != nil {
+		t.Fatalf("count %s: %v", alias, err)
+	}
+	return n
+}
+
+// 正常改名: 所有候选行一起搬过去, 旧名字清空。
+func TestRenameAlias_MovesAllRows(t *testing.T) {
+	svc, db := newAliasWithRows(t, "old-name", "m-a", "m-b", "m-c")
+
+	n, err := svc.RenameAlias(context.Background(), "old-name", "new-name")
+	if err != nil {
+		t.Fatalf("rename: %v", err)
+	}
+	if n != 3 {
+		t.Fatalf("renamed = %d, want 3", n)
+	}
+	if got := countAlias(t, db, "old-name"); got != 0 {
+		t.Fatalf("old-name 还剩 %d 行, want 0", got)
+	}
+	if got := countAlias(t, db, "new-name"); got != 3 {
+		t.Fatalf("new-name = %d 行, want 3", got)
+	}
+}
+
+// 改成同名: 空操作, 不报错也不动数据。
+func TestRenameAlias_SameNameIsNoop(t *testing.T) {
+	svc, db := newAliasWithRows(t, "same-name", "m-a")
+
+	n, err := svc.RenameAlias(context.Background(), "same-name", "same-name")
+	if err != nil {
+		t.Fatalf("rename to same: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("renamed = %d, want 0", n)
+	}
+	if got := countAlias(t, db, "same-name"); got != 1 {
+		t.Fatalf("行数 = %d, want 1", got)
+	}
+}
+
+// 守卫①: 保留别名(simple/medium/complex)不能改名 —— 它们是 auto 路由按名字寻址的档位池。
+func TestRenameAlias_RejectsReservedSource(t *testing.T) {
+	svc, db := newAliasWithRows(t, "medium", "m-a")
+
+	if _, err := svc.RenameAlias(context.Background(), "medium", "not-reserved"); err == nil {
+		t.Fatal("改保留别名应被拒, 实际通过了")
+	}
+	if got := countAlias(t, db, "medium"); got != 1 {
+		t.Fatalf("被拒后 medium 行数 = %d, want 1 (不该被动过)", got)
+	}
+}
+
+// 守卫②: 不能改成保留名 —— 那会撞进自动路由的命名空间。
+func TestRenameAlias_RejectsReservedTarget(t *testing.T) {
+	svc, db := newAliasWithRows(t, "custom", "m-a")
+
+	if _, err := svc.RenameAlias(context.Background(), "custom", "complex"); err == nil {
+		t.Fatal("改成保留名应被拒, 实际通过了")
+	}
+	if got := countAlias(t, db, "custom"); got != 1 {
+		t.Fatalf("被拒后 custom 行数 = %d, want 1", got)
+	}
+}
+
+// 守卫③(上周实机没走到的那条): 目标名已有候选则拒绝 —— 否则两边候选会静默合并,
+// 权重分配莫名变化, 而且唯一索引 (alias, group_id, real_model) 会撞车。
+func TestRenameAlias_RejectsExistingTarget(t *testing.T) {
+	db := newTestDB(t)
+	g := createGroup(t, db, &models.Group{
+		Name: "grp-two", GroupType: "standard", ChannelType: "openai",
+	})
+	svc := NewAliasService(db)
+	for _, a := range []struct{ alias, model string }{
+		{"from-alias", "m-a"},
+		{"to-alias", "m-b"},
+	} {
+		if _, err := svc.Create(context.Background(), AliasCreateRequest{
+			Alias: a.alias, GroupID: g.ID, RealModel: a.model,
+		}); err != nil {
+			t.Fatalf("seed %s: %v", a.alias, err)
+		}
+	}
+
+	if _, err := svc.RenameAlias(context.Background(), "from-alias", "to-alias"); err == nil {
+		t.Fatal("改成已存在的别名应被拒, 实际通过了")
+	}
+	// 两边都必须原封不动 —— 被拒的改名不能留下半截状态。
+	if got := countAlias(t, db, "from-alias"); got != 1 {
+		t.Fatalf("from-alias = %d, want 1", got)
+	}
+	if got := countAlias(t, db, "to-alias"); got != 1 {
+		t.Fatalf("to-alias = %d, want 1", got)
+	}
+}
