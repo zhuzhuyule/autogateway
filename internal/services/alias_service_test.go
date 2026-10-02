@@ -337,3 +337,46 @@ func TestRenameAlias_RejectsExistingTarget(t *testing.T) {
 		t.Fatalf("to-alias = %d, want 1", got)
 	}
 }
+
+// 按组收敛的别名列表: 只回指定 group 集合内启用的别名 —
+// proxy model list 用它, 不把别的组的别名广播成"本组可用模型".
+func TestListEnabledAliasNamesForGroups(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+	ga := createGroup(t, db, &models.Group{Name: "ga", ChannelType: "openai", TestModel: "m"})
+	gb := createGroup(t, db, &models.Group{Name: "gb", ChannelType: "openai", TestModel: "m"})
+	svc := NewAliasService(db)
+
+	rows := []models.ModelAlias{
+		{Alias: "alias-a", GroupID: ga.ID, RealModel: "m-a", Weight: 1, Enabled: true},
+		{Alias: "alias-b", GroupID: gb.ID, RealModel: "m-b", Weight: 1, Enabled: true},
+		{Alias: "alias-off", GroupID: ga.ID, RealModel: "m-a2", Weight: 1, Enabled: false},
+		{Alias: "placeholder", GroupID: 0, RealModel: "", Weight: 1, Enabled: true},
+	}
+	for i := range rows {
+		if err := db.Create(&rows[i]).Error; err != nil {
+			t.Fatalf("seed %s: %v", rows[i].Alias, err)
+		}
+	}
+
+	names, err := svc.ListEnabledAliasNamesForGroups(ctx, []uint{ga.ID})
+	if err != nil {
+		t.Fatalf("list for ga: %v", err)
+	}
+	if !slices.Equal(names, []string{"alias-a"}) {
+		t.Fatalf("names = %v, want [alias-a]", names)
+	}
+
+	both, err := svc.ListEnabledAliasNamesForGroups(ctx, []uint{ga.ID, gb.ID})
+	if err != nil {
+		t.Fatalf("list for ga+gb: %v", err)
+	}
+	if !slices.Equal(both, []string{"alias-a", "alias-b"}) {
+		t.Fatalf("both = %v, want [alias-a alias-b]", both)
+	}
+
+	empty, err := svc.ListEnabledAliasNamesForGroups(ctx, nil)
+	if err != nil || empty != nil {
+		t.Fatalf("empty ids = (%v, %v), want (nil, nil)", empty, err)
+	}
+}

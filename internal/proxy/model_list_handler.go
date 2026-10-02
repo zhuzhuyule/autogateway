@@ -50,14 +50,9 @@ func (ps *ProxyServer) handleModelListResponse(c *gin.Context, resp *http.Respon
 		return
 	}
 
-	if ps.aliasService != nil {
-		aliasNames, err := ps.aliasService.ListEnabledAliasNames(c.Request.Context())
-		if err != nil {
-			logrus.WithError(err).Warn("Failed to load aliases for model list")
-		} else {
-			appendAliasModels(response, aliasNames)
-		}
-	}
+	// 不附加任何别名: alias 解析只发生在 aggregate 入口 (ModelResolver),
+	// standard 分组入口收到 alias 名会原样透传给上游 → 调不通. 以前广播
+	// 全局别名, 导致每个组的 /v1/models 都混进一堆本 URL 不可用的模型.
 
 	c.JSON(http.StatusOK, response)
 }
@@ -122,8 +117,14 @@ func (ps *ProxyServer) handleAggregateModelList(c *gin.Context, aggregateGroup *
 		"object": "list",
 		"data":   data,
 	}
-	if ps.aliasService != nil {
-		aliasNames, err := ps.aliasService.ListEnabledAliasNames(c.Request.Context())
+	if ps.aliasService != nil && len(aggregateGroup.SubGroups) > 0 {
+		// 只附加候选落在本聚合子分组内的别名 — 与 ModelResolver 的路由约束
+		// 一致 (alias.GroupID 不在 SubGroups 内时命中 alias 也路由不出去).
+		subIDs := make([]uint, 0, len(aggregateGroup.SubGroups))
+		for _, sg := range aggregateGroup.SubGroups {
+			subIDs = append(subIDs, sg.SubGroupID)
+		}
+		aliasNames, err := ps.aliasService.ListEnabledAliasNamesForGroups(c.Request.Context(), subIDs)
 		if err != nil {
 			logrus.WithError(err).Warn("Failed to load aliases for aggregate model list")
 		} else {

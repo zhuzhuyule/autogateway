@@ -129,15 +129,21 @@ func (s *AliasService) ListAll(ctx context.Context) ([]models.ModelAlias, error)
 	return rows, nil
 }
 
-// ListEnabledAliasNames returns distinct user-callable alias names. Placeholder
-// rows have group_id=0 and are intentionally excluded; an alias appears only
-// after it has at least one enabled destination candidate.
-func (s *AliasService) ListEnabledAliasNames(ctx context.Context) ([]string, error) {
+// ListEnabledAliasNamesForGroups returns distinct enabled alias names limited
+// to the given group ids. Placeholder rows (group_id=0) and disabled
+// candidates are excluded. The proxy model list uses this so a group only
+// advertises aliases that actually resolve through it — alias routing (P4)
+// never fires for ids outside the group's / aggregate's sub-group set, so
+// broadcasting the global list would advertise uncallable models.
+func (s *AliasService) ListEnabledAliasNamesForGroups(ctx context.Context, groupIDs []uint) ([]string, error) {
+	if len(groupIDs) == 0 {
+		return nil, nil
+	}
 	var names []string
 	if err := s.db.WithContext(ctx).
 		Model(&models.ModelAlias{}).
 		Distinct("alias").
-		Where("enabled = ? AND group_id <> 0 AND alias <> ''", true).
+		Where("enabled = ? AND group_id IN ? AND alias <> ''", true, groupIDs).
 		Order("alias asc").
 		Pluck("alias", &names).Error; err != nil {
 		return nil, app_errors.ParseDBError(err)
