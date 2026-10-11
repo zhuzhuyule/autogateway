@@ -162,20 +162,34 @@ func candidateModelsForGroup(g *models.Group) map[string]struct{} {
 	return out
 }
 
+// CandidateModelIDsForGroup 返回单个分组"可调模型"的排序清单: 先按路由模式取
+// candidateModelsForGroup (specified 用 exposed_models, 空则回落 available_models),
+// 再剔除 blocked_models. 与 aggregateCandidateModelIDs 同一口径, 供代理侧
+// model-list 兜底复用 (上游透传失败时回缓存清单).
+func CandidateModelIDsForGroup(g *models.Group) []string {
+	if g == nil {
+		return nil
+	}
+	blocked := parseStringSet(g.BlockedModels)
+	candidates := candidateModelsForGroup(g)
+	out := make([]string, 0, len(candidates))
+	for m := range candidates {
+		if _, isBlocked := blocked[m]; isBlocked {
+			continue
+		}
+		out = append(out, m)
+	}
+	sort.Strings(out)
+	return out
+}
+
 // aggregateCandidateModelIDs 合并多个子分组的可调模型 (candidateModelsForGroup) 为并集,
 // 各自剔除 blocked_models, 全局去重后排序返回. 聚合分组的 /v1/models 用它构建完整、稳定
 // 的模型列表, 取代"随机 SWRR 命中单个子分组转发"造成的漂移/不完整.
 func aggregateCandidateModelIDs(subGroups []*models.Group) []string {
 	seen := map[string]struct{}{}
 	for _, sub := range subGroups {
-		if sub == nil {
-			continue
-		}
-		blocked := parseStringSet(sub.BlockedModels)
-		for m := range candidateModelsForGroup(sub) {
-			if _, isBlocked := blocked[m]; isBlocked {
-				continue
-			}
+		for _, m := range CandidateModelIDsForGroup(sub) {
 			seen[m] = struct{}{}
 		}
 	}

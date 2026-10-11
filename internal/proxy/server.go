@@ -326,6 +326,11 @@ func (ps *ProxyServer) executeRequestWithRetry(
 	if err != nil {
 		logrus.Errorf("Failed to select a key for group %s on attempt %d: %v", group.Name, retryCount+1, err)
 		ps.markRoutingCandidate(c, http.StatusServiceUnavailable, "", 0, 0)
+		// 拉模型列表时没有可用 key 不必把 503 甩给客户端: 分组缓存里就有清单。
+		if ps.modelListDegrade(c, group, channelHandler) {
+			ps.logRequest(c, originalGroup, group, nil, startTime, http.StatusServiceUnavailable, err, isStream, "", channelHandler, bodyBytes, models.RequestTypeFinal)
+			return
+		}
 		response.Error(c, app_errors.NewAPIError(app_errors.ErrNoKeysAvailable, err.Error()))
 		ps.logRequest(c, originalGroup, group, nil, startTime, http.StatusServiceUnavailable, err, isStream, "", channelHandler, bodyBytes, models.RequestTypeFinal)
 		return
@@ -725,6 +730,9 @@ func (ps *ProxyServer) handleAttemptFailure(ac *attemptContext, resp *http.Respo
 			ps.subGroupManager.RecordSubGroupResult(originalGroup.ID, group.Name, false, statusCode, parsedError, retryAfter)
 		}
 		var errorJSON map[string]any
+		if ps.modelListDegrade(c, group, channelHandler) {
+			return
+		}
 		if err := json.Unmarshal([]byte(errorMessage), &errorJSON); err == nil {
 			c.JSON(statusCode, errorJSON)
 		} else {
