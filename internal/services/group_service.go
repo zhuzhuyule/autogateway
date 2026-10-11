@@ -402,8 +402,41 @@ func (s *GroupService) MaybeRefreshAvailableModels(ctx context.Context, groupID 
 }
 
 // RefreshAvailableModels 拉取分组对应上游的真实模型列表并缓存到 group.AvailableModels.
-// 仅 standard 分组有意义;聚合分组无独立 upstream,直接报错.
+// 仅 standard 分组有意义;聚合分组无独立 upstream,直接报错。
+// 保持老签名 (后台定时刷新、加 key 后自动拉取等调用方用)。
 func (s *GroupService) RefreshAvailableModels(ctx context.Context, groupID uint) ([]string, error) {
+	res, err := s.RefreshModelsWithSource(ctx, groupID, "")
+	if err != nil {
+		return nil, err
+	}
+	return res.Models, nil
+}
+
+// 模型清单来源标记 (group.models_source). 前端据此区分"上游真实清单"和
+// "FreeModels 缓存清单".
+const (
+	ModelsSourceUpstream   = "upstream"
+	ModelsSourceFreeModels = "freemodels"
+)
+
+// ModelRefreshResult 是一次模型清单刷新的结果.
+type ModelRefreshResult struct {
+	Models []string
+	// Source 是 Models 的来源: ModelsSourceUpstream / ModelsSourceFreeModels.
+	Source string
+}
+
+// RefreshModelsWithSource 刷新 group.AvailableModels, 并固化来源.
+//
+// source 为空 = 自动: 优先上游 /v1/models (或 channel 等价端点); 只要拿不到真实
+// 清单 —— provider 没有该端点 (404)、key 被拒 (401/403)、超时, 或分组压根没有活跃
+// key —— 就用 FreeModels registry 按上游 host 反查出该 provider 的清单兜底, 并把
+// 来源标成 "freemodels", 让 UI 能告诉用户"这不是上游真实清单"。
+// registry 也反查不到时, 原错误照旧上报 (401 等 → 500, 无 key → 400), 不会把空
+// 清单静默缓存.
+//
+// source = "freemodels" = 强制只读 registry, 不碰上游 (控制台"从 FreeModels 导入")。
+func (s *GroupService) RefreshModelsWithSource(ctx context.Context, groupID uint, source string) (*ModelRefreshResult, error) {
 	var group models.Group
 	if err := s.db.WithContext(ctx).First(&group, groupID).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
@@ -415,38 +448,50 @@ func (s *GroupService) RefreshAvailableModels(ctx context.Context, groupID uint)
 		return nil, NewI18nError(app_errors.ErrBadRequest, "group.refresh_models_not_supported", nil)
 	}
 
-	apiKey, err := s.pickActiveDecryptedKey(ctx, group.ID)
-	if err != nil {
-		return nil, err
-	}
+	result := &ModelRefreshResult{}
 
-	modelIDs, err := FetchUpstreamModels(ctx, &group, apiKey)
-	if err != nil {
-		// 部分 provider 没有 OpenAI 兼容的 /v1/models 端点 (e.g. iFlytek Spark
-		// 只暴露 /v1/chat/completions). 这种情况下用 FreeModels registry 按
-		// upstream host 反查 providerId, 拿出该 provider 收录的全部 modelId 兜底.
-		// 仅在 404 / "not found" 这类"端点不存在"语义下回退, 401/403/timeout
-		// 等鉴权或网络问题继续向上报, 避免错误数据被静默缓存.
-		if fallback := s.fallbackModelsFromRegistry(&group, err); fallback != nil {
-			logrus.WithField("group_id", group.ID).WithField("count", len(fallback)).
-				Info("upstream /v1/models 404, fell back to FreeModels registry")
-			modelIDs = fallback
-			err = nil
+	if source == ModelsSourceFreeModels {
+		ids, ok := s.modelsFromRegistry(&group)
+		if !ok {
+			return nil, NewI18nError(app_errors.ErrBadRequest, "group.refresh_models_registry_unavailable", nil)
+		}
+		result.Models, result.Source = ids, ModelsSourceFreeModels
+	} else {
+		var fetchErr error
+		var keyErr error
+		apiKey, err := s.pickActiveDecryptedKey(ctx, group.ID)
+		if err != nil {
+			keyErr = err
 		} else {
-			logrus.WithError(err).WithField("group_id", group.ID).Warn("fetch upstream models failed")
-			return nil, NewI18nError(app_errors.ErrInternalServer, "group.refresh_models_failed", map[string]any{"error": err.Error()})
+			result.Models, fetchErr = FetchUpstreamModels(ctx, &group, apiKey)
+		}
+		switch {
+		case keyErr == nil && fetchErr == nil:
+			result.Source = ModelsSourceUpstream
+		default:
+			if ids, ok := s.modelsFromRegistry(&group); ok {
+				logrus.WithField("group_id", group.ID).WithField("count", len(ids)).
+					Info("upstream model list unavailable, fell back to FreeModels registry")
+				result.Models, result.Source = ids, ModelsSourceFreeModels
+			} else if fetchErr != nil {
+				logrus.WithError(fetchErr).WithField("group_id", group.ID).Warn("fetch upstream models failed")
+				return nil, NewI18nError(app_errors.ErrInternalServer, "group.refresh_models_failed", map[string]any{"error": fetchErr.Error()})
+			} else {
+				// 没有活跃 key 且 registry 也没收录该 host: 保持原语义 (400 无密钥)。
+				return nil, keyErr
+			}
 		}
 	}
 
-	data, err := json.Marshal(modelIDs)
+	data, err := json.Marshal(result.Models)
 	if err != nil {
 		return nil, fmt.Errorf("marshal models list: %w", err)
 	}
 
-	// 同步计算 free_models 子集 (Registry × upstream, provider-aware 归一化求交).
+	// 同步计算 free_models 子集 (Registry × 清单, provider-aware 归一化求交).
 	// 跟 available_models 同一刷新时机固化, 让前端零本地算法直接判 Free badge,
 	// 也让 backup / proxy routing 用同一个 truth source.
-	freeIDs := computeFreeModelIDs(&group, modelIDs, s.freeModelsRegistry)
+	freeIDs := computeFreeModelIDs(&group, result.Models, s.freeModelsRegistry)
 	freeData, err := json.Marshal(freeIDs)
 	if err != nil {
 		return nil, fmt.Errorf("marshal free models list: %w", err)
@@ -459,6 +504,7 @@ func (s *GroupService) RefreshAvailableModels(ctx context.Context, groupID uint)
 			"available_models":    datatypes.JSON(data),
 			"free_models":         datatypes.JSON(freeData),
 			"models_refreshed_at": &now,
+			"models_source":       result.Source,
 		}).Error; err != nil {
 		return nil, app_errors.ParseDBError(err)
 	}
@@ -468,10 +514,11 @@ func (s *GroupService) RefreshAvailableModels(ctx context.Context, groupID uint)
 	}
 	logrus.WithFields(logrus.Fields{
 		"group_id":  group.ID,
-		"available": len(modelIDs),
+		"available": len(result.Models),
 		"free":      len(freeIDs),
+		"source":    result.Source,
 	}).Info("refresh-models: persisted available + free subset")
-	return modelIDs, nil
+	return result, nil
 }
 
 // computeFreeModelIDs 按 "Registry × upstream" 契约算出免费子集:
@@ -508,39 +555,31 @@ func computeFreeModelIDs(group *models.Group, upstreamIDs []string, registry *Fr
 	return out
 }
 
-// fallbackModelsFromRegistry 仅当 fetchErr 表明上游 /v1/models 端点不存在
-// (404) 时, 用 FreeModels registry 按 upstream URL host 反查 providerId,
-// 返回该 provider 收录的所有 bare modelId. 任何其他错误 (鉴权/超时/解析失败)
-// 或 registry 未知 host / 没有该 provider 的模型, 返回 nil 让调用方继续上报错误.
-func (s *GroupService) fallbackModelsFromRegistry(group *models.Group, fetchErr error) []string {
-	if s.freeModelsRegistry == nil || group == nil || fetchErr == nil {
-		return nil
-	}
-	msg := fetchErr.Error()
-	// upstream_models.go 的错误格式是 "upstream %d: %s",404 才适用 fallback.
-	// 也兼容部分 provider 返回 "404 page not found" 但没正确设状态码的边角情况.
-	if !strings.Contains(msg, "upstream 404") && !strings.Contains(strings.ToLower(msg), "404 page not found") {
-		return nil
+// modelsFromRegistry 用 FreeModels registry 按 upstream URL host 反查 providerId,
+// 返回该 provider 收录的所有 bare modelId (freeOnly=false: 要全清单, 不只 free,
+// 否则 AvailableModels 不完整)。registry 未初始化 / host 未收录 / 该 provider 一条
+// 模型都没有, 都返回 ok=false 让调用方继续上报原错误。
+func (s *GroupService) modelsFromRegistry(group *models.Group) ([]string, bool) {
+	if s.freeModelsRegistry == nil || group == nil {
+		return nil, false
 	}
 	baseURL, err := firstUpstreamURL(group)
 	if err != nil {
-		return nil
+		return nil, false
 	}
 	host := extractHost(baseURL)
 	if host == "" {
-		return nil
+		return nil, false
 	}
 	providerID, _, ok := s.freeModelsRegistry.LookupProviderByHost(host)
 	if !ok {
-		return nil
+		return nil, false
 	}
-	// freeOnly=false: 上游 /v1/models 404 fallback 要拿全清单,
-	// 不只 free (否则 group.AvailableModels 不完整).
 	ids := s.freeModelsRegistry.ListModelIDsByProvider(providerID, false)
 	if len(ids) == 0 {
-		return nil
+		return nil, false
 	}
-	return ids
+	return ids, true
 }
 
 // pickActiveDecryptedKey 取该分组当前活跃 key 中的一个,用于调用上游 /v1/models.

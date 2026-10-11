@@ -22,6 +22,7 @@ import {
   ChevronDownOutline,
   CopyOutline,
   CubeOutline,
+  CloudDownloadOutline,
   DownloadOutline,
   FlashOutline,
   HelpCircleOutline,
@@ -792,21 +793,36 @@ const modelsRefreshedAtDisplay = computed(() => {
   }
 });
 
+// 清单来源: 后端刷新时固化在 group.models_source。
+// "freemodels" = 上游 /v1/models 没拿到 (端点缺失 / 密钥被拒 / 无活跃密钥),
+// 列表来自 FreeModels 缓存, 不等于上游当前真实可调用集合。
+const modelsFromRegistry = computed(
+  () => (props.group as unknown as { models_source?: string })?.models_source === "freemodels",
+);
+
 // === 刷新模型 ===
 const modelsRefreshing = ref(false);
 
-async function refreshGroupModels() {
+async function refreshGroupModels(source?: "freemodels") {
   if (!props.group?.id || modelsRefreshing.value) {
     return;
   }
   modelsRefreshing.value = true;
   try {
-    const res = await keysApi.refreshModels(props.group.id);
+    const res = await keysApi.refreshModels(props.group.id, source);
     const n = res?.count ?? res?.models?.length ?? 0;
-    message.success(t("keys.refreshModelsSuccess", { n }));
+    message.success(
+      res?.source === "freemodels"
+        ? t("keys.refreshModelsFromRegistrySuccess", { n })
+        : t("keys.refreshModelsSuccess", { n }),
+    );
     emit("refresh");
   } catch (e) {
-    message.error((e as Error).message || t("keys.refreshModelsFail"));
+    // refreshModels 走 hideMessage (不发全局 toast), 这里必须自己取后端 i18n 文案,
+    // 否则只剩 axios 的 "Request failed with status code 500", 真实原因 (无活跃
+    // 密钥 / upstream 401) 全被吞掉.
+    const err = e as { response?: { data?: { message?: string } } };
+    message.error(err?.response?.data?.message || (e as Error).message || t("keys.refreshModelsFail"));
   } finally {
     modelsRefreshing.value = false;
   }
@@ -2032,7 +2048,8 @@ const filterCounts = computed(() => ({
           v-if="tab === 'models' && !isAggregate"
           class="v3-btn v3-btn--sm"
           :disabled="modelsRefreshing"
-          @click="refreshGroupModels"
+          :title="t('keys.refreshModelsBtnTip')"
+          @click="refreshGroupModels()"
         >
           <n-icon
             :component="RefreshOutline"
@@ -2044,6 +2061,17 @@ const filterCounts = computed(() => ({
         <button v-else-if="tab !== 'models'" class="v3-btn v3-btn--sm" @click="refreshAll">
           <n-icon :component="RefreshOutline" :size="11" />
           {{ t("common.refresh") || "Refresh" }}
+        </button>
+        <!-- 上游拿不到清单时的显式入口: 只用 FreeModels 缓存, 不碰上游 -->
+        <button
+          v-if="tab === 'models' && !isAggregate"
+          class="v3-btn v3-btn--sm"
+          :disabled="modelsRefreshing"
+          :title="t('keys.refreshModelsFromRegistryTip')"
+          @click="refreshGroupModels('freemodels')"
+        >
+          <n-icon :component="CloudDownloadOutline" :size="11" />
+          {{ t("keys.refreshModelsFromRegistryBtn") }}
         </button>
         <button
           v-if="tab === 'keys' && !isAggregate"
@@ -2466,8 +2494,12 @@ const filterCounts = computed(() => ({
             {{ t("v5.bulkClear") || "取消选择" }}
           </button>
           </div>
-          <span v-if="modelsRefreshedAtDisplay" class="v5-toolbar__hint v5-toolbar__stamp">
-            {{ t("v5.refreshedAt") }} {{ modelsRefreshedAtDisplay }}
+          <span
+            v-if="modelsRefreshedAtDisplay"
+            class="v5-toolbar__hint v5-toolbar__stamp"
+            :title="modelsFromRegistry ? t('v5.modelsFromRegistryTip') : undefined"
+          >
+            {{ t("v5.refreshedAt") }} {{ modelsRefreshedAtDisplay }}<template v-if="modelsFromRegistry"> · {{ t("v5.modelsFromRegistry") }}</template>
           </span>
         </div>
 

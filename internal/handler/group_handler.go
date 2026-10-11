@@ -255,16 +255,28 @@ func (s *Server) ProbeModels(c *gin.Context) {
 	})
 }
 
+// RefreshGroupModelsRequest 是 POST /api/groups/:id/refresh-models 的载荷.
+// Source 为空 = 优先上游 /v1/models, 拿不到时用 FreeModels 兜底;
+// Source = "freemodels" = 强制只用 FreeModels 清单 (不碰上游).
+type RefreshGroupModelsRequest struct {
+	Source string `json:"source"`
+}
+
 func (s *Server) RefreshGroupModels(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
 		response.ErrorI18nFromAPIError(c, app_errors.ErrBadRequest, "validation.invalid_group_id")
 		return
 	}
-	models, err := s.GroupService.RefreshAvailableModels(c.Request.Context(), uint(id))
+	// body 可选: 老的调用方发 `{}`, 解析失败按默认 (自动) 来源处理.
+	var req RefreshGroupModelsRequest
+	_ = c.ShouldBindJSON(&req)
+
+	res, err := s.GroupService.RefreshModelsWithSource(c.Request.Context(), uint(id), req.Source)
 	if s.handleGroupError(c, err) {
 		return
 	}
+	models := res.Models
 	// 解析准确的 FreeModels provider id (上游 host 反查), 避免裸 modelId
 	// 跨 provider 误匹配 (e.g. openrouter 上的付费 model 被某个其他 provider
 	// 同名 model 借成 free).
@@ -278,6 +290,7 @@ func (s *Server) RefreshGroupModels(c *gin.Context) {
 	response.Success(c, gin.H{
 		"models": enriched,
 		"count":  len(enriched),
+		"source": res.Source,
 	})
 }
 
@@ -456,12 +469,15 @@ type GroupResponse struct {
 	SystemRole          string              `json:"system_role"`
 	AvailableModels     datatypes.JSON      `json:"available_models,omitempty"`
 	ModelsRefreshedAt   *time.Time          `json:"models_refreshed_at,omitempty"`
-	ModelRoutingMode    string              `json:"model_routing_mode"`
-	ExposedModels       datatypes.JSON      `json:"exposed_models,omitempty"`
-	BlockedModels       datatypes.JSON      `json:"blocked_models,omitempty"`
-	KeyCount            int64               `json:"key_count"`
-	CreatedAt           time.Time           `json:"created_at"`
-	UpdatedAt           time.Time           `json:"updated_at"`
+	// ModelsSource 标明 available_models 是上游真实清单还是 FreeModels 兜底
+	// ("upstream" / "freemodels"); 空 = 老数据, 按 upstream 处理.
+	ModelsSource     string         `json:"models_source,omitempty"`
+	ModelRoutingMode string         `json:"model_routing_mode"`
+	ExposedModels    datatypes.JSON `json:"exposed_models,omitempty"`
+	BlockedModels    datatypes.JSON `json:"blocked_models,omitempty"`
+	KeyCount         int64          `json:"key_count"`
+	CreatedAt        time.Time      `json:"created_at"`
+	UpdatedAt        time.Time      `json:"updated_at"`
 }
 
 // newGroupResponse creates a new GroupResponse from a models.Group.
@@ -522,6 +538,7 @@ func (s *Server) newGroupResponse(group *models.Group) *GroupResponse {
 		SystemRole:          group.SystemRole,
 		AvailableModels:     group.AvailableModels,
 		ModelsRefreshedAt:   group.ModelsRefreshedAt,
+		ModelsSource:        group.ModelsSource,
 		ModelRoutingMode:    group.ModelRoutingMode,
 		ExposedModels:       group.ExposedModels,
 		BlockedModels:       group.BlockedModels,

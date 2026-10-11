@@ -400,8 +400,14 @@ export const keysApi = {
   },
 
   // 刷新分组上游真实可用模型列表 (POST /groups/:id/refresh-models)
-  async refreshModels(groupId: number): Promise<{ models: string[]; count: number }> {
-    const res = await http.post(`/groups/${groupId}/refresh-models`, {}, { hideMessage: true });
+  // source="freemodels" 强制只用 FreeModels 清单; 缺省 = 优先上游, 拿不到时后端自动兜底.
+  async refreshModels(
+    groupId: number,
+    source?: "freemodels"
+  ): Promise<{ models: string[]; count: number; source?: string }> {
+    const res = await http.post(`/groups/${groupId}/refresh-models`, source ? { source } : {}, {
+      hideMessage: true,
+    });
     return res.data;
   },
 };

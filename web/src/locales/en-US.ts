@@ -271,6 +271,13 @@ export default {
     refreshModelsRequiresSave: "Save group and add keys first to fetch the model list",
     refreshModelsSuccess: "Fetched {n} upstream models",
     refreshModelsBtn: "Refresh Models",
+    refreshModelsBtnTip:
+      "Calls the upstream /v1/models first; falls back to the FreeModels cached list when it can't be fetched",
+    refreshModelsFromRegistryBtn: "From FreeModels",
+    refreshModelsFromRegistryTip:
+      "Fill the list straight from FreeModels' cached catalogue for this provider, without calling upstream (useful when there is no /v1/models endpoint or the key is rejected)",
+    refreshModelsFromRegistrySuccess:
+      "Imported {n} models from the FreeModels cache (no real upstream list)",
     refreshModelsFail: "Failed to fetch models",
     upstreamModelsList: "Upstream available models",
     upstreamModelsEmpty: "No model list cached yet. Click refresh to fetch.",
@@ -1403,6 +1410,9 @@ export default {
     noModelsSub: "Add a working key — the upstream will declare available models.",
     openGroupSettings: "Open group settings",
     refreshedAt: "refreshed",
+    modelsFromRegistry: "FreeModels cache",
+    modelsFromRegistryTip:
+      "The upstream /v1/models returned no list (missing endpoint / key rejected / no active key), so this is FreeModels' cached model list — it may differ from what the upstream actually serves.",
     cardSelectHint: "Click a card to multi-select for bulk test / expose / block",
     qsTitle: "One <em>key</em>, all providers.",
     qsSubClosed: "Drop into any OpenAI / Anthropic / Gemini SDK — same key, your endpoint.",

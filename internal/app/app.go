@@ -179,6 +179,11 @@ func (a *App) Start() error {
 		if err := db.V2_8_2_RequestLogUsageColumns(a.db); err != nil {
 			return fmt.Errorf("V2_8_2 add request_logs usage columns failed: %w", err)
 		}
+		// groups.models_source: 清单来源标记 (上游真实 vs FreeModels 兜底)。
+		// 同 V2_7_1, 只靠 AutoMigrate 在部分环境加不上列。
+		if err := db.V2_10_1_GroupModelsSource(a.db); err != nil {
+			return fmt.Errorf("V2_10_1 add groups.models_source failed: %w", err)
+		}
 		if err := db.V2_7_0_InviteTokens(a.db); err != nil {
 			return fmt.Errorf("V2_7_0 invite_tokens failed: %w", err)
 		}
@@ -269,6 +274,11 @@ func (a *App) Start() error {
 		// Slave 自己也要写请求日志 —— 缺这几列会让每次 INSERT 都失败, 所以必须自己补。
 		if err := db.V2_8_2_RequestLogUsageColumns(a.db); err != nil {
 			return fmt.Errorf("V2_8_2 (slave) add request_logs usage columns failed: %w", err)
+		}
+		// Slave 的 groups 表同样要能 SELECT models_source —— GORM 按结构体列名
+		// 显式列出字段, 缺列会让分组相关查询整体失败。
+		if err := db.V2_10_1_GroupModelsSource(a.db); err != nil {
+			return fmt.Errorf("V2_10_1 (slave) add groups.models_source failed: %w", err)
 		}
 		if err := db.V2_7_0_InviteTokens(a.db); err != nil {
 			return fmt.Errorf("V2_7_0 (slave) invite_tokens failed: %w", err)

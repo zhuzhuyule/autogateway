@@ -265,6 +265,11 @@ export default {
     refreshModelsRequiresSave: "保存分组并添加密钥后才能拉取模型列表",
     refreshModelsSuccess: "已拉取 {n} 个上游模型",
     refreshModelsBtn: "刷新模型",
+    refreshModelsBtnTip: "优先调上游 /v1/models;拿不到时自动用 FreeModels 缓存清单兜底",
+    refreshModelsFromRegistryBtn: "从 FreeModels 获取",
+    refreshModelsFromRegistryTip:
+      "直接用 FreeModels 缓存的该厂商模型清单填充,不调上游(上游没有 /v1/models 或密钥不可用时)",
+    refreshModelsFromRegistrySuccess: "已从 FreeModels 缓存导入 {n} 个模型(未取到上游真实清单)",
     refreshModelsFail: "拉取模型失败",
     upstreamModelsList: "上游可用模型",
     upstreamModelsEmpty: "尚未拉取过模型列表,点击下方刷新按钮拉取",
@@ -1375,6 +1380,9 @@ export default {
     openGroupSettings: "打开分组设置",
     // Models tab
     refreshedAt: "更新于",
+    modelsFromRegistry: "FreeModels 缓存",
+    modelsFromRegistryTip:
+      "上游 /v1/models 没拿到清单(端点不存在 / 密钥被拒 / 无活跃密钥),这里是 FreeModels 缓存的模型列表,可能与上游实际可调用集合不一致。",
     cardSelectHint: "点击卡片可多选,用于批量测试 / 暴露 / 拉黑",
     // Dashboard quickstart
     qsTitle: "一个 <em>密钥</em>，所有 Provider。",

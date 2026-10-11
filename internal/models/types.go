@@ -164,6 +164,12 @@ type Group struct {
 	// 保留原样 ID (含 ":free" 等后缀); 前端读它直接判 Free badge, 零本地算法.
 	FreeModels        datatypes.JSON `gorm:"type:json" json:"free_models"`
 	ModelsRefreshedAt *time.Time     `json:"models_refreshed_at"`
+	// ModelsSource 标明 AvailableModels 是怎么来的:
+	//   "upstream"   — 上游 /v1/models (或等价端点) 真实返回
+	//   "freemodels" — 上游拿不到 (无 /v1/models、key 被拒、无活跃 key),
+	//                  用 FreeModels registry 按 host 反查出的清单兜底
+	// 前端据此提示"这不是上游真实清单"。老数据为空, 按 upstream 处理。
+	ModelsSource string `gorm:"type:varchar(20)" json:"models_source"`
 	// ModelRoutingMode controls model routing strictness:
 	//   "passthrough" — 所有上游模型直通 (默认, 兼容老分组)
 	//   "specified"   — 只允许 ExposedModels 列出的模型, 否则 405

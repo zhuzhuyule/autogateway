@@ -269,6 +269,13 @@ export default {
     refreshModelsRequiresSave: "グループ保存とキー追加後にモデル一覧を取得できます",
     refreshModelsSuccess: "{n} 件の上流モデルを取得しました",
     refreshModelsBtn: "モデルを更新",
+    refreshModelsBtnTip:
+      "まず上流の /v1/models を呼び、取得できない場合は FreeModels のキャッシュ一覧で補完します",
+    refreshModelsFromRegistryBtn: "FreeModels から取得",
+    refreshModelsFromRegistryTip:
+      "上流を呼ばず、FreeModels がキャッシュしているこのプロバイダの一覧でモデル列表を埋めます（/v1/models が無い・キーが拒否された場合）",
+    refreshModelsFromRegistrySuccess:
+      "FreeModels キャッシュから {n} 件のモデルを導入しました（上流の実際の一覧は取得できていません）",
     refreshModelsFail: "モデルの取得に失敗しました",
     upstreamModelsList: "上流の利用可能モデル",
     upstreamModelsEmpty: "まだモデル一覧を取得していません。更新ボタンをクリック",
@@ -1399,6 +1406,9 @@ export default {
     noModelsSub: "有効な key を追加すると、上流が利用可能なモデルを宣言します。",
     openGroupSettings: "グループ設定を開く",
     refreshedAt: "更新",
+    modelsFromRegistry: "FreeModels キャッシュ",
+    modelsFromRegistryTip:
+      "上流の /v1/models から一覧を取得できませんでした（エンドポイント無し / キー拒否 / 有効なキー無し）。これは FreeModels のキャッシュ一覧で、上流で実際に利用可能なモデルと食い違う場合があります。",
     cardSelectHint: "カードをクリックして複数選択 — 一括テスト / 公開 / ブロックに使用",
     qsTitle: "一つの <em>キー</em>、すべての Provider。",
     qsSubClosed: "OpenAI / Anthropic / Gemini SDK にそのまま貼り付け。",
@@ -1658,7 +1668,8 @@ export default {
     modalityTtsLabel: "音声合成",
     modalityAsrLabel: "音声認識",
     ttsPlaceholder: "合成するテキストを入力…",
-    asrPlaceholder: "任意: 文字起こしプロンプト — 🎙 で録音または音声ファイルをアップロードして送信",
+    asrPlaceholder:
+      "任意: 文字起こしプロンプト — 🎙 で録音または音声ファイルをアップロードして送信",
     ttsVoice: "voice",
     ttsStream: "ストリーミング",
     ttsInputRequired: "合成するテキストを入力してください",
